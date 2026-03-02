@@ -127,6 +127,9 @@ describe('CLI Integration Tests', () => {
           agentName: 'test-agent',
         })
       );
+      const parsedAuthUrl = new URL(result.authUrl);
+      expect(parsedAuthUrl.searchParams.get('ap')).toBeTruthy();
+      expect(result.authUrl).not.toContain(tempCwd);
 
       const savedConfig = JSON.parse(readFileSync(result.configPath, 'utf-8'));
       expect(savedConfig).toEqual({

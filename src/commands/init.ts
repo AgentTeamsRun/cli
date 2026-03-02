@@ -1,5 +1,6 @@
 import { writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
+import { constants, createCipheriv, publicEncrypt, randomBytes } from 'node:crypto';
 import httpClient from '../utils/httpClient.js';
 import open from 'open';
 import { startLocalAuthServer } from '../utils/authServer.js';
@@ -12,6 +13,16 @@ const AUTH_BASE_URL = process.env.AGENTTEAMS_WEB_URL || 'https://agentteams.run'
 const CONFIG_DIR = '.agentteams';
 const CONFIG_FILE = 'config.json';
 const CONVENTION_FILE = 'convention.md';
+
+const AUTH_PATH_PUBLIC_KEY_PEM = `-----BEGIN PUBLIC KEY-----
+MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAs9s9+n0C8Z099LrOTlKB
+83c2WluO/TxZFxJQ07XgfKJ2RG/8K2kvCwVKeSgzzBP/hmY2qWAgAOrXIoSHNYGt
+EPX6qkbWQmE27pxmLk6dWdCdUJcEs3r7lfLlJU7BPCFmH6GozHDX7jR9VeGIDdxu
+c2cX4cEfs01xffT2EK7lfNrYTmwlnB5WMEr0jX+DUfjb/7HfC6Fg8J6cacxdjvqy
+kmeQx6wGzG3OtYytKoOgbCY7wuRFOFoCphNPbaRzofnob/QM3hfLIyvgPDq6f6qG
+HVz0XnMxh/7GdXCHHBTasxC965LHgOcJRhMJ51vadetmX4Xv8yoo5zkAmvb37/yo
+JwIDAQAB
+-----END PUBLIC KEY-----`;
 
 type InitOptions = {
   cwd?: string;
@@ -31,13 +42,62 @@ function isSshEnvironment(): boolean {
   return Boolean(process.env.SSH_CONNECTION || process.env.SSH_CLIENT || process.env.SSH_TTY);
 }
 
-function buildAuthorizeUrl(port: number, projectName: string): string {
-  return `${AUTH_BASE_URL}/cli/authorize?port=${port}&projectName=${encodeURIComponent(projectName)}`;
+function encodeBase64Url(value: Buffer): string {
+  return value.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
+function encryptAuthPath(authPath: string): string {
+  const sessionKey = randomBytes(32);
+  const iv = randomBytes(12);
+  const cipher = createCipheriv('aes-256-gcm', sessionKey, iv);
+  const ciphertext = Buffer.concat([cipher.update(authPath, 'utf8'), cipher.final()]);
+  const authTag = cipher.getAuthTag();
+
+  const encryptedSessionKey = publicEncrypt(
+    {
+      key: AUTH_PATH_PUBLIC_KEY_PEM,
+      oaepHash: 'sha256',
+      padding: constants.RSA_PKCS1_OAEP_PADDING,
+    },
+    sessionKey,
+  );
+
+  const payload = {
+    ek: encodeBase64Url(encryptedSessionKey),
+    iv: encodeBase64Url(iv),
+    tag: encodeBase64Url(authTag),
+    ct: encodeBase64Url(ciphertext),
+  };
+
+  return `v1.${encodeBase64Url(Buffer.from(JSON.stringify(payload), 'utf8'))}`;
+}
+
+function buildAuthorizeUrl(port: number, projectName: string, authPathEnc?: string): string {
+  const params = new URLSearchParams({
+    port: String(port),
+    projectName,
+  });
+  if (authPathEnc && authPathEnc.length > 0) {
+    params.set('ap', authPathEnc);
+  }
+  return `${AUTH_BASE_URL}/cli/authorize?${params.toString()}`;
 }
 
 function printAuthorizeUrl(url: string): void {
+  const displayUrl = (() => {
+    try {
+      const parsed = new URL(url);
+      if (parsed.searchParams.has('ap')) {
+        parsed.searchParams.set('ap', '[secure]');
+      }
+      return parsed.toString();
+    } catch {
+      return url;
+    }
+  })();
+
   console.log('🚀 Complete a free login in 1 second to download the template:');
-  console.log(url);
+  console.log(displayUrl);
 }
 
 async function tryOpenBrowser(url: string): Promise<void> {
@@ -151,7 +211,14 @@ export async function executeInitCommand(options?: InitOptions): Promise<InitRes
     );
   }
 
-  const authUrl = buildAuthorizeUrl(authContext.port, projectName);
+  let authPathEnc: string | undefined;
+  try {
+    authPathEnc = encryptAuthPath(cwd);
+  } catch {
+    authPathEnc = undefined;
+  }
+
+  const authUrl = buildAuthorizeUrl(authContext.port, projectName, authPathEnc);
   await tryOpenBrowser(authUrl);
 
   try {
