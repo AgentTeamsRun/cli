@@ -19,7 +19,7 @@ import {
   unlinkPostMortemFromCoAction,
 } from '../api/coaction.js';
 import { findProjectConfig } from '../utils/config.js';
-import { toPositiveInteger, toSafeFileName } from '../utils/parsers.js';
+import { deleteIfTempFile, toPositiveInteger, toSafeFileName } from '../utils/parsers.js';
 import { printFileInfo, withSpinner } from '../utils/spinner.js';
 
 export async function executeCoActionCommand(
@@ -92,7 +92,11 @@ export async function executeCoActionCommand(
 
       return withSpinner(
         'Creating co-action takeaway...',
-        () => createCoActionTakeaway(apiUrl, options.projectId, headers, options.id, body),
+        async () => {
+          const data = await createCoActionTakeaway(apiUrl, options.projectId, headers, options.id, body);
+          if (options.file) deleteIfTempFile(options.file);
+          return data;
+        },
         'Co-action takeaway created',
       );
     }
@@ -115,7 +119,11 @@ export async function executeCoActionCommand(
 
       return withSpinner(
         'Updating co-action takeaway...',
-        () => updateCoActionTakeaway(apiUrl, options.projectId, headers, options.id, options.takeawayId, body),
+        async () => {
+          const data = await updateCoActionTakeaway(apiUrl, options.projectId, headers, options.id, options.takeawayId, body);
+          if (options.file) deleteIfTempFile(options.file);
+          return data;
+        },
         'Co-action takeaway updated',
       );
     }
@@ -174,7 +182,13 @@ export async function executeCoActionCommand(
 
       return withSpinner(
         'Creating co-action...',
-        () => createCoAction(apiUrl, options.projectId, headers, body),
+        async () => {
+          const data = await createCoAction(apiUrl, options.projectId, headers, body);
+          if (options.file) deleteIfTempFile(options.file);
+          const id = (data as any)?.data?.id ?? options.id;
+          if (id) process.stdout.write(`Tip: Add a takeaway — agentteams coaction takeaway-create --id ${id}\n`);
+          return data;
+        },
         'Co-action created',
       );
     }
@@ -198,7 +212,10 @@ export async function executeCoActionCommand(
         body.planId = options.planId === null || options.planId === 'null' ? null : options.planId;
       }
 
-      return updateCoAction(apiUrl, options.projectId, headers, options.id, body);
+      const updateResult = await updateCoAction(apiUrl, options.projectId, headers, options.id, body);
+      if (options.file) deleteIfTempFile(options.file);
+      if (options.id) process.stdout.write(`Tip: Add a takeaway — agentteams coaction takeaway-create --id ${options.id}\n`);
+      return updateResult;
     }
     case 'delete': {
       if (!options.id) throw new Error('--id is required for coaction delete');

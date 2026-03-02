@@ -4,7 +4,7 @@ import { createReport, deleteReport, getReport, listReports, updateReport } from
 import { collectGitMetrics } from '../utils/git.js';
 import { findProjectConfig } from '../utils/config.js';
 
-import { toNonEmptyString, toNonNegativeInteger, toPositiveInteger, toSafeFileName } from '../utils/parsers.js';
+import { deleteIfTempFile, toNonEmptyString, toNonNegativeInteger, toPositiveInteger, toSafeFileName } from '../utils/parsers.js';
 import { printFileInfo, withSpinner } from '../utils/spinner.js';
 
 
@@ -100,7 +100,11 @@ export async function executeReportCommand(
 
       return withSpinner(
         'Creating report...',
-        () => createReport(apiUrl, options.projectId, headers, body),
+        async () => {
+          const data = await createReport(apiUrl, options.projectId, headers, body);
+          if (options.file) deleteIfTempFile(options.file);
+          return data;
+        },
         'Report created',
       );
     }

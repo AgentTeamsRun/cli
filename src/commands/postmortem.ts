@@ -9,7 +9,7 @@ import {
 } from '../api/postmortem.js';
 import { findProjectConfig } from '../utils/config.js';
 
-import { splitCsv, toPositiveInteger, toSafeFileName } from '../utils/parsers.js';
+import { deleteIfTempFile, splitCsv, toPositiveInteger, toSafeFileName } from '../utils/parsers.js';
 import { printFileInfo, withSpinner } from '../utils/spinner.js';
 
 export async function executePostMortemCommand(
@@ -69,7 +69,11 @@ export async function executePostMortemCommand(
 
       return withSpinner(
         'Creating post-mortem...',
-        () => createPostMortem(apiUrl, options.projectId, headers, body),
+        async () => {
+          const data = await createPostMortem(apiUrl, options.projectId, headers, body);
+          if (options.file) deleteIfTempFile(options.file);
+          return data;
+        },
         'Post-mortem created',
       );
     }
@@ -93,7 +97,9 @@ export async function executePostMortemCommand(
       if (options.actionItems !== undefined) body.actionItems = splitCsv(options.actionItems);
       if (options.status) body.status = options.status;
 
-      return updatePostMortem(apiUrl, options.projectId, headers, options.id, body);
+      const updateResult = await updatePostMortem(apiUrl, options.projectId, headers, options.id, body);
+      if (options.file) deleteIfTempFile(options.file);
+      return updateResult;
     }
     case 'delete': {
       if (!options.id) throw new Error('--id is required for postmortem delete');

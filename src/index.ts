@@ -76,6 +76,8 @@ function printCommandResult(params: {
   console.log(outputText);
 }
 
+const CONVENTION_HINT = `\nFor workflow rules and reporting guidelines, see: .agentteams/convention.md`;
+
 program
   .name('agentteams')
   .description('CLI tool for AgentTeams API')
@@ -87,6 +89,7 @@ program
   .option('--format <format>', 'Output format (json, text)', 'text')
   .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
   .option('--verbose', 'Print full output to stdout (useful with --output-file)', false)
+  .addHelpText('after', CONVENTION_HINT)
   .action(async (options) => {
     try {
       const result = await executeCommand('init', 'start', {});
@@ -105,6 +108,7 @@ program
   .option('--format <format>', 'Output format (json, text)', 'text')
   .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
   .option('--verbose', 'Print full output to stdout (useful with --output-file)', false)
+  .addHelpText('after', CONVENTION_HINT)
   .action(async (options) => {
     try {
       const result = await executeCommand('sync', 'download', {
@@ -140,6 +144,7 @@ program
   .option('--assigned-to <id>', 'Assigned agent config ID (list filter)')
   .option('--task <text>', 'Task summary for plan start/finish')
   .option('--report-title <title>', 'Completion report title (plan finish)')
+  .option('--report-file <path>', 'Read completion report content from a local file (plan finish)')
   .option('--report-status <status>', 'Completion report status: COMPLETED, FAILED, PARTIAL (plan finish)')
   .option('--quality-score <n>', 'Quality score 0-100 (plan finish)')
   .option('--commit-hash <hash>', 'Git commit hash (plan finish, manual override)')
@@ -159,6 +164,7 @@ program
   .option('--format <format>', 'Output format (json, text)')
   .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
   .option('--verbose', 'Print full output to stdout (useful with --output-file)', false)
+  .addHelpText('after', CONVENTION_HINT)
   .action(async (action, options) => {
     try {
       const normalizedFormat = normalizeFormat(options.format, 'json');
@@ -226,6 +232,7 @@ program
   .option('--format <format>', 'Output format (json, text)', 'json')
   .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
   .option('--verbose', 'Print full output to stdout (useful with --output-file)', false)
+  .addHelpText('after', CONVENTION_HINT)
   .action(async (action, options) => {
     try {
       const result = await executeCommand('comment', action, {
@@ -282,6 +289,7 @@ program
   .option('--format <format>', 'Output format (json, text)')
   .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
   .option('--verbose', 'Print full output to stdout (useful with --output-file)', false)
+  .addHelpText('after', CONVENTION_HINT)
   .action(async (action, options) => {
     try {
 
@@ -352,6 +360,7 @@ program
   .option('--format <format>', 'Output format (json, text)')
   .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
   .option('--verbose', 'Print full output to stdout (useful with --output-file)', false)
+  .addHelpText('after', CONVENTION_HINT)
   .action(async (action, options) => {
     try {
       const normalizedFormat = normalizeFormat(options.format, 'json');
@@ -415,6 +424,7 @@ program
   .option('--format <format>', 'Output format (json, text)')
   .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
   .option('--verbose', 'Print full output to stdout (useful with --output-file)', false)
+  .addHelpText('after', CONVENTION_HINT)
   .action(async (action, options) => {
     try {
       const normalizedFormat = normalizeFormat(options.format, 'json');
@@ -470,6 +480,7 @@ program
   .option('--format <format>', 'Output format (json, text)', 'text')
   .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
   .option('--verbose', 'Print full output to stdout (useful with --output-file)', false)
+  .addHelpText('after', CONVENTION_HINT)
   .action(async (action, options) => {
     try {
       const normalizedFormat = normalizeFormat(options.format, 'text');
@@ -513,6 +524,7 @@ program
   .option('--apply', 'Apply changes to server (default: dry-run)', false)
   .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
   .option('--verbose', 'Print full output to stdout (useful with --output-file)', false)
+  .addHelpText('after', CONVENTION_HINT)
   .action(async (action, options) => {
     try {
       const result = await executeCommand('convention', action, {
@@ -543,6 +555,7 @@ program
   .option('--format <format>', 'Output format (json, text)', 'json')
   .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
   .option('--verbose', 'Print full output to stdout (useful with --output-file)', false)
+  .addHelpText('after', CONVENTION_HINT)
   .action(async (action, options) => {
     try {
       const result = await executeCommand('dependency', action, {
@@ -571,6 +584,7 @@ program
   .option('--format <format>', 'Output format (json, text)', 'json')
   .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
   .option('--verbose', 'Print full output to stdout (useful with --output-file)', false)
+  .addHelpText('after', CONVENTION_HINT)
   .action(async (action, options) => {
     try {
       const result = await executeCommand('agent-config', action, {
@@ -596,6 +610,7 @@ program
   .option('--format <format>', 'Output format (json, text)', 'json')
   .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
   .option('--verbose', 'Print full output to stdout (useful with --output-file)', false)
+  .addHelpText('after', CONVENTION_HINT)
   .action(async (action, options) => {
     try {
       const result = await executeCommand('config', action, {});

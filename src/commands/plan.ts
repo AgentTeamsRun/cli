@@ -13,6 +13,7 @@ import {
   toNonNegativeInteger,
   toPositiveInteger,
   toSafeFileName,
+  deleteIfTempFile,
 } from '../utils/parsers.js';
 import {
   assignPlan,
@@ -302,11 +303,13 @@ export async function executePlanCommand(
         if (pullRequestId !== undefined) body.completionReport.pullRequestId = pullRequestId;
       }
 
-      return withSpinner(
+      const finishResult = await withSpinner(
         'Finishing plan...',
         () => finishPlanLifecycle(apiUrl, projectId, headers, options.id, body),
         'Plan finished',
       );
+      if (options.reportFile) deleteIfTempFile(options.reportFile);
+      return finishResult;
     }
     case 'create': {
       if (!options.title) throw new Error('--title is required for plan create');
