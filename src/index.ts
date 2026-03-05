@@ -401,7 +401,7 @@ program
 program
   .command('coaction')
   .description('Manage co-actions (session context dumps)')
-  .argument('<action>', 'Action to perform (list, get, create, update, delete, download, takeaway-list, takeaway-create, takeaway-update, takeaway-delete, history, link-plan, unlink-plan, link-completion-report, unlink-completion-report, link-post-mortem, unlink-post-mortem)')
+  .argument('<action>', 'Action to perform (list, get, create, update, delete, download, cleanup, takeaway-list, takeaway-create, takeaway-update, takeaway-delete, history, link-plan, unlink-plan, link-completion-report, unlink-completion-report, link-post-mortem, unlink-post-mortem)')
   .option('--id <id>', 'Co-action ID')
   .option('--takeaway-id <id>', 'Co-action takeaway ID (for takeaway-update/takeaway-delete)')
   .option('--plan-id <id>', 'Plan ID (for link-plan/unlink-plan)')
