@@ -229,7 +229,7 @@ export async function executeCoActionCommand(
           const data = await createCoAction(apiUrl, options.projectId, headers, body);
           if (options.file) deleteIfTempFile(options.file);
           const id = (data as any)?.data?.id ?? options.id;
-          if (id) process.stderr.write(`Tip: Add a takeaway — agentteams coaction takeaway-create --id ${id}\n`);
+          if (id) process.stderr.write(`Tip: Add a takeaway to capture key insights or knowledge for the next reader — agentteams coaction takeaway-create --id ${id}\n`);
           return data;
         },
         'Co-action created',
@@ -257,7 +257,7 @@ export async function executeCoActionCommand(
 
       const updateResult = await updateCoAction(apiUrl, options.projectId, headers, options.id, body);
       if (options.file) deleteIfTempFile(options.file);
-      if (options.id) process.stderr.write(`Tip: Add a takeaway — agentteams coaction takeaway-create --id ${options.id}\n`);
+      if (options.id) process.stderr.write(`Tip: Add a takeaway to capture key insights or knowledge for the next reader — agentteams coaction takeaway-create --id ${options.id}\n`);
       return updateResult;
     }
     case 'delete': {
