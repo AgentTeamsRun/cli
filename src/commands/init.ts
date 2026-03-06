@@ -80,13 +80,32 @@ function encryptAuthPath(authPath: string): string {
   return `v1.${encodeBase64Url(Buffer.from(JSON.stringify(payload), 'utf8'))}`;
 }
 
-function buildAuthorizeUrl(port: number, projectName: string, authPathEnc?: string): string {
+export function detectOsType(): 'MACOS' | 'LINUX' | 'WINDOWS' | undefined {
+  if (process.platform === 'darwin') {
+    return 'MACOS';
+  }
+
+  if (process.platform === 'linux') {
+    return 'LINUX';
+  }
+
+  if (process.platform === 'win32') {
+    return 'WINDOWS';
+  }
+
+  return undefined;
+}
+
+export function buildAuthorizeUrl(port: number, projectName: string, authPathEnc?: string, osType?: string): string {
   const params = new URLSearchParams({
     port: String(port),
     projectName,
   });
   if (authPathEnc && authPathEnc.length > 0) {
     params.set('ap', authPathEnc);
+  }
+  if (osType && osType.length > 0) {
+    params.set('ot', osType);
   }
   return `${AUTH_BASE_URL}/cli/authorize?${params.toString()}`;
 }
@@ -248,7 +267,7 @@ export async function executeInitCommand(options?: InitOptions): Promise<InitRes
     authPathEnc = undefined;
   }
 
-  const authUrl = buildAuthorizeUrl(authContext.port, projectName, authPathEnc);
+  const authUrl = buildAuthorizeUrl(authContext.port, projectName, authPathEnc, detectOsType());
   await tryOpenBrowser(authUrl);
 
   try {
