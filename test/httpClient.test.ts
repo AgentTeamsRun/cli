@@ -93,7 +93,7 @@ describe('httpClient', () => {
     }
 
     expect(loaded.httpClient).toBe(loaded.axiosMock);
-    expect(loaded.axiosMock.defaults.headers.common['X-CLI-Version']).toBe('0.1.5');
+    expect(loaded.axiosMock.defaults.headers.common['X-CLI-Version']).toBe('0.1.6');
   });
 
   it('writes update cache from X-CLI-Latest-Version response headers', async () => {
