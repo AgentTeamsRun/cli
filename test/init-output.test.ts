@@ -59,13 +59,6 @@ describe('printInitResult', () => {
       expect(output).toContain('Next steps:');
     });
 
-    it('.gitignore 추가 힌트를 출력한다', () => {
-      printInitResult(MOCK_INIT_RESULT, 'text');
-
-      const output = captureOutput(logSpy);
-      expect(output).toContain('.gitignore');
-    });
-
     it('에이전트 파일 생성 결과를 출력한다', () => {
       printInitResult(MOCK_INIT_RESULT, 'text');
 

@@ -54,10 +54,9 @@ export function printInitResult(result: unknown, format: OutputFormat): void {
 
   console.log('');
   console.log('Next steps:');
-  console.log('  1. Add .agentteams/ to .gitignore');
-  console.log('  2. Check the generated agent files (CLAUDE.md, AGENTS.md, etc.)');
+  console.log('  1. Check the generated agent files (CLAUDE.md, AGENTS.md, etc.)');
   console.log('     If a -example file was created, merge it into your existing file.');
-  console.log('  3. Try saying to your AI agent:');
+  console.log('  2. Try saying to your AI agent:');
   console.log(chalk.cyan('       Analyze the codebase and create conventions.'));
   console.log(chalk.cyan('       Create a plan to improve test coverage for this project.'));
 }

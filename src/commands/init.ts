@@ -1,4 +1,4 @@
-import { writeFileSync, existsSync, mkdirSync } from 'node:fs';
+import { writeFileSync, readFileSync, appendFileSync, existsSync, mkdirSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { constants, createCipheriv, publicEncrypt, randomBytes } from 'node:crypto';
 import { multiselect, isCancel, cancel } from '@clack/prompts';
@@ -217,6 +217,27 @@ async function promptAgentFileSelection(): Promise<string[]> {
   return selected as string[];
 }
 
+function ensureGitignore(cwd: string): void {
+  const gitignorePath = join(cwd, '.gitignore');
+  const entry = '.agentteams/';
+
+  const block = `# AgentTeams local config\n${entry}\n`;
+
+  if (existsSync(gitignorePath)) {
+    const content = readFileSync(gitignorePath, 'utf-8');
+    const lines = content.split('\n').map((l) => l.trim());
+    if (lines.includes(entry)) {
+      return;
+    }
+    const separator = content.endsWith('\n') ? '\n' : '\n\n';
+    appendFileSync(gitignorePath, `${separator}${block}`, 'utf-8');
+    console.log(`✅ Added ${entry} to .gitignore`);
+  } else {
+    writeFileSync(gitignorePath, `${block}`, 'utf-8');
+    console.log(`✅ Created .gitignore with ${entry}`);
+  }
+}
+
 function generateAgentEntryPointFiles(cwd: string, selectedFiles: string[]): AgentFileEntry[] {
   if (selectedFiles.length === 0) {
     return [];
@@ -340,6 +361,7 @@ export async function executeInitCommand(options?: InitOptions): Promise<InitRes
     saveConfig(configPath, config);
     writeFileSync(conventionPath, conventionContent, 'utf-8');
     await conventionDownload({ cwd, config });
+    ensureGitignore(cwd);
     const selectedFiles = await promptAgentFileSelection();
     const agentFiles = generateAgentEntryPointFiles(cwd, selectedFiles);
 
