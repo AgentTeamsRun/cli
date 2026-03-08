@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals';
+import { createRequire } from 'node:module';
 import type { AxiosError, AxiosResponse, InternalAxiosRequestConfig } from 'axios';
+
+const require = createRequire(import.meta.url);
+const pkg = require('../package.json') as { version: string };
 
 type RetryConfig = InternalAxiosRequestConfig & { _retryCount?: number };
 type StoredResponseHandler = {
@@ -93,7 +97,7 @@ describe('httpClient', () => {
     }
 
     expect(loaded.httpClient).toBe(loaded.axiosMock);
-    expect(loaded.axiosMock.defaults.headers.common['X-CLI-Version']).toBe('0.1.6');
+    expect(loaded.axiosMock.defaults.headers.common['X-CLI-Version']).toBe(pkg.version);
   });
 
   it('writes update cache from X-CLI-Latest-Version response headers', async () => {
