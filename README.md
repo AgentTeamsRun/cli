@@ -91,7 +91,7 @@ If file names collide within the same category, suffixes like `-2`, `-3` are add
 Create a new convention.
 
 - The input file must be under `.agentteams/<category>/*.md`, and `<category>` is inferred from the path.
-- Frontmatter is optional. Supported fields: `trigger`, `description`, `agentInstruction`, `title` (optional).
+- Frontmatter is optional. Supported fields: `trigger`, `description`, `title` (optional). Use `# AGENT_RULES` in the document body instead of the deprecated `agentInstruction` frontmatter field.
 - After creation, the CLI immediately updates `.agentteams/conventions.manifest.json`, so you can `update/delete` the same file right away.
 - Run `agentteams convention download` if you want to refresh `convention.md` and the server-normalized (downloadable) markdown.
 

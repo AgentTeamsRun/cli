@@ -1,10 +1,13 @@
 ---
-trigger: 
-description: 
-agentInstruction: |
-  본 문서는 한국어로 작성해주세요.
-  * npm 사이트에 본 문서가 노출되어서 api/ 폴더로 이동
+trigger:
+description:
 ---
+
+# AGENT_RULES
+
+- 본 문서는 한국어로 작성해주세요.
+- npm 사이트에 본 문서가 노출되어서 api/ 폴더로 이동
+
 # API ↔ CLI 워크플로우
 
 이 문서는 AgentTeams CLI(`agentteams`)가 API 서버와 어떻게 통신하는지, 그리고 그 결과로 로컬 워크스페이스에 어떤 파일이 생성/업데이트되는지를 설명합니다.

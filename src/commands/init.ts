@@ -245,11 +245,9 @@ function generateAgentEntryPointFiles(cwd: string, selectedFiles: string[]): Age
 
   const DEFAULT_CONVENTION_REFERENCE = `---
 alwaysApply: true
-agentInstruction: |
-**Before starting any task, always refer to \`.agentteams/convention.md\`.**
 ---
 
-# AgentTeams Convention
+# AGENT_RULES
 
 **Before starting any task, always refer to \`.agentteams/convention.md\`.**
 `;
