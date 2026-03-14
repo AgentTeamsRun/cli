@@ -627,6 +627,51 @@ program
     }
   });
 
+program
+  .command('search')
+  .description('Search across all entity types (plans, co-actions, reports, post-mortems, conventions)')
+  .option('--query <text>', 'Search query (required)')
+  .option('--types <types>', 'Comma-separated entity types to filter (PLAN, CO_ACTION, COMPLETION_REPORT, POST_MORTEM, CONVENTION)')
+  .option('--limit <n>', 'Max results (1-100, default: 20)')
+  .option('--max-tokens <n>', 'Token budget for response')
+  .option('--api-url <url>', 'Override API URL (optional)')
+  .option('--api-key <key>', 'Override API key (optional)')
+  .option('--project-id <id>', 'Override project ID (optional)')
+  .option('--team-id <id>', 'Override team ID (optional)')
+  .option('--agent-name <name>', 'Override agent name (optional)')
+  .option('--format <format>', 'Output format (json, text)', 'json')
+  .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
+  .option('--verbose', 'Print full output to stdout (useful with --output-file)', false)
+  .addHelpText('after', CONVENTION_HINT)
+  .action(async (options) => {
+    try {
+      const normalizedFormat = normalizeFormat(options.format, 'json');
+      const result = await executeCommand('search', '', {
+        query: options.query,
+        types: options.types,
+        limit: options.limit,
+        maxTokens: options.maxTokens,
+        apiUrl: options.apiUrl,
+        apiKey: options.apiKey,
+        projectId: options.projectId,
+        teamId: options.teamId,
+        agentName: options.agentName,
+      });
+
+      printCommandResult({
+        result,
+        format: normalizedFormat,
+        outputFile: options.outputFile,
+        verbose: options.verbose,
+        resource: 'search',
+        formatExplicit: typeof options.format === 'string',
+      });
+    } catch (error) {
+      console.error(handleError(error));
+      process.exit(1);
+    }
+  });
+
 startUpdateCheck(pkg.version);
 
 program.parse();

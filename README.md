@@ -290,6 +290,26 @@ agentteams postmortem create \
 
 Status values: `OPEN`, `IN_PROGRESS`, `RESOLVED`
 
+### `search`
+
+Search across all entity types in a project.
+
+```bash
+# Basic search
+agentteams search --query "login feature"
+
+# Filter by entity types
+agentteams search --query "auth" --types PLAN,CO_ACTION
+
+# Limit results and token budget (useful for agents)
+agentteams search --query "deployment" --limit 5 --max-tokens 4000
+
+# JSON output for automation
+agentteams search --query "refactor" --format json
+```
+
+Searchable entity types: `PLAN`, `CO_ACTION`, `COMPLETION_REPORT`, `POST_MORTEM`, `CONVENTION`
+
 ### `config`
 
 ```bash

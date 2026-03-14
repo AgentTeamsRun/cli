@@ -9,6 +9,7 @@ import { executePostMortemCommand } from './postmortem.js';
 import { executeCoActionCommand } from './coaction.js';
 import { executeReportCommand } from './report.js';
 import { executeFeedbackCommand } from './feedback.js';
+import { executeSearchCommand } from './search.js';
 import { loadConfig } from '../utils/config.js';
 import type { Config } from '../types/index.js';
 
@@ -117,6 +118,11 @@ export async function executeCommand(
       return executeAgentConfigCommand(action, options);
     case 'config':
       return executeConfigCommand(action);
+    case 'search': {
+      const config = loadRequiredConfig(buildConfigOverrides(options));
+      const { apiUrl, headers } = resolveApiContext(config);
+      return executeSearchCommand(apiUrl, config.projectId, headers, options);
+    }
     default:
       throw new Error(`Unknown resource: ${resource}`);
   }

@@ -1696,6 +1696,59 @@ describe('CLI Integration Tests', () => {
         'Unknown resource: unknown'
       );
     });
+
+    describe('search', () => {
+      it('should call search API with query', async () => {
+        axiosGetSpy.mockResolvedValueOnce({
+          data: {
+            data: [
+              { entityType: 'PLAN', id: 'p1', title: 'Test Plan', snippet: 'match', rank: 1, contentTokenCount: 100, createdAt: '2026-01-01T00:00:00Z' },
+            ],
+            meta: { total: 1, truncatedByTokenBudget: false },
+          },
+        });
+
+        const result = await executeCommand('search', '', { query: 'test' });
+        expect(axiosGetSpy).toHaveBeenCalledWith(
+          expect.stringContaining(`/api/projects/${PROJECT_ID}/search?q=test`),
+          expect.objectContaining({ headers: authHeaders() })
+        );
+        expect((result as any).data).toHaveLength(1);
+        expect((result as any).data[0].entityType).toBe('PLAN');
+      });
+
+      it('should pass types filter as array params', async () => {
+        axiosGetSpy.mockResolvedValueOnce({
+          data: { data: [], meta: { total: 0, truncatedByTokenBudget: false } },
+        });
+
+        await executeCommand('search', '', { query: 'test', types: 'PLAN,CO_ACTION' });
+        const calledUrl = axiosGetSpy.mock.calls[0]![0] as string;
+        expect(calledUrl).toContain('types%5B%5D=PLAN');
+        expect(calledUrl).toContain('types%5B%5D=CO_ACTION');
+      });
+
+      it('should throw when query is missing', async () => {
+        await expect(executeCommand('search', '', {})).rejects.toThrow('--query is required');
+      });
+
+      it('should throw for invalid types', async () => {
+        await expect(
+          executeCommand('search', '', { query: 'test', types: 'INVALID' })
+        ).rejects.toThrow('Invalid type(s): INVALID');
+      });
+
+      it('should pass limit and maxTokens', async () => {
+        axiosGetSpy.mockResolvedValueOnce({
+          data: { data: [], meta: { total: 0, truncatedByTokenBudget: false } },
+        });
+
+        await executeCommand('search', '', { query: 'test', limit: '10', maxTokens: '5000' });
+        const calledUrl = axiosGetSpy.mock.calls[0]![0] as string;
+        expect(calledUrl).toContain('limit=10');
+        expect(calledUrl).toContain('maxTokens=5000');
+      });
+    });
   });
 
   describe('Output Formatting', () => {
