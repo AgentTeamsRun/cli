@@ -5,6 +5,14 @@ type ApiErrorPayload = {
   errorCode?: unknown;
 };
 
+export type ErrorContext = {
+  apiUrl?: string;
+};
+
+type ErrorWithContext = {
+  agentteamsContext?: ErrorContext;
+};
+
 function translateServerMessage(message: string): string {
   const mapping: Array<{ match: string; translated: string }> = [
     { match: '컨벤션 수정 권한이 없습니다', translated: "You don't have permission to modify conventions." },
@@ -22,7 +30,38 @@ function translateServerMessage(message: string): string {
   return message;
 }
 
-export function handleError(error: unknown): string {
+function getErrorContext(error: unknown, context?: ErrorContext): ErrorContext | undefined {
+  if (context) {
+    return context;
+  }
+
+  if (error && typeof error === 'object' && 'agentteamsContext' in error) {
+    const candidate = (error as ErrorWithContext).agentteamsContext;
+    if (candidate && typeof candidate === 'object') {
+      return candidate;
+    }
+  }
+
+  return undefined;
+}
+
+export function attachErrorContext(error: unknown, context: ErrorContext): unknown {
+  if (!error || typeof error !== 'object') {
+    return error;
+  }
+
+  const nextContext = {
+    ...((error as ErrorWithContext).agentteamsContext ?? {}),
+    ...context,
+  };
+
+  (error as ErrorWithContext).agentteamsContext = nextContext;
+  return error;
+}
+
+export function handleError(error: unknown, context?: ErrorContext): string {
+  const resolvedContext = getErrorContext(error, context);
+
   if (isAxiosError(error)) {
     if (error.response) {
       const status = error.response.status;
@@ -83,8 +122,11 @@ Details: ${message}`;
     }
 
     if (error.code === 'ECONNREFUSED' || error.code === 'ENOTFOUND') {
-      const apiUrl = process.env.AGENTTEAMS_API_URL ?? '(not set)';
-      return `Cannot connect to server at ${apiUrl}.\nNext: Check AGENTTEAMS_API_URL and connectivity.`;
+      const apiUrl = resolvedContext?.apiUrl ?? process.env.AGENTTEAMS_API_URL;
+      if (typeof apiUrl === 'string' && apiUrl.length > 0) {
+        return `Cannot connect to server at ${apiUrl}.\nNext: Check network connectivity and firewall settings.`;
+      }
+      return "Cannot connect to server (API URL not configured).\nNext: Run 'agentteams init' or set AGENTTEAMS_API_URL.";
     }
 
     return `Network error: ${error.message}`;
@@ -96,4 +138,3 @@ Details: ${message}`;
 
   return String(error);
 }
-

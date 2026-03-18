@@ -11,6 +11,7 @@ import { executeReportCommand } from './report.js';
 import { executeFeedbackCommand } from './feedback.js';
 import { executeSearchCommand } from './search.js';
 import { loadConfig } from '../utils/config.js';
+import { attachErrorContext } from '../utils/errors.js';
 import type { Config } from '../types/index.js';
 
 const CONFIG_OVERRIDE_KEYS = ['apiKey', 'apiUrl', 'teamId', 'projectId', 'agentName'] as const;
@@ -45,6 +46,14 @@ function resolveApiContext(config: Config): { apiUrl: string; headers: Record<st
   return { apiUrl, headers };
 }
 
+async function withApiErrorContext<T>(apiUrl: string, operation: () => Promise<T>): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    throw attachErrorContext(error, { apiUrl });
+  }
+}
+
 export async function executeCommand(
   resource: string,
   action: string,
@@ -64,15 +73,15 @@ export async function executeCommand(
       const { apiUrl, headers } = resolveApiContext(config);
 
       if (resource === 'plan') {
-        return executePlanCommand(apiUrl, config.projectId, headers, action, {
+        return withApiErrorContext(apiUrl, () => executePlanCommand(apiUrl, config.projectId, headers, action, {
           ...options,
           defaultCreatedBy: config.agentName,
           defaultRepositoryId: config.repositoryId,
-        });
+        }));
       }
 
       if (resource === 'comment') {
-        return executeCommentCommand(apiUrl, config.projectId, headers, action, options);
+        return withApiErrorContext(apiUrl, () => executeCommentCommand(apiUrl, config.projectId, headers, action, options));
       }
 
       throw new Error(`Unknown resource: ${resource}`);
@@ -81,38 +90,38 @@ export async function executeCommand(
       const config = loadRequiredConfig(buildConfigOverrides(options));
       const { apiUrl, headers } = resolveApiContext(config);
 
-      return executeReportCommand(apiUrl, headers, action, {
+      return withApiErrorContext(apiUrl, () => executeReportCommand(apiUrl, headers, action, {
         ...options,
         projectId: config.projectId,
         defaultCreatedBy: config.agentName,
         defaultRepositoryId: config.repositoryId,
-      });
+      }));
     }
     case 'postmortem': {
       const config = loadRequiredConfig(buildConfigOverrides(options));
       const { apiUrl, headers } = resolveApiContext(config);
 
-      return executePostMortemCommand(apiUrl, headers, action, {
+      return withApiErrorContext(apiUrl, () => executePostMortemCommand(apiUrl, headers, action, {
         ...options,
         projectId: config.projectId,
         defaultCreatedBy: config.agentName,
         defaultRepositoryId: config.repositoryId,
-      });
+      }));
     }
     case 'coaction': {
       const config = loadRequiredConfig(buildConfigOverrides(options));
       const { apiUrl, headers } = resolveApiContext(config);
-      return executeCoActionCommand(apiUrl, headers, action, {
+      return withApiErrorContext(apiUrl, () => executeCoActionCommand(apiUrl, headers, action, {
         ...options,
         projectId: config.projectId,
-      });
+      }));
     }
     case 'dependency':
       return executeDependencyCommand(action, options);
     case 'feedback': {
       const config = loadRequiredConfig(buildConfigOverrides(options));
       const { apiUrl, headers } = resolveApiContext(config);
-      return executeFeedbackCommand(apiUrl, headers, action, options);
+      return withApiErrorContext(apiUrl, () => executeFeedbackCommand(apiUrl, headers, action, options));
     }
     case 'agent-config':
       return executeAgentConfigCommand(action, options);
@@ -121,7 +130,7 @@ export async function executeCommand(
     case 'search': {
       const config = loadRequiredConfig(buildConfigOverrides(options));
       const { apiUrl, headers } = resolveApiContext(config);
-      return executeSearchCommand(apiUrl, config.projectId, headers, options);
+      return withApiErrorContext(apiUrl, () => executeSearchCommand(apiUrl, config.projectId, headers, options));
     }
     default:
       throw new Error(`Unknown resource: ${resource}`);

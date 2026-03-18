@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 import { AxiosError } from 'axios';
-import { handleError } from '../src/utils/errors.js';
+import { attachErrorContext, handleError } from '../src/utils/errors.js';
 
 function makeAxiosError(
   status: number,
@@ -67,5 +67,29 @@ describe('errors', () => {
     expect(handleError(networkError)).toContain('Cannot connect to server at https://api.example.');
     expect(handleError(new Error('plain error'))).toBe('plain error');
     expect(handleError(123)).toBe('123');
+  });
+
+  it('prefers resolved apiUrl from error context for connection failures', () => {
+    process.env.AGENTTEAMS_API_URL = '';
+
+    const networkError = new AxiosError('connect fail');
+    networkError.code = 'ENOTFOUND';
+
+    attachErrorContext(networkError, { apiUrl: 'https://resolved.example' });
+
+    expect(handleError(networkError)).toBe(
+      'Cannot connect to server at https://resolved.example.\nNext: Check network connectivity and firewall settings.'
+    );
+  });
+
+  it('shows configuration guidance when apiUrl is unavailable', () => {
+    process.env.AGENTTEAMS_API_URL = '';
+
+    const networkError = new AxiosError('connect fail');
+    networkError.code = 'ECONNREFUSED';
+
+    expect(handleError(networkError)).toBe(
+      "Cannot connect to server (API URL not configured).\nNext: Run 'agentteams init' or set AGENTTEAMS_API_URL."
+    );
   });
 });
