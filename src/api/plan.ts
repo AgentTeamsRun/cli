@@ -88,6 +88,8 @@ export async function startPlanLifecycle(
   body: {
     assignedTo?: string;
     task?: string;
+    startCommit?: string;
+    startBranch?: string;
   }
 ): Promise<any> {
   const baseUrl = `${apiUrl}/api/projects/${projectId}/plans`;

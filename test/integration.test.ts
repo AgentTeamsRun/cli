@@ -597,7 +597,7 @@ describe('CLI Integration Tests', () => {
 
       expect(axiosPostSpy).toHaveBeenCalledWith(
         `${API_URL}/api/projects/${PROJECT_ID}/plans/plan-1/start`,
-        { assignedTo: 'test-agent' },
+        expect.objectContaining({ assignedTo: 'test-agent' }),
         { headers: authHeaders() }
       );
     });
@@ -609,7 +609,7 @@ describe('CLI Integration Tests', () => {
 
       expect(axiosPostSpy).toHaveBeenCalledWith(
         `${API_URL}/api/projects/${PROJECT_ID}/plans/plan-1/start`,
-        { assignedTo: 'test-agent', task: 'Work started custom' },
+        expect.objectContaining({ assignedTo: 'test-agent', task: 'Work started custom' }),
         { headers: authHeaders() }
       );
     });

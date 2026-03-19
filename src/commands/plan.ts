@@ -224,11 +224,19 @@ export async function executePlanCommand(
         throw new Error('No agent available for assignment. Set AGENTTEAMS_AGENT_NAME or pass --agent.');
       }
 
-      const body: { assignedTo?: string; task?: string } = {
+      const startGitInfo = options.git === false ? {} : collectGitMetrics();
+
+      const body: { assignedTo?: string; task?: string; startCommit?: string; startBranch?: string } = {
         assignedTo: assignAgent,
       };
       if (options.task) {
         body.task = options.task;
+      }
+      if (startGitInfo.commitHash) {
+        body.startCommit = startGitInfo.commitHash;
+      }
+      if (startGitInfo.branchName) {
+        body.startBranch = startGitInfo.branchName;
       }
 
       const result = await withSpinner(
@@ -280,7 +288,20 @@ export async function executePlanCommand(
       }
 
       if (includeCompletionReport) {
-        const autoGitMetrics = options.git === false ? {} : collectGitMetrics();
+        // Fetch plan to get startCommit for accurate diff range
+        let planStartCommit: string | undefined;
+        if (options.git !== false) {
+          try {
+            const planResponse = await getPlan(apiUrl, projectId, headers, options.id);
+            planStartCommit = planResponse?.data?.startCommit ?? undefined;
+          } catch {
+            // Plan fetch failure is non-blocking; fall back to HEAD~1 diff
+          }
+        }
+
+        const autoGitMetrics = options.git === false
+          ? {}
+          : collectGitMetrics(undefined, { startCommit: planStartCommit });
 
         const commitHash = toNonEmptyString(options.commitHash) ?? autoGitMetrics.commitHash;
         const branchName = toNonEmptyString(options.branchName) ?? autoGitMetrics.branchName;
@@ -288,8 +309,8 @@ export async function executePlanCommand(
         const linesAdded = toNonNegativeInteger(options.linesAdded) ?? autoGitMetrics.linesAdded;
         const linesDeleted = toNonNegativeInteger(options.linesDeleted) ?? autoGitMetrics.linesDeleted;
         const durationSeconds = toNonNegativeInteger(options.durationSeconds);
-        const commitStart = toNonEmptyString(options.commitStart);
-        const commitEnd = toNonEmptyString(options.commitEnd);
+        const commitStart = toNonEmptyString(options.commitStart) ?? planStartCommit;
+        const commitEnd = toNonEmptyString(options.commitEnd) ?? autoGitMetrics.commitHash;
         const pullRequestId = toNonEmptyString(options.pullRequestId);
         const qualityScore = toNonNegativeInteger(options.qualityScore);
         const reportStatus = toNonEmptyString(options.reportStatus);

@@ -19,10 +19,17 @@ type ExecFileSyncFn = (
   options: { encoding: 'utf8'; stdio: ['ignore', 'pipe', 'ignore'] }
 ) => string;
 
-export function collectGitMetrics(execFileSyncImpl: ExecFileSyncFn = childProcess.execFileSync): GitMetrics {
+export function collectGitMetrics(
+  execFileSyncImpl: ExecFileSyncFn = childProcess.execFileSync,
+  options?: { startCommit?: string },
+): GitMetrics {
   const commitHash = runGit(execFileSyncImpl, ['rev-parse', 'HEAD']);
   const branchRaw = runGit(execFileSyncImpl, ['branch', '--show-current']);
-  const shortStat = runGit(execFileSyncImpl, ['diff', '--shortstat', 'HEAD~1']);
+
+  const diffRef = options?.startCommit
+    ? `${options.startCommit}..HEAD`
+    : 'HEAD~1';
+  const shortStat = runGit(execFileSyncImpl, ['diff', '--shortstat', diffRef]);
 
   const parsed = parseShortStat(shortStat);
 

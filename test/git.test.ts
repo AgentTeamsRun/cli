@@ -65,4 +65,29 @@ describe('Git Metrics Utility', () => {
       linesDeleted: undefined,
     });
   });
+
+  it('uses startCommit..HEAD range when startCommit option is provided', () => {
+    const metrics = collectGitMetrics((cmd, args) => {
+      if (cmd !== 'git') {
+        throw new Error('unexpected command');
+      }
+
+      const serializedArgs = Array.isArray(args) ? args.join(' ') : '';
+      if (serializedArgs === 'rev-parse HEAD') return 'end789\n';
+      if (serializedArgs === 'branch --show-current') return 'feat/my-feature\n';
+      if (serializedArgs === 'diff --shortstat start123..HEAD') {
+        return ' 5 files changed, 42 insertions(+), 10 deletions(-)\n';
+      }
+
+      throw new Error(`unexpected args: ${serializedArgs}`);
+    }, { startCommit: 'start123' });
+
+    expect(metrics).toEqual({
+      commitHash: 'end789',
+      branchName: 'feat/my-feature',
+      filesModified: 5,
+      linesAdded: 42,
+      linesDeleted: 10,
+    });
+  });
 });
