@@ -163,18 +163,18 @@ export async function patchPlanStatus(
   return response.data;
 }
 
-export async function listExternalIssues(
+export async function listOriginIssues(
   apiUrl: string,
   projectId: string,
   headers: any,
   planId: string
 ): Promise<any> {
   const baseUrl = `${apiUrl}/api/projects/${projectId}/plans`;
-  const response = await httpClient.get(`${baseUrl}/${planId}/external-issues`, { headers });
+  const response = await httpClient.get(`${baseUrl}/${planId}/origin-issues`, { headers });
   return response.data;
 }
 
-export async function linkExternalIssue(
+export async function linkOriginIssue(
   apiUrl: string,
   projectId: string,
   headers: any,
@@ -188,11 +188,11 @@ export async function linkExternalIssue(
   }
 ): Promise<any> {
   const baseUrl = `${apiUrl}/api/projects/${projectId}/plans`;
-  const response = await httpClient.post(`${baseUrl}/${planId}/external-issues`, body, { headers });
+  const response = await httpClient.post(`${baseUrl}/${planId}/origin-issues`, body, { headers });
   return response.data;
 }
 
-export async function unlinkExternalIssue(
+export async function unlinkOriginIssue(
   apiUrl: string,
   projectId: string,
   headers: any,
@@ -200,7 +200,7 @@ export async function unlinkExternalIssue(
   issueId: string
 ): Promise<any> {
   const baseUrl = `${apiUrl}/api/projects/${projectId}/plans`;
-  const response = await httpClient.delete(`${baseUrl}/${planId}/external-issues/${issueId}`, {
+  const response = await httpClient.delete(`${baseUrl}/${planId}/origin-issues/${issueId}`, {
     headers: withoutJsonContentType(headers),
   });
   return response.data;

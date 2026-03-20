@@ -22,12 +22,12 @@ import {
   getPlan,
   getPlanDependencies,
   getPlanStatus,
-  linkExternalIssue,
-  listExternalIssues,
+  linkOriginIssue,
+  listOriginIssues,
   listPlans,
   patchPlanStatus,
   startPlanLifecycle,
-  unlinkExternalIssue,
+  unlinkOriginIssue,
   updatePlan,
 } from '../api/plan.js';
 
@@ -383,7 +383,7 @@ export async function executePlanCommand(
         process.stderr.write(`[warn] plan create: --status ${options.status} is ignored. Plans are always created as DRAFT.\n`);
       }
 
-      return withSpinner(
+      const createResult = await withSpinner(
         'Creating plan...',
         () => createPlan(apiUrl, projectId, headers, {
           title: options.title,
@@ -395,6 +395,63 @@ export async function executePlanCommand(
         }),
         'Plan created',
       );
+
+      // --origin-issue flag: link origin issues after plan creation
+      const originIssueFlags: string[] = Array.isArray(options.originIssue)
+        ? options.originIssue
+        : options.originIssue ? [options.originIssue] : [];
+
+      if (originIssueFlags.length > 0 && createResult?.data?.id) {
+        const createdPlanId = createResult.data.id;
+        for (const raw of originIssueFlags) {
+          // Format: PROVIDER:EXTERNAL_ID:URL[:TITLE]
+          // Use first colon to get provider, second to get externalId, rest is URL[:TITLE]
+          const firstColon = raw.indexOf(':');
+          const secondColon = raw.indexOf(':', firstColon + 1);
+          if (firstColon < 0 || secondColon < 0) {
+            process.stderr.write(`[warn] Skipping invalid --origin-issue: "${raw}" (expected provider:externalId:externalUrl[:title])\n`);
+            continue;
+          }
+          const provider = raw.substring(0, firstColon);
+          const externalId = raw.substring(firstColon + 1, secondColon);
+          const remainder = raw.substring(secondColon + 1);
+
+          // Title is optional, separated by the last colon that's NOT part of a URL path
+          // URL always contains "://" so find the scheme separator, then look for trailing :title
+          let externalUrl: string;
+          let externalTitle: string | undefined;
+          const schemeEnd = remainder.indexOf('://');
+          if (schemeEnd >= 0) {
+            // Find last colon after the scheme
+            const afterScheme = schemeEnd + 3;
+            const lastColon = remainder.lastIndexOf(':');
+            if (lastColon > afterScheme) {
+              externalUrl = remainder.substring(0, lastColon);
+              externalTitle = remainder.substring(lastColon + 1) || undefined;
+            } else {
+              externalUrl = remainder;
+            }
+          } else {
+            externalUrl = remainder;
+          }
+
+          try {
+            await linkOriginIssue(apiUrl, projectId, headers, createdPlanId, {
+              provider: provider.toUpperCase(),
+              externalId,
+              externalUrl,
+              externalTitle,
+            });
+          } catch (err: any) {
+            // 409 CONFLICT = already linked, skip silently
+            if (err?.response?.status !== 409) {
+              process.stderr.write(`[warn] Failed to link origin issue (${provider}:${externalId}): ${err?.message ?? err}\n`);
+            }
+          }
+        }
+      }
+
+      return createResult;
     }
     case 'update': {
       if (!options.id) throw new Error('--id is required for plan update');
@@ -632,7 +689,7 @@ export async function executePlanCommand(
         }
       }
 
-      return linkExternalIssue(apiUrl, projectId, headers, planId, body);
+      return linkOriginIssue(apiUrl, projectId, headers, planId, body);
     }
     case 'unlink-issue': {
       const planId = toNonEmptyString(options.id);
@@ -640,13 +697,55 @@ export async function executePlanCommand(
       const issueId = toNonEmptyString(options.issueId);
       if (!issueId) throw new Error('--issue-id is required for plan unlink-issue');
 
-      return unlinkExternalIssue(apiUrl, projectId, headers, planId, issueId);
+      return unlinkOriginIssue(apiUrl, projectId, headers, planId, issueId);
     }
     case 'list-issues': {
       const planId = toNonEmptyString(options.id);
       if (!planId) throw new Error('--id is required for plan list-issues');
 
-      return listExternalIssues(apiUrl, projectId, headers, planId);
+      return listOriginIssues(apiUrl, projectId, headers, planId);
+    }
+    case 'issue': {
+      // Shorter alias for link-issue, designed for agent convenience
+      const planId = toNonEmptyString(options.id);
+      if (!planId) throw new Error('--id is required for plan issue');
+      const provider = toNonEmptyString(options.provider)?.toUpperCase();
+      if (!provider) throw new Error('--provider is required for plan issue');
+      const externalId = toNonEmptyString(options.externalId);
+      if (!externalId) throw new Error('--external-id is required for plan issue');
+      const externalUrl = toNonEmptyString(options.externalUrl);
+      if (!externalUrl) throw new Error('--external-url is required for plan issue');
+
+      if (!['GITHUB', 'GITLAB', 'LINEAR'].includes(provider)) {
+        throw new Error('--provider must be one of: GITHUB, GITLAB, LINEAR');
+      }
+
+      const body: {
+        provider: string;
+        externalId: string;
+        externalUrl: string;
+        externalTitle?: string;
+        metadata?: Record<string, unknown>;
+      } = { provider, externalId, externalUrl };
+
+      if (options.title) body.externalTitle = options.title;
+      if (options.metadata) {
+        try {
+          body.metadata = JSON.parse(options.metadata);
+        } catch {
+          throw new Error('--metadata must be valid JSON');
+        }
+      }
+
+      try {
+        return await linkOriginIssue(apiUrl, projectId, headers, planId, body);
+      } catch (err: any) {
+        // 409 CONFLICT = already linked, return success message
+        if (err?.response?.status === 409) {
+          return { message: 'Origin issue already linked (skipped)' };
+        }
+        throw err;
+      }
     }
     default:
       throw new Error(`Unknown action: ${action}`);
