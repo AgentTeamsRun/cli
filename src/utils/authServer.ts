@@ -112,15 +112,41 @@ function readRequestBody(request: IncomingMessage): Promise<string> {
   });
 }
 
-function setCorsHeaders(response: ServerResponse): void {
-  response.setHeader('Access-Control-Allow-Origin', '*');
+function getAllowedOrigins(): string[] {
+  const webUrl = process.env.AGENTTEAMS_WEB_URL || 'https://agentteams.run';
+  return [webUrl.replace(/\/+$/, '')];
+}
+
+function isAllowedOrigin(origin: string): boolean {
+  const allowedOrigins = getAllowedOrigins();
+
+  if (allowedOrigins.includes(origin)) {
+    return true;
+  }
+
+  // Allow localhost with any port for dev
+  if (/^http:\/\/localhost(:\d+)?$/.test(origin)) {
+    return true;
+  }
+
+  return false;
+}
+
+function setCorsHeaders(response: ServerResponse, request?: IncomingMessage): void {
+  const origin = request?.headers.origin;
+
+  if (origin && isAllowedOrigin(origin)) {
+    response.setHeader('Access-Control-Allow-Origin', origin);
+    response.setHeader('Vary', 'Origin');
+  }
+
   response.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   response.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 }
 
-function sendJson(response: ServerResponse, statusCode: number, payload: unknown): void {
+function sendJson(response: ServerResponse, statusCode: number, payload: unknown, request?: IncomingMessage): void {
   const body = JSON.stringify(payload);
-  setCorsHeaders(response);
+  setCorsHeaders(response, request);
   response.writeHead(statusCode, {
     'Content-Type': 'application/json',
     'Content-Length': Buffer.byteLength(body),
@@ -184,19 +210,19 @@ export function startLocalAuthServer(): AuthServerResult {
 
   const server = createServer(async (request: IncomingMessage, response: ServerResponse) => {
     if (request.method === 'OPTIONS') {
-      setCorsHeaders(response);
+      setCorsHeaders(response, request);
       response.writeHead(204);
       response.end();
       return;
     }
 
     if (request.method !== 'POST' || request.url !== '/callback') {
-      sendJson(response, 404, { message: 'Not found.' });
+      sendJson(response, 404, { message: 'Not found.' }, request);
       return;
     }
 
     if (settled) {
-      sendJson(response, 409, { message: 'OAuth callback already processed.' });
+      sendJson(response, 409, { message: 'OAuth callback already processed.' }, request);
       return;
     }
 
@@ -205,17 +231,17 @@ export function startLocalAuthServer(): AuthServerResult {
       const payload: unknown = JSON.parse(rawBody);
 
       if (!isAuthResult(payload)) {
-        sendJson(response, 400, { message: 'Invalid OAuth callback payload.' });
+        sendJson(response, 400, { message: 'Invalid OAuth callback payload.' }, request);
         return;
       }
 
-      sendJson(response, 200, { success: true });
+      sendJson(response, 200, { success: true }, request);
       
       setTimeout(() => {
         resolveAuth(payload);
       }, 100);
     } catch {
-      sendJson(response, 400, { message: 'Invalid JSON body.' });
+      sendJson(response, 400, { message: 'Invalid JSON body.' }, request);
     }
   });
 

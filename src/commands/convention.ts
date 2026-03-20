@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, unlinkSync } from "node:fs";
 import { atomicWriteFileSync } from "../utils/atomicWrite.js";
-import { basename, join, relative, resolve } from "node:path";
+import { basename, join, relative, resolve, sep } from "node:path";
 import httpClient from "../utils/httpClient.js"
 import { isAxiosError } from "axios";
 import matter from "gray-matter";
@@ -123,21 +123,29 @@ function resolveConventionFileAbsolutePath(projectRoot: string, cwd: string, fil
   // If absolute path, keep as-is.
   const resolvedFromCwd = resolve(cwd, fileInput);
   if (resolvedFromCwd === fileInput && existsSync(fileInput)) {
-    return fileInput;
+    return validatePathBoundary(fileInput, projectRoot);
   }
 
   // Common usage: pass `.agentteams/...` from any working directory.
   if (fileInput.startsWith(`${CONVENTION_DIR}/`) || fileInput.startsWith(`${CONVENTION_DIR}\\`)) {
-    return resolve(projectRoot, fileInput);
+    return validatePathBoundary(resolve(projectRoot, fileInput), projectRoot);
   }
 
   // Fallback: if the cwd-based resolution exists, use it.
   if (existsSync(resolvedFromCwd)) {
-    return resolvedFromCwd;
+    return validatePathBoundary(resolvedFromCwd, projectRoot);
   }
 
   // Otherwise, return cwd-based resolution to preserve a stable error path.
-  return resolvedFromCwd;
+  return validatePathBoundary(resolvedFromCwd, projectRoot);
+}
+
+function validatePathBoundary(absolutePath: string, projectRoot: string): string {
+  const normalized = resolve(absolutePath);
+  if (!normalized.startsWith(resolve(projectRoot) + sep)) {
+    throw new Error("Path traversal detected: file must be within project root");
+  }
+  return normalized;
 }
 
 function buildManifestPath(projectRoot: string): string {
@@ -730,7 +738,7 @@ export async function conventionCreate(options: ConventionCreateOptions): Promis
     const cwd = options.cwd ?? process.cwd();
     const absolutePath = resolveConventionFileAbsolutePath(projectRoot, cwd, fileInput);
     if (!existsSync(absolutePath)) {
-      throw new Error(`File not found: ${absolutePath}`);
+      throw new Error(`File not found: ${normalizeRelativePath(relative(projectRoot, absolutePath))}`);
     }
 
     const fileRelativePath = normalizeRelativePath(relative(projectRoot, absolutePath));
@@ -842,8 +850,7 @@ export async function conventionUpdate(options: ConventionUploadOptions): Promis
         .slice(0, 30);
       throw new Error(
         `Only downloaded convention files can be updated: ${fileInput}\n` +
-        `- resolved: ${absolutePath}\n` +
-        `- relative: ${fileRelativePath}\n` +
+        `- resolved: ${fileRelativePath}\n` +
         `Run 'agentteams convention download' first, or pass a file path listed in the manifest.\n` +
         (available.length > 0 ? `Examples (partial):\n- ${available.join("\n- ")}` : "")
       );
@@ -958,8 +965,7 @@ export async function conventionDelete(options: ConventionDeleteOptions): Promis
         .slice(0, 30);
       throw new Error(
         `Only downloaded convention files can be deleted: ${fileInput}\n` +
-        `- resolved: ${absolutePath}\n` +
-        `- relative: ${fileRelativePath}\n` +
+        `- resolved: ${fileRelativePath}\n` +
         `Run 'agentteams convention download' first, or pass a file path listed in the manifest.\n` +
         (available.length > 0 ? `Examples (partial):\n- ${available.join("\n- ")}` : "")
       );
