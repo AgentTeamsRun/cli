@@ -679,30 +679,37 @@ const linearCommand = program
 
 linearCommand
   .command('issue')
-  .description('Read a Linear issue')
-  .argument('<action>', 'Action to perform (get)')
-  .option('--issue-id <id>', 'Linear issue ID')
+  .description('Read or create a Linear issue')
+  .argument('<action>', 'Action to perform (get, create)')
+  .option('--issue-id <id>', 'Linear issue ID (required for get)')
+  .option('--team-id <id>', 'Linear team ID (required for create, optional override for other commands)')
+  .option('--title <text>', 'Issue title (required for create)')
+  .option('--description <text>', 'Issue description (optional, for create)')
+  .option('--state <name>', 'Issue state name, e.g. "Done", "Todo" (optional, for create)')
   .option('--api-url <url>', 'Override API URL (optional)')
   .option('--api-key <key>', 'Override API key (optional)')
   .option('--project-id <id>', 'Override project ID (optional)')
-  .option('--team-id <id>', 'Override team ID (optional)')
   .option('--agent-name <name>', 'Override agent name (optional)')
   .option('--format <format>', 'Output format (json, text)', 'text')
   .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
   .option('--verbose', 'Print full output to stdout (useful with --output-file)', false)
   .action(async (action, options) => {
     try {
-      if (action !== 'get') {
+      if (action !== 'get' && action !== 'create') {
         throw new Error(`Unknown action: ${action}`);
       }
 
-      const normalizedFormat = normalizeFormat(options.format, 'text');
-      const result = await executeCommand('linear', 'issue-get', {
+      const commandAction = action === 'get' ? 'issue-get' : 'issue-create';
+      const normalizedFormat = normalizeFormat(options.format, action === 'get' ? 'text' : 'json');
+      const result = await executeCommand('linear', commandAction, {
         issueId: options.issueId,
+        teamId: options.teamId,
+        title: options.title,
+        description: options.description,
+        state: options.state,
         apiUrl: options.apiUrl,
         apiKey: options.apiKey,
         projectId: options.projectId,
-        teamId: options.teamId,
         agentName: options.agentName,
       });
 
@@ -712,7 +719,7 @@ linearCommand
         outputFile: options.outputFile,
         verbose: options.verbose,
         resource: 'linear',
-        action: 'issue-get',
+        action: commandAction,
         formatExplicit: typeof options.format === 'string',
       });
     } catch (error) {
