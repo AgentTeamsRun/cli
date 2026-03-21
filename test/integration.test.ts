@@ -1744,7 +1744,7 @@ describe('CLI Integration Tests', () => {
       expect(cliIndex).toContain("--include-deps");
       expect(cliIndex).not.toContain("Action to perform (download)");
 
-      expect(cliIndex).not.toContain("--metadata <json>");
+      expect(cliIndex).toContain("--metadata <json>");
       expect(cliIndex).not.toContain("--author-id <id>");
       expect(cliIndex).not.toContain("--depends-on <id>");
       expect(cliIndex).toContain("DRAFT, PENDING, ASSIGNED, IN_PROGRESS, BLOCKED, DONE, CANCELLED");
