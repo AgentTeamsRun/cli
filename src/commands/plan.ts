@@ -6,6 +6,7 @@ import { collectGitMetrics } from '../utils/git.js';
 import { withSpinner, printFileInfo } from '../utils/spinner.js';
 import { formatPlanWithDependenciesText, mergePlanWithDependencies, normalizeDependencies } from '../utils/planFormat.js';
 import {
+  ensureUrlProtocol,
   interpretEscapes,
   stripFrontmatter,
   toNonEmptyString,
@@ -439,7 +440,7 @@ export async function executePlanCommand(
             await linkOriginIssue(apiUrl, projectId, headers, createdPlanId, {
               provider: provider.toUpperCase(),
               externalId,
-              externalUrl,
+              externalUrl: ensureUrlProtocol(externalUrl),
               externalTitle,
             });
           } catch (err: any) {
@@ -678,7 +679,7 @@ export async function executePlanCommand(
         externalUrl: string;
         externalTitle?: string;
         metadata?: Record<string, unknown>;
-      } = { provider, externalId, externalUrl };
+      } = { provider, externalId, externalUrl: ensureUrlProtocol(externalUrl) };
 
       if (options.title) body.externalTitle = options.title;
       if (options.metadata) {
@@ -726,7 +727,7 @@ export async function executePlanCommand(
         externalUrl: string;
         externalTitle?: string;
         metadata?: Record<string, unknown>;
-      } = { provider, externalId, externalUrl };
+      } = { provider, externalId, externalUrl: ensureUrlProtocol(externalUrl) };
 
       if (options.title) body.externalTitle = options.title;
       if (options.metadata) {

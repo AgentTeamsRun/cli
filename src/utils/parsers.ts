@@ -61,6 +61,11 @@ export function stripFrontmatter(content: string): string {
   return content.replace(/^---[\r\n][\s\S]*?[\r\n]---[\r\n]?/, '').trimStart();
 }
 
+export function ensureUrlProtocol(url: string): string {
+  if (/^https?:\/\//i.test(url)) return url;
+  return `https://${url}`;
+}
+
 export function toSafeFileName(input: string): string {
   return input
     .toLowerCase()
