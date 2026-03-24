@@ -25,7 +25,7 @@ describe('updateCheck', () => {
 
     expect(message).toContain('0.1.0');
     expect(message).toContain('0.2.0');
-    expect(message).toContain('@rlarua/agentteams-cli');
+    expect(message).toContain('@agentteams/cli');
   });
 
   it('readCache returns null when file is missing or invalid', async () => {

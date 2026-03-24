@@ -3,7 +3,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import chalk from 'chalk';
 
-const PACKAGE_NAME = '@rlarua/agentteams-cli';
+const PACKAGE_NAME = '@agentteams/cli';
 const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
 const FETCH_TIMEOUT_MS = 3000;
 

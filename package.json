@@ -1,5 +1,5 @@
 {
-  "name": "@rlarua/agentteams-cli",
+  "name": "@agentteams/cli",
   "version": "0.1.22",
   "description": "CLI tool for AgentTeams API",
   "type": "module",

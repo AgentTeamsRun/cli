@@ -1,4 +1,4 @@
-# @rlarua/agentteams-cli
+# @agentteams/cli
 
 [![GitHub](https://img.shields.io/badge/GitHub-rlarua%2FAgentTeams--cli-blue?logo=github)](https://github.com/rlarua/AgentTeams-cli)
 [![Issues](https://img.shields.io/github/issues/rlarua/AgentTeams-cli)](https://github.com/rlarua/AgentTeams-cli/issues)
@@ -9,7 +9,7 @@ It supports convention sync and plan/comment/report management.
 ## Installation
 
 ```bash
-npm install -g @rlarua/agentteams-cli
+npm install -g @agentteams/cli
 ```
 
 ## Quick Start
