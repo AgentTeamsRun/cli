@@ -1,7 +1,7 @@
 # @agentteams/cli
 
-[![GitHub](https://img.shields.io/badge/GitHub-rlarua%2FAgentTeams--cli-blue?logo=github)](https://github.com/rlarua/AgentTeams-cli)
-[![Issues](https://img.shields.io/github/issues/rlarua/AgentTeams-cli)](https://github.com/rlarua/AgentTeams-cli/issues)
+[![GitHub](https://img.shields.io/badge/GitHub-AgentTeamsRun%2Fcli-blue?logo=github)](https://github.com/AgentTeamsRun/cli)
+[![Issues](https://img.shields.io/github/issues/AgentTeamsRun/cli)](https://github.com/AgentTeamsRun/cli/issues)
 
 A CLI for working with the AgentTeams API from your terminal.
 It supports convention sync and plan/comment/report management.
