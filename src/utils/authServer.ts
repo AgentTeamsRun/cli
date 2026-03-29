@@ -65,7 +65,7 @@ function isPortAvailableSync(port: number): boolean {
   ].join(' ');
 
   try {
-    execFileSync(process.execPath, ['-e', checkScript, String(port)], { stdio: 'ignore' });
+    execFileSync(process.execPath, ['-e', checkScript, String(port)], { stdio: 'ignore', windowsHide: true });
     return true;
   } catch {
     return false;

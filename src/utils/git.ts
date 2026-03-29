@@ -16,7 +16,7 @@ export interface GitMetrics {
 type ExecFileSyncFn = (
   file: string,
   args: readonly string[],
-  options: { encoding: 'utf8'; stdio: ['ignore', 'pipe', 'ignore'] }
+  options: { encoding: 'utf8'; stdio: ['ignore', 'pipe', 'ignore']; windowsHide?: boolean }
 ) => string;
 
 export function collectGitMetrics(
@@ -47,6 +47,7 @@ function runGit(execFileSyncImpl: ExecFileSyncFn, args: string[]): string | unde
     const output = execFileSyncImpl('git', args, {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
+      windowsHide: true,
     });
 
     const trimmed = output.trim();
