@@ -1,6 +1,6 @@
 {
   "name": "@agentteams/cli",
-  "version": "0.1.24",
+  "version": "0.1.25",
   "description": "CLI tool for AgentTeams API",
   "type": "module",
   "main": "dist/index.js",
