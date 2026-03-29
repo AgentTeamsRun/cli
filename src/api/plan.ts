@@ -90,6 +90,8 @@ export async function startPlanLifecycle(
     task?: string;
     startCommit?: string;
     startBranch?: string;
+    runnerType?: string;
+    model?: string;
   }
 ): Promise<any> {
   const baseUrl = `${apiUrl}/api/projects/${projectId}/plans`;
@@ -104,6 +106,8 @@ export async function finishPlanLifecycle(
   id: string,
   body: {
     task?: string;
+    runnerType?: string;
+    model?: string;
     completionReport?: {
       repositoryId?: string;
       title: string;

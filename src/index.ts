@@ -156,6 +156,8 @@ program
   .option('--commit-start <hash>', 'Commit range start hash (plan finish, manual only)')
   .option('--commit-end <hash>', 'Commit range end hash (plan finish, manual only)')
   .option('--pull-request-id <id>', 'Pull request ID (plan finish, manual only)')
+  .option('--runner-type <type>', 'Runner type snapshot (plan start/finish)')
+  .option('--model <model>', 'Model ID snapshot (plan start/finish)')
   .option('--no-git', 'Disable git metrics auto-collection (plan finish)')
   .option('--page <number>', 'Page number (list only)')
   .option('--page-size <number>', 'Page size (list only)')
