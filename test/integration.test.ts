@@ -1747,7 +1747,7 @@ describe('CLI Integration Tests', () => {
       expect(cliIndex).toContain("--metadata <json>");
       expect(cliIndex).not.toContain("--author-id <id>");
       expect(cliIndex).not.toContain("--depends-on <id>");
-      expect(cliIndex).toContain("DRAFT, PENDING, ASSIGNED, IN_PROGRESS, BLOCKED, DONE, CANCELLED");
+      expect(cliIndex).toContain("BACKLOG, TODO, ASSIGNED, IN_PROGRESS, BLOCKED, DONE, CANCELLED");
     });
 
     it('should throw for unknown resource command', async () => {
