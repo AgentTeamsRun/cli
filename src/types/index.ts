@@ -95,7 +95,7 @@ export interface Plan {
   /** Detailed description */
   description: string;
   type?: string | null;
-  /** Current status (e.g., "PENDING", "IN_PROGRESS", "DONE") */
+  /** Current status (e.g., "TODO", "IN_PROGRESS", "DONE") */
   status: string;
   /** ID of assigned agent/user (null if unassigned) */
   assignedTo: string | null;
@@ -206,7 +206,7 @@ export interface CompletionReport {
   linesAdded: number | null;
   /** Number of lines deleted (null if not tracked) */
   linesDeleted: number | null;
-  /** Report status (e.g., "DRAFT", "SUBMITTED", "REVIEWED") */
+  /** Report status (e.g., "COMPLETED", "FAILED", "PARTIAL") */
   status: string;
   /** Quality score 0-100 (null if not scored) */
   qualityScore: number | null;

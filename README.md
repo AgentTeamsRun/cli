@@ -140,7 +140,7 @@ agentteams sync
 
 Manage plans.
 
-Note: Plans are always created as `DRAFT`. Even if you pass `--status` to `plan create`, the server will ignore it. Use `plan update` to change status after creation.
+Note: Plans are always created as `BACKLOG`. Even if you pass `--status` to `plan create`, the server will ignore it. Use `plan update` to change status after creation.
 
 ```bash
 agentteams plan list
@@ -165,7 +165,7 @@ agentteams plan create \
   # - `plan create` uses `.agentteams/config.json` -> `repositoryId` when present.
 
 agentteams plan quick --title "Quick task" --content "Implemented X and verified with tests" --type CHORE
-agentteams plan update --id <plan-id> --status PENDING
+agentteams plan update --id <plan-id> --status TODO
 agentteams plan update --id <plan-id> --status IN_PROGRESS
 agentteams plan assign --id <plan-id> --agent "agent-name"
 agentteams plan download --id <plan-id>
@@ -173,7 +173,7 @@ agentteams plan cleanup --id <plan-id>
 agentteams plan delete --id <plan-id>
 ```
 
-Status values: `DRAFT`, `PENDING`, `ASSIGNED`, `IN_PROGRESS`, `BLOCKED`, `DONE`, `CANCELLED`
+Status values: `BACKLOG`, `TODO`, `ASSIGNED`, `IN_PROGRESS`, `BLOCKED`, `DONE`, `CANCELLED`
 
 Types: `FEATURE`, `BUG_FIX`, `ISSUE`, `REFACTOR`, `CHORE`
 

@@ -153,7 +153,7 @@ text 출력에서 객체 필드는 핵심 식별 필드(`id/title/status/priorit
 ### Plan
 
 - Create: `POST /api/projects/:projectId/plans`
-  - Plans are always created as `DRAFT` (server-enforced). Even if a client sends `status`, it will be ignored on creation.
+  - Plans are always created as `BACKLOG` (server-enforced). Even if a client sends `status`, it will be ignored on creation.
   - Use `--content` or `--file` for the body.
   - `--template refactor-minimal`로 최소 리팩터링 체크리스트 본문을 자동 채울 수 있습니다(내용이 비어 있을 때).
   - `--template quick-minimal`로 약식 작업 계획서(최소 템플릿)를 자동 채울 수 있습니다(내용이 비어 있을 때).
@@ -228,7 +228,7 @@ sequenceDiagram
 
   U->>CLI: plan create (title, content, priority)
   CLI->>API: POST /api/projects/:projectId/plans
-  API-->>CLI: { data: plan(status=DRAFT) }
+  API-->>CLI: { data: plan(status=BACKLOG) }
 
   U->>CLI: plan start --id {planId}
   CLI->>API: POST /api/projects/:projectId/plans/:id/start
@@ -275,8 +275,8 @@ sequenceDiagram
 
 ### Status values
 
-- `DRAFT`
-- `PENDING`
+- `BACKLOG`
+- `TODO`
 - `ASSIGNED`
 - `IN_PROGRESS`
 - `BLOCKED`
@@ -287,16 +287,16 @@ sequenceDiagram
 
 ```mermaid
 stateDiagram-v2
-  [*] --> DRAFT
+  [*] --> BACKLOG
 
-  DRAFT --> PENDING
+  BACKLOG --> TODO
 
-  PENDING --> ASSIGNED
-  PENDING --> IN_PROGRESS
-  PENDING --> DONE
-  PENDING --> CANCELLED
+  TODO --> ASSIGNED
+  TODO --> IN_PROGRESS
+  TODO --> DONE
+  TODO --> CANCELLED
 
-  ASSIGNED --> PENDING
+  ASSIGNED --> TODO
   ASSIGNED --> IN_PROGRESS
   ASSIGNED --> DONE
   ASSIGNED --> CANCELLED
@@ -325,12 +325,12 @@ If you attempt a disallowed transition, the API returns `400` with `허용되지
 
 ```mermaid
 flowchart TD
-  A["plan update (title/content/priority change)"] --> B{Current status is<br/>DRAFT or PENDING?}
-  B -- "No" --> E["400: Content edits allowed only in DRAFT or PENDING"]
+  A["plan update (title/content/priority change)"] --> B{Current status is<br/>BACKLOG or TODO?}
+  B -- "No" --> E["400: Content edits allowed only in BACKLOG or TODO"]
   B -- "Yes" --> F["Allowed"]
 
-  C["plan delete"] --> D{Current status is<br/>PENDING, DRAFT, or CANCELLED?}
-  D -- "No" --> G["400: Delete allowed only in PENDING, DRAFT, or CANCELLED"]
+  C["plan delete"] --> D{Current status is<br/>TODO, BACKLOG, or CANCELLED?}
+  D -- "No" --> G["400: Delete allowed only in TODO, BACKLOG, or CANCELLED"]
   D -- "Yes" --> H["204 No Content"]
 ```
 
@@ -365,7 +365,7 @@ flowchart TD
 # First-time setup
 agentteams init
 
-# Create plan (always DRAFT)
+# Create plan (always BACKLOG)
 agentteams plan create --title "My plan" --content "# TODO\n- ..." --priority MEDIUM
 
 # Download local snapshot/runbook

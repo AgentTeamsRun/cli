@@ -48,7 +48,7 @@ export async function createPlan(
     type?: string;
     priority: string;
     repositoryId?: string;
-    status: 'DRAFT';
+    status: 'BACKLOG';
   }
 ): Promise<any> {
   const baseUrl = `${apiUrl}/api/projects/${projectId}/plans`;

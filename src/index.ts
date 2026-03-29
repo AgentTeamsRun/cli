@@ -138,7 +138,7 @@ program
   .option('--interpret-escapes', 'Interpret \\n sequences in --content as newlines (create/update only)', false)
   .option('--file <path>', 'Read plan content from a local file (create/update)')
   .option('--template <name>', 'Plan content template (refactor-minimal, quick-minimal, create only)')
-  .option('--status <status>', 'Plan status (DRAFT, PENDING, ASSIGNED, IN_PROGRESS, BLOCKED, DONE, CANCELLED)')
+  .option('--status <status>', 'Plan status (BACKLOG, TODO, ASSIGNED, IN_PROGRESS, BLOCKED, DONE, CANCELLED)')
   .option('--type <type>', 'Plan type (FEATURE, BUG_FIX, ISSUE, REFACTOR, CHORE)')
   .option('--priority <priority>', 'Plan priority (LOW, MEDIUM, HIGH)')
   .option('--assigned-to <id>', 'Assigned agent config ID (list filter)')

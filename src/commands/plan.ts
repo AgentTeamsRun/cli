@@ -380,8 +380,8 @@ export async function executePlanCommand(
         throw new Error('--content, --file, or --template is required for plan create');
       }
 
-      if (options.status && options.status !== 'DRAFT') {
-        process.stderr.write(`[warn] plan create: --status ${options.status} is ignored. Plans are always created as DRAFT.\n`);
+      if (options.status && options.status !== 'BACKLOG') {
+        process.stderr.write(`[warn] plan create: --status ${options.status} is ignored. Plans are always created as BACKLOG.\n`);
       }
 
       const createResult = await withSpinner(
@@ -392,7 +392,7 @@ export async function executePlanCommand(
           type: options.type,
           priority: options.priority ?? 'MEDIUM',
           repositoryId: options.repositoryId ?? options.defaultRepositoryId,
-          status: 'DRAFT',
+          status: 'BACKLOG',
         }),
         'Plan created',
       );
@@ -628,7 +628,7 @@ export async function executePlanCommand(
           type: options.type,
           priority,
           repositoryId: options.repositoryId ?? options.defaultRepositoryId,
-          status: 'DRAFT',
+          status: 'BACKLOG',
         }),
         'Plan created',
       );
