@@ -593,11 +593,11 @@ describe('CLI Integration Tests', () => {
     it('plan start: should call single lifecycle endpoint', async () => {
       axiosPostSpy.mockResolvedValue({ data: { data: { id: 'plan-1' } } } as any);
 
-      await executeCommand('plan', 'start', { id: 'plan-1' });
+      await executeCommand('plan', 'start', { id: 'plan-1', runnerType: 'CLAUDE_CODE', model: 'claude-opus-4-6' });
 
       expect(axiosPostSpy).toHaveBeenCalledWith(
         `${API_URL}/api/projects/${PROJECT_ID}/plans/plan-1/start`,
-        expect.objectContaining({ assignedTo: 'test-agent' }),
+        expect.objectContaining({ assignedTo: 'test-agent', runnerType: 'CLAUDE_CODE', model: 'claude-opus-4-6' }),
         { headers: authHeaders() }
       );
     });
@@ -605,19 +605,23 @@ describe('CLI Integration Tests', () => {
     it('plan start: should pass custom task to lifecycle endpoint', async () => {
       axiosPostSpy.mockResolvedValue({ data: { data: { id: 'plan-1' } } } as any);
 
-      await executeCommand('plan', 'start', { id: 'plan-1', task: 'Work started custom' });
+      await executeCommand('plan', 'start', { id: 'plan-1', task: 'Work started custom', runnerType: 'CLAUDE_CODE', model: 'claude-opus-4-6' });
 
       expect(axiosPostSpy).toHaveBeenCalledWith(
         `${API_URL}/api/projects/${PROJECT_ID}/plans/plan-1/start`,
-        expect.objectContaining({ assignedTo: 'test-agent', task: 'Work started custom' }),
+        expect.objectContaining({ assignedTo: 'test-agent', task: 'Work started custom', runnerType: 'CLAUDE_CODE', model: 'claude-opus-4-6' }),
         { headers: authHeaders() }
       );
+    });
+
+    it('plan start: should fail when --runner-type or --model is missing', async () => {
+      await expect(executeCommand('plan', 'start', { id: 'plan-1' })).rejects.toThrow('--runner-type and --model are required');
     });
 
     it('plan start: should fail when lifecycle endpoint fails', async () => {
       axiosPostSpy.mockRejectedValue(new Error('start failed'));
 
-      await expect(executeCommand('plan', 'start', { id: 'plan-1' })).rejects.toThrow('start failed');
+      await expect(executeCommand('plan', 'start', { id: 'plan-1', runnerType: 'CLAUDE_CODE', model: 'claude-opus-4-6' })).rejects.toThrow('start failed');
 
       expect(axiosPostSpy).toHaveBeenCalledTimes(1);
     });
@@ -625,13 +629,17 @@ describe('CLI Integration Tests', () => {
     it('plan finish: should call single lifecycle endpoint', async () => {
       axiosPostSpy.mockResolvedValue({ data: { data: { id: 'plan-1' } } } as any);
 
-      await executeCommand('plan', 'finish', { id: 'plan-1' });
+      await executeCommand('plan', 'finish', { id: 'plan-1', runnerType: 'CLAUDE_CODE', model: 'claude-opus-4-6' });
 
       expect(axiosPostSpy).toHaveBeenCalledWith(
         `${API_URL}/api/projects/${PROJECT_ID}/plans/plan-1/finish`,
-        {},
+        { runnerType: 'CLAUDE_CODE', model: 'claude-opus-4-6' },
         { headers: authHeaders() }
       );
+    });
+
+    it('plan finish: should fail when --runner-type or --model is missing', async () => {
+      await expect(executeCommand('plan', 'finish', { id: 'plan-1' })).rejects.toThrow('--runner-type and --model are required');
     });
 
     it('plan finish: should include completion report when report file is provided', async () => {
@@ -645,12 +653,16 @@ describe('CLI Integration Tests', () => {
         id: 'plan-1',
         reportTitle: 'Completion summary',
         reportFile,
+        runnerType: 'CLAUDE_CODE',
+        model: 'claude-opus-4-6',
         git: false,
       });
 
       expect(axiosPostSpy).toHaveBeenCalledWith(
         `${API_URL}/api/projects/${PROJECT_ID}/plans/plan-1/finish`,
         {
+          runnerType: 'CLAUDE_CODE',
+          model: 'claude-opus-4-6',
           completionReport: {
             title: 'Completion summary',
             content: '## Summary\n- done',
@@ -1448,6 +1460,8 @@ describe('CLI Integration Tests', () => {
       await executeCommand('report', 'create', {
         title: 'Test report',
         file: reportFile,
+        runnerType: 'CLAUDE_CODE',
+        model: 'claude-opus-4-6',
       });
 
       expect(axiosGetSpy).toHaveBeenCalledWith(
@@ -1476,6 +1490,8 @@ describe('CLI Integration Tests', () => {
       await executeCommand('report', 'create', {
         title: 'File report',
         file: reportFile,
+        runnerType: 'CLAUDE_CODE',
+        model: 'claude-opus-4-6',
       });
 
       expect(axiosPostSpy).toHaveBeenCalledWith(
@@ -1500,6 +1516,8 @@ describe('CLI Integration Tests', () => {
       await executeCommand('report', 'create', {
         title: 'Metric report',
         file: reportFile,
+        runnerType: 'CLAUDE_CODE',
+        model: 'claude-opus-4-6',
         git: false,
         commitHash: 'abc123',
         branchName: 'feature/report',

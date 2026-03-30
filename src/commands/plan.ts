@@ -221,6 +221,9 @@ export async function executePlanCommand(
     }
     case 'start': {
       if (!options.id) throw new Error('--id is required for plan start');
+      if (!options.runnerType || !options.model) {
+        throw new Error('--runner-type and --model are required for plan start.');
+      }
       const assignAgent = (options.agent as string | undefined)
         ?? (options.defaultCreatedBy as string | undefined);
 
@@ -259,6 +262,9 @@ export async function executePlanCommand(
     }
     case 'finish': {
       if (!options.id) throw new Error('--id is required for plan finish');
+      if (!options.runnerType || !options.model) {
+        throw new Error('--runner-type and --model are required for plan finish.');
+      }
 
       let reportContent: string | undefined;
 

@@ -288,6 +288,8 @@ program
   .option('--commit-end <hash>', 'Commit range end hash (manual only)')
   .option('--pull-request-id <id>', 'Pull request ID (manual only)')
   .option('--quality-score <n>', 'Quality score 0-100')
+  .option('--runner-type <type>', 'Runner type snapshot (required for create)')
+  .option('--model <model>', 'Model ID snapshot (required for create)')
   .option('--no-git', 'Disable git metrics auto-collection')
   .option('--page <number>', 'Page number (list only)')
   .option('--page-size <number>', 'Page size (list only)')

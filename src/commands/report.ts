@@ -42,6 +42,9 @@ export async function executeReportCommand(
       return getReport(apiUrl, options.projectId, headers, options.id);
     }
     case 'create': {
+      if (!options.runnerType || !options.model) {
+        throw new Error('--runner-type and --model are required for report create.');
+      }
       const title = (options.title ?? options.summary) as string | undefined;
       if (!title || title.trim().length === 0) {
         throw new Error('--title is required for report create (or use --summary)');
@@ -83,6 +86,8 @@ export async function executeReportCommand(
         status,
       };
 
+      if (options.runnerType) body.runnerType = options.runnerType;
+      if (options.model) body.model = options.model;
       if (commitHash !== undefined) body.commitHash = commitHash;
       if (branchName !== undefined) body.branchName = branchName;
       if (filesModified !== undefined) body.filesModified = filesModified;
