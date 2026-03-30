@@ -211,6 +211,8 @@ program
         issueId: options.issueId,
         metadata: options.metadata,
         includeDeps: options.includeDeps,
+        runnerType: options.runnerType,
+        model: options.model,
         format: normalizedFormat,
         formatExplicit: typeof options.format === 'string',
       });
@@ -334,6 +336,8 @@ program
         projectId: options.projectId,
         teamId: options.teamId,
         agentName: options.agentName,
+        runnerType: options.runnerType,
+        model: options.model,
       });
 
       printCommandResult({
