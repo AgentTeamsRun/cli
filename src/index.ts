@@ -690,6 +690,33 @@ program
     }
   });
 
+program
+  .command('harness')
+  .description('Manage server-side harness configuration (pre/post hooks, quality gate)')
+  .argument('<action>', 'Action to perform (get, set)')
+  .option('--file <path>', 'Path to JSON config file (required for set)')
+  .option('--format <format>', 'Output format (json, text)', 'json')
+  .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
+  .option('--verbose', 'Print full output to stdout (useful with --output-file)', false)
+  .addHelpText('after', CONVENTION_HINT)
+  .action(async (action, options) => {
+    try {
+      const result = await executeCommand('harness', action, {
+        file: options.file,
+      });
+
+      printCommandResult({
+        result,
+        format: normalizeFormat(options.format, 'json'),
+        outputFile: options.outputFile,
+        verbose: options.verbose,
+      });
+    } catch (error) {
+      console.error(handleError(error));
+      process.exit(1);
+    }
+  });
+
 const linearCommand = program
   .command('linear')
   .description('Read Linear issues and add comments through the AgentTeams API')
