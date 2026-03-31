@@ -11,6 +11,7 @@ import { executeReportCommand } from './report.js';
 import { executeFeedbackCommand } from './feedback.js';
 import { executeSearchCommand } from './search.js';
 import { executeLinearCommand } from './linear.js';
+import { executeHarnessCommand } from './harness.js';
 import { loadConfig } from '../utils/config.js';
 import { attachErrorContext } from '../utils/errors.js';
 import type { Config } from '../types/index.js';
@@ -137,6 +138,11 @@ export async function executeCommand(
       const config = loadRequiredConfig(buildConfigOverrides(options));
       const { apiUrl, headers } = resolveApiContext(config);
       return withApiErrorContext(apiUrl, () => executeLinearCommand(apiUrl, headers, action, options));
+    }
+    case 'harness': {
+      const config = loadRequiredConfig(buildConfigOverrides(options));
+      const { apiUrl, headers } = resolveApiContext(config);
+      return withApiErrorContext(apiUrl, () => executeHarnessCommand(apiUrl, config.projectId, headers, action, options));
     }
     default:
       throw new Error(`Unknown resource: ${resource}`);
