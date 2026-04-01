@@ -37,6 +37,16 @@ export async function updateLinearIssue(
   return response.data;
 }
 
+export async function listLinearComments(
+  apiUrl: string,
+  headers: any,
+  issueId: string
+): Promise<any> {
+  const baseUrl = `${apiUrl}/api/linear/issues/${issueId}/comments`;
+  const response = await httpClient.get(baseUrl, { headers });
+  return response.data;
+}
+
 export async function createLinearComment(
   apiUrl: string,
   headers: any,

@@ -776,8 +776,8 @@ linearCommand
 
 linearCommand
   .command('comment')
-  .description('Create a comment on a Linear issue')
-  .argument('<action>', 'Action to perform (create)')
+  .description('Manage comments on a Linear issue')
+  .argument('<action>', 'Action to perform (list, create)')
   .option('--issue-id <id>', 'Linear issue ID')
   .option('--body <text>', 'Comment body')
   .option('--api-url <url>', 'Override API URL (optional)')
@@ -790,12 +790,13 @@ linearCommand
   .option('--verbose', 'Print full output to stdout (useful with --output-file)', false)
   .action(async (action, options) => {
     try {
-      if (action !== 'create') {
+      if (action !== 'list' && action !== 'create') {
         throw new Error(`Unknown action: ${action}`);
       }
 
+      const commentAction = action === 'list' ? 'comment-list' : 'comment-create';
       const normalizedFormat = normalizeFormat(options.format, 'json');
-      const result = await executeCommand('linear', 'comment-create', {
+      const result = await executeCommand('linear', commentAction, {
         issueId: options.issueId,
         body: options.body,
         apiUrl: options.apiUrl,
@@ -811,7 +812,7 @@ linearCommand
         outputFile: options.outputFile,
         verbose: options.verbose,
         resource: 'linear',
-        action: 'comment-create',
+        action: commentAction,
         formatExplicit: typeof options.format === 'string',
       });
     } catch (error) {
