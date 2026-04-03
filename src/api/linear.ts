@@ -13,13 +13,14 @@ export async function getLinearIssue(
 export async function createLinearIssue(
   apiUrl: string,
   headers: any,
-  teamId: string,
   title: string,
   description?: string,
-  state?: string
+  state?: string,
+  teamId?: string
 ): Promise<any> {
   const baseUrl = `${apiUrl}/api/linear/issues`;
-  const body: Record<string, string> = { teamId, title };
+  const body: Record<string, string> = { title };
+  if (teamId) body.teamId = teamId;
   if (description) body.description = description;
   if (state) body.state = state;
   const response = await httpClient.post(baseUrl, body, { headers });

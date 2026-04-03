@@ -15,14 +15,11 @@ export async function executeLinearCommand(
       return getLinearIssue(apiUrl, headers, options.issueId);
     }
     case 'issue-create': {
-      if (!options.teamId) {
-        throw new Error('--team-id is required for linear issue create');
-      }
       if (!options.title) {
         throw new Error('--title is required for linear issue create');
       }
 
-      return createLinearIssue(apiUrl, headers, options.teamId, options.title, options.description, options.state);
+      return createLinearIssue(apiUrl, headers, options.title, options.description, options.state, options.teamId);
     }
     case 'issue-update': {
       if (!options.issueId) {
