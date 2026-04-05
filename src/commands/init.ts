@@ -238,6 +238,23 @@ function ensureGitignore(cwd: string): void {
   }
 }
 
+function ensureGeminiIgnore(cwd: string): void {
+  const geminiIgnorePath = join(cwd, '.geminiignore');
+  const entry = '!.agentteams';
+
+  if (existsSync(geminiIgnorePath)) {
+    const content = readFileSync(geminiIgnorePath, 'utf-8');
+    const lines = content.split('\n').map((l) => l.trim());
+    if (lines.includes(entry)) {
+      return;
+    }
+    const separator = content.endsWith('\n') ? '\n' : '\n\n';
+    appendFileSync(geminiIgnorePath, `${separator}# Allow AgentTeams convention files\n${entry}\n`, 'utf-8');
+  } else {
+    writeFileSync(geminiIgnorePath, `# Allow AgentTeams convention files\n${entry}\n`, 'utf-8');
+  }
+}
+
 function generateAgentEntryPointFiles(cwd: string, selectedFiles: string[]): AgentFileEntry[] {
   if (selectedFiles.length === 0) {
     return [];
@@ -361,6 +378,9 @@ export async function executeInitCommand(options?: InitOptions): Promise<InitRes
     await conventionDownload({ cwd, config });
     ensureGitignore(cwd);
     const selectedFiles = await promptAgentFileSelection();
+    if (selectedFiles.includes('GEMINI.md')) {
+      ensureGeminiIgnore(cwd);
+    }
     const agentFiles = generateAgentEntryPointFiles(cwd, selectedFiles);
 
     return {
