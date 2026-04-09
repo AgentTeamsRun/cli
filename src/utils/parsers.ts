@@ -62,8 +62,8 @@ export function stripFrontmatter(content: string): string {
 }
 
 export function ensureUrlProtocol(url: string): string {
-  if (/^https?:\/\//i.test(url)) return url;
-  return `https://${url}`;
+  const withProtocol = /^https?:\/\//i.test(url) ? url : `https://${url}`;
+  return encodeURI(withProtocol);
 }
 
 export function toSafeFileName(input: string): string {
