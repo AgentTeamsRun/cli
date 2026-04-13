@@ -1,0 +1,2 @@
+export declare function executeHarnessCommand(apiUrl: string, projectId: string, headers: Record<string, string>, action: string, options: Record<string, unknown>): Promise<unknown>;
+//# sourceMappingURL=harness.d.ts.map
