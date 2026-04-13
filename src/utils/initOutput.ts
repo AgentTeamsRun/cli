@@ -56,7 +56,8 @@ export function printInitResult(result: unknown, format: OutputFormat): void {
   console.log('Next steps:');
   console.log('  1. Check the generated agent files (CLAUDE.md, AGENTS.md, etc.)');
   console.log('     If a -example file was created, merge it into your existing file.');
-  console.log('  2. Try saying to your AI agent:');
-  console.log(chalk.cyan('       Analyze the codebase and create conventions.'));
+  console.log('  2. Set up conventions for your project by saying to your AI agent:');
+  console.log(chalk.cyan('       Read .agentteams/platform/convention-setup-guide.md and create conventions for this project.'));
+  console.log('  3. Or try other commands:');
   console.log(chalk.cyan('       Create a plan to improve test coverage for this project.'));
 }
