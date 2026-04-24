@@ -16,13 +16,15 @@ export async function createLinearIssue(
   title: string,
   description?: string,
   state?: string,
-  teamId?: string
+  teamId?: string,
+  parentId?: string
 ): Promise<any> {
   const baseUrl = `${apiUrl}/api/linear/issues`;
   const body: Record<string, string> = { title };
   if (teamId) body.teamId = teamId;
   if (description) body.description = description;
   if (state) body.state = state;
+  if (parentId) body.parentId = parentId;
   const response = await httpClient.post(baseUrl, body, { headers });
   return response.data;
 }
