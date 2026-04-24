@@ -19,7 +19,7 @@ export async function executeLinearCommand(
         throw new Error('--title is required for linear issue create');
       }
 
-      return createLinearIssue(apiUrl, headers, options.title, options.description, options.state, options.teamId);
+      return createLinearIssue(apiUrl, headers, options.title, options.description, options.state, options.teamId, options.parentId);
     }
     case 'issue-update': {
       if (!options.issueId) {

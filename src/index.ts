@@ -731,6 +731,7 @@ linearCommand
   .option('--title <text>', 'Issue title (required for create)')
   .option('--description <text>', 'Issue description (optional, for create)')
   .option('--state <name>', 'Issue state name, e.g. "Done", "Todo" (required for update, optional for create)')
+  .option('--parent-id <id>', 'Linear parent issue UUID for creating a sub-issue (optional, for create)')
   .option('--api-url <url>', 'Override API URL (optional)')
   .option('--api-key <key>', 'Override API key (optional)')
   .option('--project-id <id>', 'Override project ID (optional)')
@@ -753,6 +754,7 @@ linearCommand
         title: options.title,
         description: options.description,
         state: options.state,
+        parentId: options.parentId,
         apiUrl: options.apiUrl,
         apiKey: options.apiKey,
         projectId: options.projectId,
