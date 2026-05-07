@@ -246,6 +246,8 @@ describe('CLI Integration Tests', () => {
         title: 'Plan 1',
         content: 'content',
         priority: 'HIGH',
+        runnerType: 'CLAUDE_CODE',
+        model: 'claude-opus-4-6',
       });
       await executeCommand('plan', 'list', {});
       await executeCommand('plan', 'get', { id: 'plan-1' });
@@ -489,6 +491,8 @@ describe('CLI Integration Tests', () => {
         title: 'Plan 1',
         content: 'Line1\\nLine2',
         interpretEscapes: true,
+        runnerType: 'CLAUDE_CODE',
+        model: 'claude-opus-4-6',
       });
 
       expect(axiosPostSpy).toHaveBeenCalledWith(
@@ -496,6 +500,8 @@ describe('CLI Integration Tests', () => {
         expect.objectContaining({
           title: 'Plan 1',
           content: 'Line1\nLine2',
+          runnerType: 'CLAUDE_CODE',
+          model: 'claude-opus-4-6',
         }),
         { headers: authHeaders() }
       );
@@ -507,6 +513,8 @@ describe('CLI Integration Tests', () => {
       await executeCommand('plan', 'create', {
         title: 'Plan with template',
         template: 'refactor-minimal',
+        runnerType: 'CLAUDE_CODE',
+        model: 'claude-opus-4-6',
       });
 
       expect(axiosPostSpy).toHaveBeenCalledWith(
@@ -525,6 +533,8 @@ describe('CLI Integration Tests', () => {
       await executeCommand('plan', 'create', {
         title: 'Quick plan',
         template: 'quick-minimal',
+        runnerType: 'CLAUDE_CODE',
+        model: 'claude-opus-4-6',
       });
 
       expect(axiosPostSpy).toHaveBeenCalledWith(
@@ -535,6 +545,12 @@ describe('CLI Integration Tests', () => {
         }),
         { headers: authHeaders() }
       );
+    });
+
+    it('plan create: should fail when --runner-type or --model is missing', async () => {
+      await expect(
+        executeCommand('plan', 'create', { title: 'Plan', content: 'body' })
+      ).rejects.toThrow('--runner-type and --model are required');
     });
 
     it('plan update: should interpret \\\\n sequences when interpretEscapes is enabled', async () => {
@@ -590,56 +606,51 @@ describe('CLI Integration Tests', () => {
       );
     });
 
-    it('plan start: should call single lifecycle endpoint', async () => {
+    it('plan start: should call single lifecycle endpoint without runnerType/model', async () => {
       axiosPostSpy.mockResolvedValue({ data: { data: { id: 'plan-1' } } } as any);
 
-      await executeCommand('plan', 'start', { id: 'plan-1', runnerType: 'CLAUDE_CODE', model: 'claude-opus-4-6' });
+      await executeCommand('plan', 'start', { id: 'plan-1' });
 
       expect(axiosPostSpy).toHaveBeenCalledWith(
         `${API_URL}/api/projects/${PROJECT_ID}/plans/plan-1/start`,
-        expect.objectContaining({ assignedTo: 'test-agent', runnerType: 'CLAUDE_CODE', model: 'claude-opus-4-6' }),
+        expect.objectContaining({ assignedTo: 'test-agent' }),
         { headers: authHeaders() }
       );
+      const sentBody = axiosPostSpy.mock.calls[0][1] as Record<string, unknown>;
+      expect(sentBody).not.toHaveProperty('runnerType');
+      expect(sentBody).not.toHaveProperty('model');
     });
 
     it('plan start: should pass custom task to lifecycle endpoint', async () => {
       axiosPostSpy.mockResolvedValue({ data: { data: { id: 'plan-1' } } } as any);
 
-      await executeCommand('plan', 'start', { id: 'plan-1', task: 'Work started custom', runnerType: 'CLAUDE_CODE', model: 'claude-opus-4-6' });
+      await executeCommand('plan', 'start', { id: 'plan-1', task: 'Work started custom' });
 
       expect(axiosPostSpy).toHaveBeenCalledWith(
         `${API_URL}/api/projects/${PROJECT_ID}/plans/plan-1/start`,
-        expect.objectContaining({ assignedTo: 'test-agent', task: 'Work started custom', runnerType: 'CLAUDE_CODE', model: 'claude-opus-4-6' }),
+        expect.objectContaining({ assignedTo: 'test-agent', task: 'Work started custom' }),
         { headers: authHeaders() }
       );
-    });
-
-    it('plan start: should fail when --runner-type or --model is missing', async () => {
-      await expect(executeCommand('plan', 'start', { id: 'plan-1' })).rejects.toThrow('--runner-type and --model are required');
     });
 
     it('plan start: should fail when lifecycle endpoint fails', async () => {
       axiosPostSpy.mockRejectedValue(new Error('start failed'));
 
-      await expect(executeCommand('plan', 'start', { id: 'plan-1', runnerType: 'CLAUDE_CODE', model: 'claude-opus-4-6' })).rejects.toThrow('start failed');
+      await expect(executeCommand('plan', 'start', { id: 'plan-1' })).rejects.toThrow('start failed');
 
       expect(axiosPostSpy).toHaveBeenCalledTimes(1);
     });
 
-    it('plan finish: should call single lifecycle endpoint', async () => {
+    it('plan finish: should call single lifecycle endpoint without requiring runnerType/model', async () => {
       axiosPostSpy.mockResolvedValue({ data: { data: { id: 'plan-1' } } } as any);
 
-      await executeCommand('plan', 'finish', { id: 'plan-1', runnerType: 'CLAUDE_CODE', model: 'claude-opus-4-6' });
+      await executeCommand('plan', 'finish', { id: 'plan-1' });
 
       expect(axiosPostSpy).toHaveBeenCalledWith(
         `${API_URL}/api/projects/${PROJECT_ID}/plans/plan-1/finish`,
-        { runnerType: 'CLAUDE_CODE', model: 'claude-opus-4-6' },
+        {},
         { headers: authHeaders() }
       );
-    });
-
-    it('plan finish: should fail when --runner-type or --model is missing', async () => {
-      await expect(executeCommand('plan', 'finish', { id: 'plan-1' })).rejects.toThrow('--runner-type and --model are required');
     });
 
     it('plan finish: should include completion report when report file is provided', async () => {
@@ -1718,7 +1729,7 @@ describe('CLI Integration Tests', () => {
 
     it('should validate required options for updated contracts', async () => {
       await expect(
-        executeCommand('plan', 'create', { title: 'no desc' })
+        executeCommand('plan', 'create', { title: 'no desc', runnerType: 'CLAUDE_CODE', model: 'claude-opus-4-6' })
       ).rejects.toThrow('--content, --file, or --template is required for plan create');
       await expect(
         executeCommand('comment', 'create', { planId: 'plan-1', content: 'x' })

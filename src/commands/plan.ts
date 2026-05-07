@@ -221,9 +221,6 @@ export async function executePlanCommand(
     }
     case 'start': {
       if (!options.id) throw new Error('--id is required for plan start');
-      if (!options.runnerType || !options.model) {
-        throw new Error('--runner-type and --model are required for plan start.');
-      }
       const assignAgent = (options.agent as string | undefined)
         ?? (options.defaultCreatedBy as string | undefined);
 
@@ -233,7 +230,7 @@ export async function executePlanCommand(
 
       const startGitInfo = options.git === false ? {} : collectGitMetrics();
 
-      const body: { assignedTo?: string; task?: string; startCommit?: string; startBranch?: string; runnerType?: string; model?: string } = {
+      const body: { assignedTo?: string; task?: string; startCommit?: string; startBranch?: string } = {
         assignedTo: assignAgent,
       };
       if (options.task) {
@@ -244,12 +241,6 @@ export async function executePlanCommand(
       }
       if (startGitInfo.branchName) {
         body.startBranch = startGitInfo.branchName;
-      }
-      if (options.runnerType) {
-        body.runnerType = options.runnerType;
-      }
-      if (options.model) {
-        body.model = options.model;
       }
 
       const result = await withSpinner(
@@ -262,9 +253,6 @@ export async function executePlanCommand(
     }
     case 'finish': {
       if (!options.id) throw new Error('--id is required for plan finish');
-      if (!options.runnerType || !options.model) {
-        throw new Error('--runner-type and --model are required for plan finish.');
-      }
 
       let reportContent: string | undefined;
 
@@ -371,6 +359,9 @@ export async function executePlanCommand(
     }
     case 'create': {
       if (!options.title) throw new Error('--title is required for plan create');
+      if (!options.runnerType || !options.model) {
+        throw new Error('--runner-type and --model are required for plan create.');
+      }
 
       let content = options.content;
       const hasExplicitContent = typeof options.content === 'string' && options.content.trim().length > 0;
@@ -413,6 +404,8 @@ export async function executePlanCommand(
           priority: options.priority ?? 'MEDIUM',
           repositoryId: options.repositoryId ?? options.defaultRepositoryId,
           status: 'BACKLOG',
+          runnerType: options.runnerType,
+          model: options.model,
         }),
         'Plan created',
       );
@@ -608,6 +601,9 @@ export async function executePlanCommand(
     }
     case 'quick': {
       if (!options.title) throw new Error('--title is required for plan quick');
+      if (!options.runnerType || !options.model) {
+        throw new Error('--runner-type and --model are required for plan quick.');
+      }
 
       const assignAgent = (options.agent as string | undefined)
         ?? (options.defaultCreatedBy as string | undefined);
@@ -649,6 +645,8 @@ export async function executePlanCommand(
           priority,
           repositoryId: options.repositoryId ?? options.defaultRepositoryId,
           status: 'BACKLOG',
+          runnerType: options.runnerType,
+          model: options.model,
         }),
         'Plan created',
       );
@@ -659,24 +657,16 @@ export async function executePlanCommand(
       }
 
       // 2. Start plan
-      const quickStartBody: { assignedTo: string; runnerType?: string; model?: string } = { assignedTo: assignAgent };
-      if (options.runnerType) quickStartBody.runnerType = options.runnerType;
-      if (options.model) quickStartBody.model = options.model;
-
       await withSpinner(
         'Starting plan...',
-        () => startPlanLifecycle(apiUrl, projectId, headers, planId, quickStartBody),
+        () => startPlanLifecycle(apiUrl, projectId, headers, planId, { assignedTo: assignAgent }),
         'Plan started',
       );
 
       // 3. Finish plan (no completion report for quick plans)
-      const quickFinishBody: { runnerType?: string; model?: string } = {};
-      if (options.runnerType) quickFinishBody.runnerType = options.runnerType;
-      if (options.model) quickFinishBody.model = options.model;
-
       const finishResult = await withSpinner(
         'Finishing plan...',
-        () => finishPlanLifecycle(apiUrl, projectId, headers, planId, quickFinishBody),
+        () => finishPlanLifecycle(apiUrl, projectId, headers, planId, {}),
         'Plan finished',
       );
 
