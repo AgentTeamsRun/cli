@@ -22,7 +22,7 @@ import { getMemberQuota } from '../api/member.js';
 import { checkConventionFreshness } from './convention.js';
 import { buildFreshnessNoticeLines } from './plan.js';
 import { findProjectConfig } from '../utils/config.js';
-import { deleteIfTempFile, toPositiveInteger, toSafeFileName } from '../utils/parsers.js';
+import { deleteIfTempFile, pruneStaleCacheFiles, toPositiveInteger, toSafeFileName } from '../utils/parsers.js';
 import { printFileInfo, withSpinner } from '../utils/spinner.js';
 import { isAxiosError } from 'axios';
 
@@ -72,6 +72,9 @@ export async function executeCoActionCommand(
   if (!options.projectId || typeof options.projectId !== 'string') {
     throw new Error('--project-id is required (or configure AGENTTEAMS_PROJECT_ID / .agentteams/config.json)');
   }
+
+  const root = findProjectRoot();
+  if (root) pruneStaleCacheFiles(root);
 
   switch (action) {
     case 'list': {
@@ -313,10 +316,19 @@ export async function executeCoActionCommand(
           }
 
           const existingFiles = readdirSync(downloadDir).filter((name) => name.endsWith('.md'));
+          for (const existing of existingFiles) {
+            const existingPath = join(downloadDir, existing);
+            const content = readFileSync(existingPath, 'utf-8');
+            const match = content.match(/^coActionId:\s*(.+)$/m);
+            if (match && match[1].trim() === coAction.id) {
+              rmSync(existingPath);
+            }
+          }
+          const remainingFiles = readdirSync(downloadDir).filter((name) => name.endsWith('.md'));
           const idPrefix = coAction.id.slice(0, 8);
           const safeName = toSafeFileName(coAction.title) || 'coaction';
           const baseName = `${safeName}-${idPrefix}`;
-          const used = new Set(existingFiles.map((name) => name.toLowerCase()));
+          const used = new Set(remainingFiles.map((name) => name.toLowerCase()));
           let fileName = `${baseName}.md`;
           let sequence = 2;
           while (used.has(fileName.toLowerCase())) {

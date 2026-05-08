@@ -73,10 +73,14 @@ describe('parsers', () => {
 
     const unlinkSync = jest.fn();
     const existsSync = jest.fn((target: string) => target.includes('.agentteams/cli/temp'));
+    const readdirSync = jest.fn(() => [] as string[]);
+    const statSync = jest.fn(() => ({ mtimeMs: Date.now() }));
 
     (jest as any).unstable_mockModule('node:fs', () => ({
       existsSync,
       unlinkSync,
+      readdirSync,
+      statSync,
     }));
 
     const { deleteIfTempFile } = await import('../src/utils/parsers.js');

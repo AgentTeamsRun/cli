@@ -14,6 +14,7 @@ import {
   toPositiveInteger,
   toSafeFileName,
   deleteIfTempFile,
+  pruneStaleCacheFiles,
 } from '../utils/parsers.js';
 import {
   assignPlan,
@@ -152,6 +153,9 @@ export async function executePlanCommand(
   action: string,
   options: any
 ): Promise<any> {
+  const root = findProjectRoot();
+  if (root) pruneStaleCacheFiles(root);
+
   switch (action) {
     case 'list': {
       await runFreshnessCheckSilent(apiUrl, projectId, headers);
@@ -409,6 +413,7 @@ export async function executePlanCommand(
         }),
         'Plan created',
       );
+      if (options.file) deleteIfTempFile(options.file);
 
       // --origin-issue flag: link origin issues after plan creation
       const originIssueFlags: string[] = Array.isArray(options.originIssue)
@@ -488,11 +493,13 @@ export async function executePlanCommand(
       if (options.type) body.type = options.type;
       if (options.priority) body.priority = options.priority;
 
-      return withSpinner(
+      const updateResult = await withSpinner(
         'Updating plan...',
         () => updatePlan(apiUrl, projectId, headers, options.id, body),
         'Plan updated',
       );
+      if (options.file) deleteIfTempFile(options.file);
+      return updateResult;
     }
     case 'delete': {
       if (!options.id) throw new Error('--id is required for plan delete');
@@ -525,7 +532,16 @@ export async function executePlanCommand(
           }
 
           const existingFiles = readdirSync(activePlanDir).filter((name) => name.endsWith('.md'));
-          const fileName = buildUniquePlanRunbookFileName(plan.title, plan.id, existingFiles);
+          for (const existing of existingFiles) {
+            const existingPath = join(activePlanDir, existing);
+            const content = readFileSync(existingPath, 'utf-8');
+            const match = content.match(/^planId:\s*(.+)$/m);
+            if (match && match[1].trim() === plan.id) {
+              rmSync(existingPath);
+            }
+          }
+          const remainingFiles = readdirSync(activePlanDir).filter((name) => name.endsWith('.md'));
+          const fileName = buildUniquePlanRunbookFileName(plan.title, plan.id, remainingFiles);
           const filePath = join(activePlanDir, fileName);
 
           const frontmatter = [
@@ -650,6 +666,7 @@ export async function executePlanCommand(
         }),
         'Plan created',
       );
+      if (hasQuickFile) deleteIfTempFile(options.file as string);
 
       const planId: string = createResult?.data?.id;
       if (!planId) {

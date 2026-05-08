@@ -9,7 +9,7 @@ import {
 } from '../api/postmortem.js';
 import { findProjectConfig } from '../utils/config.js';
 
-import { deleteIfTempFile, splitCsv, toPositiveInteger, toSafeFileName } from '../utils/parsers.js';
+import { deleteIfTempFile, pruneStaleCacheFiles, splitCsv, toPositiveInteger, toSafeFileName } from '../utils/parsers.js';
 import { printFileInfo, withSpinner } from '../utils/spinner.js';
 
 export async function executePostMortemCommand(
@@ -21,6 +21,9 @@ export async function executePostMortemCommand(
   if (!options.projectId || typeof options.projectId !== 'string') {
     throw new Error('--project-id is required (or configure AGENTTEAMS_PROJECT_ID / .agentteams/config.json)');
   }
+
+  const configPath = findProjectConfig(process.cwd());
+  if (configPath) pruneStaleCacheFiles(resolve(configPath, '..', '..'));
 
   switch (action) {
     case 'list': {

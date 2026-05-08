@@ -4,7 +4,7 @@ import { createReport, deleteReport, getReport, listReports, updateReport } from
 import { collectGitMetrics } from '../utils/git.js';
 import { findProjectConfig } from '../utils/config.js';
 
-import { deleteIfTempFile, toNonEmptyString, toNonNegativeInteger, toPositiveInteger, toSafeFileName } from '../utils/parsers.js';
+import { deleteIfTempFile, pruneStaleCacheFiles, toNonEmptyString, toNonNegativeInteger, toPositiveInteger, toSafeFileName } from '../utils/parsers.js';
 import { printFileInfo, withSpinner } from '../utils/spinner.js';
 
 
@@ -17,6 +17,9 @@ export async function executeReportCommand(
   if (!options.projectId || typeof options.projectId !== 'string') {
     throw new Error('--project-id is required (or configure AGENTTEAMS_PROJECT_ID / .agentteams/config.json)');
   }
+
+  const configPath = findProjectConfig(process.cwd());
+  if (configPath) pruneStaleCacheFiles(resolve(configPath, '..', '..'));
 
   switch (action) {
     case 'list': {

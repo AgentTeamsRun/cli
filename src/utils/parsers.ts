@@ -1,5 +1,8 @@
-import { existsSync, unlinkSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { existsSync, readdirSync, statSync, unlinkSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+
+const STALE_CACHE_AGE_MS = 3 * 24 * 60 * 60 * 1000;
+const CACHE_DIRS = ['active-plan', 'active-coaction', 'temp'] as const;
 
 export function splitCsv(value: string): string[] {
   if (typeof value !== 'string') {
@@ -86,6 +89,34 @@ export function deleteIfTempFile(fileInput: string): void {
       unlinkSync(resolved);
     } catch {
       // 삭제 실패는 무시 (읽기 전용 파일시스템 등 예외 상황)
+    }
+  }
+}
+
+/**
+ * .agentteams/cli/{active-plan,active-coaction,temp} 안에서 mtime이 3일 초과된
+ * .md 파일을 best-effort로 정리합니다. 디렉토리/파일 접근 실패는 모두 무시합니다.
+ */
+export function pruneStaleCacheFiles(projectRoot: string): void {
+  const cutoff = Date.now() - STALE_CACHE_AGE_MS;
+  for (const sub of CACHE_DIRS) {
+    const dir = join(projectRoot, '.agentteams', 'cli', sub);
+    if (!existsSync(dir)) continue;
+    let files: string[];
+    try {
+      files = readdirSync(dir).filter((f) => f.endsWith('.md'));
+    } catch {
+      continue;
+    }
+    for (const file of files) {
+      const filePath = join(dir, file);
+      try {
+        if (statSync(filePath).mtimeMs < cutoff) {
+          unlinkSync(filePath);
+        }
+      } catch {
+        // 개별 파일 실패는 무시
+      }
     }
   }
 }
