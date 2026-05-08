@@ -14,6 +14,7 @@ export type AuthResult = {
   apiKey: string;
   apiUrl: string;
   configId: string;
+  seedPlanId?: string | null;
 };
 
 type AuthServerResult = {
@@ -92,6 +93,11 @@ function isAuthResult(value: unknown): value is AuthResult {
   }
 
   const candidate = value as Record<string, unknown>;
+  const seedPlanIdValid =
+    candidate.seedPlanId === undefined ||
+    candidate.seedPlanId === null ||
+    typeof candidate.seedPlanId === 'string';
+
   return (
     typeof candidate.teamId === 'string' &&
     typeof candidate.projectId === 'string' &&
@@ -99,7 +105,8 @@ function isAuthResult(value: unknown): value is AuthResult {
     typeof candidate.agentName === 'string' &&
     typeof candidate.apiKey === 'string' &&
     typeof candidate.apiUrl === 'string' &&
-    typeof candidate.configId === 'string'
+    typeof candidate.configId === 'string' &&
+    seedPlanIdValid
   );
 }
 

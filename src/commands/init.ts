@@ -50,6 +50,8 @@ type InitResult = {
   projectId: string;
   agentName: string;
   agentFiles: AgentFileEntry[];
+  seedPlanId: string | null;
+  seedPlanWebUrl: string | null;
 };
 
 function isSshEnvironment(): boolean {
@@ -383,6 +385,11 @@ export async function executeInitCommand(options?: InitOptions): Promise<InitRes
     }
     const agentFiles = generateAgentEntryPointFiles(cwd, selectedFiles);
 
+    const seedPlanId = authResult.seedPlanId ?? null;
+    const seedPlanWebUrl = seedPlanId
+      ? `${AUTH_BASE_URL.replace(/\/+$/, '')}/go?type=plan&id=${seedPlanId}`
+      : null;
+
     return {
       success: true,
       authUrl,
@@ -392,6 +399,8 @@ export async function executeInitCommand(options?: InitOptions): Promise<InitRes
       projectId: authResult.projectId,
       agentName: authResult.agentName,
       agentFiles,
+      seedPlanId,
+      seedPlanWebUrl,
     };
   } catch (error) {
     authSpinner?.fail();
