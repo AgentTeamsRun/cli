@@ -72,7 +72,9 @@ describe('parsers', () => {
     }
 
     const unlinkSync = jest.fn();
-    const existsSync = jest.fn((target: string) => target.includes('.agentteams/cli/temp'));
+    const existsSync = jest.fn((target: string) =>
+      target.replace(/\\/g, '/').includes('.agentteams/cli/temp')
+    );
     const readdirSync = jest.fn(() => [] as string[]);
     const statSync = jest.fn(() => ({ mtimeMs: Date.now() }));
 
@@ -89,6 +91,8 @@ describe('parsers', () => {
     deleteIfTempFile('/tmp/project/src/report.md');
 
     expect(unlinkSync).toHaveBeenCalledTimes(1);
-    expect(unlinkSync).toHaveBeenCalledWith(expect.stringContaining('.agentteams/cli/temp/report.md'));
+    expect(unlinkSync).toHaveBeenCalledWith(
+      expect.stringMatching(/\.agentteams[/\\]cli[/\\]temp[/\\]report\.md$/)
+    );
   });
 });

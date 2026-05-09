@@ -1,3 +1,4 @@
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals';
 
 describe('updateCheck', () => {
@@ -72,7 +73,9 @@ describe('updateCheck', () => {
 
     const mkdirSync = jest.fn();
     const writeFileSync = jest.fn();
-    const existsSync = jest.fn((target: string) => !target.endsWith('/.agentteams'));
+    const existsSync = jest.fn((target: string) =>
+      !target.replace(/\\/g, '/').endsWith('/.agentteams')
+    );
 
     (jest as any).unstable_mockModule('node:fs', () => ({
       __esModule: true,
@@ -99,9 +102,9 @@ describe('updateCheck', () => {
 
     writeCache({ lastCheck: 123, latestVersion: '0.2.0' });
 
-    expect(mkdirSync).toHaveBeenCalledWith('/mock-home/.agentteams', { recursive: true });
+    expect(mkdirSync).toHaveBeenCalledWith(join('/mock-home', '.agentteams'), { recursive: true });
     expect(writeFileSync).toHaveBeenCalledWith(
-      '/mock-home/.agentteams/update-check.json',
+      join('/mock-home', '.agentteams', 'update-check.json'),
       JSON.stringify({ lastCheck: 123, latestVersion: '0.2.0' }),
       'utf-8'
     );
