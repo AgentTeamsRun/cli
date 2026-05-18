@@ -1,0 +1,1 @@
+{"version":3,"file":"dependency.d.ts","sourceRoot":"","sources":["../../src/commands/dependency.ts"],"names":[],"mappings":"AAyBA,wBAAsB,cAAc,CAAC,MAAM,EAAE,MAAM,GAAG,OAAO,CAAC,GAAG,CAAC,CAQjE;AAED,wBAAsB,gBAAgB,CACpC,MAAM,EAAE,MAAM,EACd,cAAc,EAAE,MAAM,GACrB,OAAO,CAAC,GAAG,CAAC,CASd;AAED,wBAAsB,gBAAgB,CACpC,MAAM,EAAE,MAAM,EACd,KAAK,EAAE,MAAM,GACZ,OAAO,CAAC,GAAG,CAAC,CAWd"}
