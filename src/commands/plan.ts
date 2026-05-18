@@ -31,6 +31,7 @@ import {
   startPlanLifecycle,
   unlinkOriginIssue,
   updatePlan,
+  uploadPlanHtml,
 } from '../api/plan.js';
 
 function findProjectRoot(): string | null {
@@ -104,6 +105,34 @@ export function buildUniquePlanRunbookFileName(title: string, planId: string, ex
   }
 
   return fileName;
+}
+
+export function readPlanHtmlUploadInput(options: { file?: string; stdin?: boolean }): string {
+  const hasFile = typeof options.file === 'string' && options.file.trim().length > 0;
+  const hasStdin = options.stdin === true;
+
+  if (hasFile && hasStdin) {
+    throw new Error('Use either --file or --stdin for plan upload-html, not both');
+  }
+  if (!hasFile && !hasStdin) {
+    throw new Error('--file or --stdin is required for plan upload-html');
+  }
+
+  const html = hasFile
+    ? (() => {
+      const filePath = resolve(options.file as string);
+      if (!existsSync(filePath)) {
+        throw new Error(`File not found: ${options.file}`);
+      }
+      return readFileSync(filePath, 'utf-8');
+    })()
+    : readFileSync(0, 'utf-8');
+
+  if (html.trim().length === 0) {
+    throw new Error('HTML content is empty');
+  }
+
+  return html;
 }
 
 
@@ -222,6 +251,22 @@ export async function executePlanCommand(
       if (!options.id) throw new Error('--id is required for plan set-status');
       if (!options.status) throw new Error('--status is required for plan set-status');
       return patchPlanStatus(apiUrl, projectId, headers, options.id, options.status);
+    }
+    case 'upload-html': {
+      if (!options.id) throw new Error('--id is required for plan upload-html');
+
+      const html = readPlanHtmlUploadInput({ file: options.file, stdin: options.stdin });
+      if (options.file) printFileInfo(options.file, html);
+
+      return withSpinner(
+        'Uploading plan HTML summary...',
+        () => uploadPlanHtml(apiUrl, projectId, headers, options.id, {
+          html,
+          curationType: 'AI_CURATED',
+          sourceLabel: options.sourceLabel,
+        }),
+        'Plan HTML summary uploaded',
+      );
     }
     case 'start': {
       if (!options.id) throw new Error('--id is required for plan start');

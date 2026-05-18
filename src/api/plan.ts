@@ -211,3 +211,19 @@ export async function unlinkOriginIssue(
   });
   return response.data;
 }
+
+export async function uploadPlanHtml(
+  apiUrl: string,
+  projectId: string,
+  headers: any,
+  id: string,
+  body: {
+    html: string;
+    curationType: 'AI_CURATED';
+    sourceLabel?: string;
+  }
+): Promise<any> {
+  const baseUrl = `${apiUrl}/api/projects/${projectId}/plans`;
+  const response = await httpClient.put(`${baseUrl}/${id}/visualization/html`, body, { headers });
+  return response.data;
+}

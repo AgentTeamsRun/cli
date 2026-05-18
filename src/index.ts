@@ -130,13 +130,15 @@ program
 program
   .command('plan')
   .description('Manage plans')
-  .argument('<action>', 'Action to perform (list, get, show, create, update, delete, assign, download, cleanup, start, finish, quick, status, set-status, link-issue, unlink-issue, list-issues)')
+  .argument('<action>', 'Action to perform (list, get, show, create, update, delete, assign, download, cleanup, start, finish, quick, status, set-status, upload-html, link-issue, unlink-issue, list-issues)')
   .option('--id <id>', 'Plan ID')
   .option('--title <title>', 'Plan title')
   .option('--search <text>', 'Plan title/ID search keyword (list only)')
   .option('--content <content>', 'Plan content (plain text or Tiptap JSON)')
   .option('--interpret-escapes', 'Interpret \\n sequences in --content as newlines (create/update only)', false)
-  .option('--file <path>', 'Read plan content from a local file (create/update)')
+  .option('--file <path>', 'Read plan content from a local file (create/update/upload-html)')
+  .option('--stdin', 'Read plan HTML summary from stdin (upload-html only)', false)
+  .option('--source-label <label>', 'Optional source label for uploaded plan HTML summary')
   .option('--template <name>', 'Plan content template (refactor-minimal, quick-minimal, create only)')
   .option('--status <status>', 'Plan status (BACKLOG, TODO, ASSIGNED, IN_PROGRESS, BLOCKED, DONE, CANCELLED)')
   .option('--type <type>', 'Plan type (FEATURE, BUG_FIX, ISSUE, REFACTOR, CHORE)')
@@ -182,6 +184,8 @@ program
         content: options.content,
         interpretEscapes: options.interpretEscapes,
         file: options.file,
+        stdin: options.stdin,
+        sourceLabel: options.sourceLabel,
         template: options.template,
         status: options.status,
         type: options.type,

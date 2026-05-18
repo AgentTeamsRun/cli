@@ -1,5 +1,8 @@
 import { describe, it, expect } from '@jest/globals';
-import { buildFreshnessNoticeLines, buildUniquePlanRunbookFileName } from '../src/commands/plan.js';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { buildFreshnessNoticeLines, buildUniquePlanRunbookFileName, readPlanHtmlUploadInput } from '../src/commands/plan.js';
 
 
 describe('buildFreshnessNoticeLines', () => {
@@ -59,5 +62,34 @@ describe('buildUniquePlanRunbookFileName', () => {
     expect(f1).toBe('plan-aaaaaaaa.md');
     expect(f2).toBe('plan-bbbbbbbb.md');
     expect(f1).not.toBe(f2);
+  });
+});
+
+describe('readPlanHtmlUploadInput', () => {
+  it('reads non-empty HTML from --file', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'agentteams-plan-html-'));
+    const file = join(dir, 'summary.html');
+    try {
+      writeFileSync(file, '<main>Summary</main>', 'utf-8');
+
+      expect(readPlanHtmlUploadInput({ file })).toBe('<main>Summary</main>');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects ambiguous or empty upload input', () => {
+    expect(() => readPlanHtmlUploadInput({})).toThrow('--file or --stdin is required');
+    expect(() => readPlanHtmlUploadInput({ file: 'summary.html', stdin: true })).toThrow('Use either --file or --stdin');
+
+    const dir = mkdtempSync(join(tmpdir(), 'agentteams-plan-html-'));
+    const file = join(dir, 'empty.html');
+    try {
+      writeFileSync(file, '   ', 'utf-8');
+
+      expect(() => readPlanHtmlUploadInput({ file })).toThrow('HTML content is empty');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
