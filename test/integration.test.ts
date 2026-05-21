@@ -1889,15 +1889,15 @@ describe('CLI Integration Tests', () => {
         expect((result as any).data[0].entityType).toBe('PLAN');
       });
 
-      it('should pass types filter as array params', async () => {
+      it('should pass types filter as repeated params', async () => {
         axiosGetSpy.mockResolvedValueOnce({
           data: { data: [], meta: { total: 0, truncatedByTokenBudget: false } },
         });
 
         await executeCommand('search', '', { query: 'test', types: 'PLAN,CO_ACTION' });
         const calledUrl = axiosGetSpy.mock.calls[0]![0] as string;
-        expect(calledUrl).toContain('types%5B%5D=PLAN');
-        expect(calledUrl).toContain('types%5B%5D=CO_ACTION');
+        expect(calledUrl).toContain('types=PLAN');
+        expect(calledUrl).toContain('types=CO_ACTION');
       });
 
       it('should throw when query is missing', async () => {

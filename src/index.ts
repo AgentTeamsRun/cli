@@ -742,9 +742,9 @@ program
 
 program
   .command('search')
-  .description('Search across all entity types (plans, co-actions, reports, post-mortems, conventions)')
+  .description('Search across all entity types (plans, co-actions, reports, post-mortems, conventions, code reviews)')
   .option('--query <text>', 'Search query (required)')
-  .option('--types <types>', 'Comma-separated entity types to filter (PLAN, CO_ACTION, COMPLETION_REPORT, POST_MORTEM, CONVENTION)')
+  .option('--types <types>', 'Comma-separated entity types to filter (PLAN, CO_ACTION, COMPLETION_REPORT, POST_MORTEM, CONVENTION, CODE_REVIEW)')
   .option('--limit <n>', 'Max results (1-100, default: 20)')
   .option('--max-tokens <n>', 'Token budget for response')
   .option('--api-url <url>', 'Override API URL (optional)')
