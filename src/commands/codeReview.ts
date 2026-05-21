@@ -49,6 +49,11 @@ export async function executeCodeReviewCommand(
     case 'create': {
       const title = toNonEmptyString(options.title);
       if (!title) throw new Error('--title is required for code-review create');
+      const runnerType = toNonEmptyString(options.runnerType);
+      const model = toNonEmptyString(options.model);
+      if (!runnerType || !model) {
+        throw new Error('--runner-type and --model are required for code-review create');
+      }
 
       const targetType = toNonEmptyString(options.targetType) ?? 'LOCAL_DIFF';
       const diffSummary = toNonEmptyString(options.diffSummary) ?? readOptionalFile(options.diffFile);
@@ -69,8 +74,8 @@ export async function executeCodeReviewCommand(
       if (diffSummary) body.diffSummary = diffSummary;
       if (testSummary) body.testSummary = testSummary;
       if (options.reviewerContext) body.reviewerContext = options.reviewerContext;
-      if (options.runnerType) body.runnerType = options.runnerType;
-      if (options.model) body.model = options.model;
+      body.runnerType = runnerType;
+      body.model = model;
       if (options.recommendationReason) body.recommendationReason = options.recommendationReason;
 
       return withSpinner(

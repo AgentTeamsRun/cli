@@ -1533,6 +1533,8 @@ describe('CLI Integration Tests', () => {
           sourcePlanId: 'plan-1',
           diffFile,
           reviewerContext: 'Independent review session',
+          runnerType: 'CODEX',
+          model: 'gpt-5-codex',
         });
         await executeCommand('code-review', 'create-plan', {
           id: 'review-1',
@@ -1554,6 +1556,8 @@ describe('CLI Integration Tests', () => {
             sourcePlanId: 'plan-1',
             diffSummary: 'Changed auth route permission checks',
             reviewerContext: 'Independent review session',
+            runnerType: 'CODEX',
+            model: 'gpt-5-codex',
           }),
           { headers: authHeaders() }
         );
@@ -1570,6 +1574,31 @@ describe('CLI Integration Tests', () => {
       } finally {
         rmSync(reviewDir, { recursive: true, force: true });
       }
+    });
+
+    it('code-review create: should require runner snapshot and include it in request body', async () => {
+      axiosPostSpy.mockResolvedValue({ data: { data: { id: 'review-1' } } } as any);
+
+      await expect(
+        executeCommand('code-review', 'create', { title: 'Missing runner snapshot' })
+      ).rejects.toThrow('--runner-type and --model are required for code-review create');
+
+      await executeCommand('code-review', 'create', {
+        title: 'Review cli snapshot',
+        runnerType: 'CLAUDE_CODE',
+        model: 'claude-opus-4-6',
+      });
+
+      expect(axiosPostSpy).toHaveBeenCalledWith(
+        `${API_URL}/api/projects/${PROJECT_ID}/code-reviews`,
+        expect.objectContaining({
+          title: 'Review cli snapshot',
+          targetType: 'LOCAL_DIFF',
+          runnerType: 'CLAUDE_CODE',
+          model: 'claude-opus-4-6',
+        }),
+        { headers: authHeaders() }
+      );
     });
 
     it('report create: should include manual metrics and disable git auto collection with --no-git', async () => {
