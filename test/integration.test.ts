@@ -1517,6 +1517,61 @@ describe('CLI Integration Tests', () => {
       rmSync(reportDir, { recursive: true, force: true });
     });
 
+    it('code-review command: should create review and plan from selected findings', async () => {
+      axiosGetSpy.mockResolvedValue({ data: { data: [] } } as any);
+      axiosPostSpy.mockResolvedValue({ data: { data: { id: 'review-1' } } } as any);
+
+      const reviewDir = mkdtempSync(join(tmpdir(), 'code-review-'));
+      const diffFile = join(reviewDir, 'diff.md');
+      writeFileSync(diffFile, 'Changed auth route permission checks', 'utf-8');
+
+      try {
+        await executeCommand('code-review', 'list', { status: 'COMPLETED', page: '2', pageSize: '5' });
+        await executeCommand('code-review', 'create', {
+          title: 'Review auth route',
+          targetType: 'LOCAL_DIFF',
+          sourcePlanId: 'plan-1',
+          diffFile,
+          reviewerContext: 'Independent review session',
+        });
+        await executeCommand('code-review', 'create-plan', {
+          id: 'review-1',
+          title: 'Fix selected findings',
+          findingIds: 'finding-1,finding-2',
+          priority: 'HIGH',
+          type: 'BUG_FIX',
+        });
+
+        expect(axiosGetSpy).toHaveBeenCalledWith(
+          `${API_URL}/api/projects/${PROJECT_ID}/code-reviews`,
+          { headers: authHeaders(), params: { status: 'COMPLETED', page: 2, pageSize: 5 } }
+        );
+        expect(axiosPostSpy).toHaveBeenCalledWith(
+          `${API_URL}/api/projects/${PROJECT_ID}/code-reviews`,
+          expect.objectContaining({
+            title: 'Review auth route',
+            targetType: 'LOCAL_DIFF',
+            sourcePlanId: 'plan-1',
+            diffSummary: 'Changed auth route permission checks',
+            reviewerContext: 'Independent review session',
+          }),
+          { headers: authHeaders() }
+        );
+        expect(axiosPostSpy).toHaveBeenCalledWith(
+          `${API_URL}/api/projects/${PROJECT_ID}/code-reviews/review-1/plans`,
+          expect.objectContaining({
+            title: 'Fix selected findings',
+            findingIds: ['finding-1', 'finding-2'],
+            priority: 'HIGH',
+            type: 'BUG_FIX',
+          }),
+          { headers: authHeaders() }
+        );
+      } finally {
+        rmSync(reviewDir, { recursive: true, force: true });
+      }
+    });
+
     it('report create: should include manual metrics and disable git auto collection with --no-git', async () => {
       axiosPostSpy.mockResolvedValue({ data: { data: { id: 'r2' } } } as any);
 

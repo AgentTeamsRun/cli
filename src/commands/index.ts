@@ -8,6 +8,7 @@ import { executePlanCommand } from './plan.js';
 import { executePostMortemCommand } from './postmortem.js';
 import { executeCoActionCommand } from './coaction.js';
 import { executeReportCommand } from './report.js';
+import { executeCodeReviewCommand } from './codeReview.js';
 import { executeFeedbackCommand } from './feedback.js';
 import { executeSearchCommand } from './search.js';
 import { executeLinearCommand } from './linear.js';
@@ -95,6 +96,15 @@ export async function executeCommand(
         ...options,
         projectId: config.projectId,
         defaultCreatedBy: config.agentName,
+        defaultRepositoryId: config.repositoryId,
+      }));
+    }
+    case 'code-review': {
+      const config = loadRequiredConfig(buildConfigOverrides(options));
+      const { apiUrl, headers } = resolveApiContext(config);
+      return withApiErrorContext(apiUrl, () => executeCodeReviewCommand(apiUrl, config.projectId, headers, action, {
+        ...options,
+        projectId: config.projectId,
         defaultRepositoryId: config.repositoryId,
       }));
     }

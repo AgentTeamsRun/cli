@@ -360,6 +360,97 @@ program
   });
 
 program
+  .command('code-review')
+  .description('Manage independent code reviews')
+  .argument('<action>', 'Action to perform (list, get, show, create, create-plan)')
+  .option('--id <id>', 'Code review ID')
+  .option('--title <title>', 'Code review or generated plan title')
+  .option('--target-type <type>', 'Review target type (BRANCH_DIFF, GITHUB_PR, GITLAB_MR, LOCAL_DIFF, UPLOADED_DIFF, COMMIT_RANGE)')
+  .option('--target-ref <ref>', 'Target reference such as branch, PR URL, MR URL, or commit range')
+  .option('--repository-id <id>', 'Repository ID')
+  .option('--source-plan-id <id>', 'Source plan ID')
+  .option('--source-completion-report-id <id>', 'Source completion report ID')
+  .option('--source-commit-start <hash>', 'Source commit range start')
+  .option('--source-commit-end <hash>', 'Source commit range end')
+  .option('--source-branch-name <name>', 'Source branch name')
+  .option('--base-branch-name <name>', 'Base branch name')
+  .option('--diff-summary <text>', 'Diff summary text')
+  .option('--diff-file <path>', 'Read diff summary from a local file')
+  .option('--test-summary <text>', 'Verification summary text')
+  .option('--test-file <path>', 'Read verification summary from a local file')
+  .option('--reviewer-context <text>', 'Reviewer context or instructions')
+  .option('--recommendation-reason <text>', 'Why this review is recommended')
+  .option('--finding-ids <ids>', 'Comma-separated finding IDs for create-plan')
+  .option('--priority <priority>', 'Generated plan priority (LOW, MEDIUM, HIGH)')
+  .option('--type <type>', 'Generated plan type (FEATURE, BUG_FIX, ISSUE, REFACTOR, CHORE)')
+  .option('--runner-type <type>', 'Runner type snapshot')
+  .option('--model <model>', 'Model ID snapshot')
+  .option('--status <status>', 'Status filter (list only)')
+  .option('--search <text>', 'Search keyword (list only)')
+  .option('--page <number>', 'Page number (list only)')
+  .option('--page-size <number>', 'Page size (list only)')
+  .option('--api-url <url>', 'Override API URL (optional)')
+  .option('--api-key <key>', 'Override API key (optional)')
+  .option('--project-id <id>', 'Override project ID (optional)')
+  .option('--team-id <id>', 'Override team ID (optional)')
+  .option('--agent-name <name>', 'Override agent name (optional)')
+  .option('--format <format>', 'Output format (json, text)')
+  .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
+  .option('--verbose', 'Print full output to stdout (useful with --output-file)', false)
+  .addHelpText('after', CONVENTION_HINT)
+  .action(async (action, options) => {
+    try {
+      const normalizedFormat = normalizeFormat(options.format, 'json');
+      const result = await executeCommand('code-review', action, {
+        id: options.id,
+        title: options.title,
+        targetType: options.targetType,
+        targetRef: options.targetRef,
+        repositoryId: options.repositoryId,
+        sourcePlanId: options.sourcePlanId,
+        sourceCompletionReportId: options.sourceCompletionReportId,
+        sourceCommitStart: options.sourceCommitStart,
+        sourceCommitEnd: options.sourceCommitEnd,
+        sourceBranchName: options.sourceBranchName,
+        baseBranchName: options.baseBranchName,
+        diffSummary: options.diffSummary,
+        diffFile: options.diffFile,
+        testSummary: options.testSummary,
+        testFile: options.testFile,
+        reviewerContext: options.reviewerContext,
+        recommendationReason: options.recommendationReason,
+        findingIds: options.findingIds,
+        priority: options.priority,
+        type: options.type,
+        runnerType: options.runnerType,
+        model: options.model,
+        status: options.status,
+        search: options.search,
+        page: options.page,
+        pageSize: options.pageSize,
+        apiUrl: options.apiUrl,
+        apiKey: options.apiKey,
+        projectId: options.projectId,
+        teamId: options.teamId,
+        agentName: options.agentName,
+      });
+
+      printCommandResult({
+        result,
+        format: normalizedFormat,
+        outputFile: options.outputFile,
+        verbose: options.verbose,
+        resource: 'code-review',
+        action,
+        formatExplicit: typeof options.format === 'string',
+      });
+    } catch (error) {
+      console.error(handleError(error));
+      process.exit(1);
+    }
+  });
+
+program
   .command('postmortem')
   .description('Manage post mortems')
   .argument('<action>', 'Action to perform (list, get, create, update, delete)')
