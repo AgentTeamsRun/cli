@@ -380,6 +380,7 @@ program
   .option('--test-file <path>', 'Read verification summary from a local file')
   .option('--reviewer-context <text>', 'Reviewer context or instructions')
   .option('--recommendation-reason <text>', 'Why this review is recommended')
+  .option('--findings-file <path>', 'Read findings JSON array from a local file (create only)')
   .option('--finding-ids <ids>', 'Comma-separated finding IDs for create-plan')
   .option('--priority <priority>', 'Generated plan priority (LOW, MEDIUM, HIGH)')
   .option('--type <type>', 'Generated plan type (FEATURE, BUG_FIX, ISSUE, REFACTOR, CHORE)')
@@ -419,6 +420,7 @@ program
         testFile: options.testFile,
         reviewerContext: options.reviewerContext,
         recommendationReason: options.recommendationReason,
+        findingsFile: options.findingsFile,
         findingIds: options.findingIds,
         priority: options.priority,
         type: options.type,

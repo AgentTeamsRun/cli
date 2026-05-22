@@ -18,6 +18,39 @@ const readOptionalFile = (file: unknown): string | undefined => {
   return readFileSync(filePath, 'utf-8');
 };
 
+const FINDING_REQUIRED_FIELDS = ['severity', 'title', 'filePath', 'problem', 'impact', 'suggestion'] as const;
+
+const parseFindingsFile = (file: unknown): Array<Record<string, unknown>> | undefined => {
+  const raw = readOptionalFile(file);
+  if (raw === undefined) return undefined;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Invalid findings JSON: ${message}`);
+  }
+
+  if (!Array.isArray(parsed)) {
+    throw new Error('findings file must contain a JSON array');
+  }
+
+  parsed.forEach((item, index) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+      throw new Error(`findings[${index}] must be an object`);
+    }
+    for (const field of FINDING_REQUIRED_FIELDS) {
+      const value = (item as Record<string, unknown>)[field];
+      if (value === undefined || value === null || value === '') {
+        throw new Error(`findings[${index}] missing required field: ${field}`);
+      }
+    }
+  });
+
+  return parsed as Array<Record<string, unknown>>;
+};
+
 export async function executeCodeReviewCommand(
   apiUrl: string,
   projectId: string,
@@ -58,6 +91,7 @@ export async function executeCodeReviewCommand(
       const targetType = toNonEmptyString(options.targetType) ?? 'LOCAL_DIFF';
       const diffSummary = toNonEmptyString(options.diffSummary) ?? readOptionalFile(options.diffFile);
       const testSummary = toNonEmptyString(options.testSummary) ?? readOptionalFile(options.testFile);
+      const findings = parseFindingsFile(options.findingsFile);
 
       const body: Record<string, unknown> = {
         title,
@@ -77,6 +111,7 @@ export async function executeCodeReviewCommand(
       body.runnerType = runnerType;
       body.model = model;
       if (options.recommendationReason) body.recommendationReason = options.recommendationReason;
+      if (findings && findings.length > 0) body.findings = findings;
 
       return withSpinner(
         'Creating code review...',
