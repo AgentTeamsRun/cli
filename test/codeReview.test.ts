@@ -82,9 +82,9 @@ describe('code-review create with --findings-file', () => {
     expect(body).not.toHaveProperty('findings');
   });
 
-  it('omits findings when the file contains an empty array', async () => {
+  it('forwards an explicit empty findings array when the file contains an empty array', async () => {
     axiosPostSpy.mockResolvedValueOnce({
-      data: { data: { id: 'cdr_abc', status: 'PENDING' } },
+      data: { data: { id: 'cdr_abc', status: 'COMPLETED' } },
     } as any);
 
     const findingsFile = writeFindings('[]');
@@ -96,7 +96,8 @@ describe('code-review create with --findings-file', () => {
 
     expect(axiosPostSpy).toHaveBeenCalledTimes(1);
     const [, body] = axiosPostSpy.mock.calls[0];
-    expect(body).not.toHaveProperty('findings');
+    expect(body).toHaveProperty('findings');
+    expect((body as { findings: unknown }).findings).toEqual([]);
   });
 
   it('throws when the findings file is not valid JSON', async () => {

@@ -111,7 +111,7 @@ export async function executeCodeReviewCommand(
       body.runnerType = runnerType;
       body.model = model;
       if (options.recommendationReason) body.recommendationReason = options.recommendationReason;
-      if (findings && findings.length > 0) body.findings = findings;
+      if (findings !== undefined) body.findings = findings;
 
       return withSpinner(
         'Creating code review...',
