@@ -2,6 +2,7 @@ import { executeInitCommand } from './init.js';
 import { executeAgentConfigCommand } from './agentConfigCommand.js';
 import { executeConfigCommand } from './config.js';
 import { executeConventionCommand, executeSyncCommand } from './conventionRouter.js';
+import { executeDocumentCommand } from './document.js';
 import { executeDependencyCommand } from './dependencyCommand.js';
 import { executeCommentCommand } from './comment.js';
 import { executePlanCommand } from './plan.js';
@@ -87,6 +88,11 @@ export async function executeCommand(
       }
 
       throw new Error(`Unknown resource: ${resource}`);
+    }
+    case 'document': {
+      const config = loadRequiredConfig(buildConfigOverrides(options));
+      const { apiUrl, headers } = resolveApiContext(config);
+      return withApiErrorContext(apiUrl, () => executeDocumentCommand(apiUrl, config.projectId, headers, action, options));
     }
     case 'report': {
       const config = loadRequiredConfig(buildConfigOverrides(options));

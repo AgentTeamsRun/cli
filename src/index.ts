@@ -661,6 +661,46 @@ program
   });
 
 program
+  .command('document')
+  .description('Manage project documents')
+  .argument('<action>', 'Action to perform (create, update, download, list, delete)')
+  .option('--id <id>', 'Document ID')
+  .option('--title <title>', 'Document title')
+  .option('--file <path>', 'Read markdown body from a local file')
+  .option('--tags <tags>', 'Comma-separated free-form tags')
+  .option('--query <q>', 'Search query (list only)')
+  .option('--limit <n>', 'Max results per page, alias for --page-size (list only)')
+  .option('--page <number>', 'Page number (list only)')
+  .option('--page-size <number>', 'Page size (list only)')
+  .option('--api-url <url>', 'Override API URL (optional)')
+  .option('--api-key <key>', 'Override API key (optional)')
+  .option('--project-id <id>', 'Override project ID (optional)')
+  .option('--team-id <id>', 'Override team ID (optional)')
+  .option('--agent-name <name>', 'Override agent name (optional)')
+  .option('--format <format>', 'Output format (json, text)', 'text')
+  .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
+  .option('--verbose', 'Print full output to stdout (useful with --output-file)', false)
+  .addHelpText('after', CONVENTION_HINT)
+  .action(async (action, options) => {
+    try {
+      const result = await executeCommand('document', action, options);
+
+      printCommandResult({
+        result,
+        format: normalizeFormat(options.format, 'text'),
+        outputFile: options.outputFile,
+        verbose: options.verbose,
+        resource: 'document',
+        action,
+        formatExplicit: typeof options.format === 'string',
+      });
+    } catch (error) {
+      console.error(handleError(error));
+      process.exit(1);
+    }
+  });
+
+program
   .command('dependency')
   .description('Manage plan dependencies')
   .argument('<action>', 'Action to perform (list, create, delete)')
