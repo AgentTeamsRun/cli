@@ -160,6 +160,7 @@ program
   .option('--pull-request-id <id>', 'Pull request ID (plan finish, manual only)')
   .option('--runner-type <type>', 'Runner type snapshot (plan start/finish)')
   .option('--model <model>', 'Model ID snapshot (plan start/finish)')
+  .option('--fast', 'Request fast mode for the selected model when supported', false)
   .option('--no-git', 'Disable git metrics auto-collection (plan finish)')
   .option('--page <number>', 'Page number (list only)')
   .option('--page-size <number>', 'Page size (list only)')
@@ -217,6 +218,7 @@ program
         includeDeps: options.includeDeps,
         runnerType: options.runnerType,
         model: options.model,
+        fast: options.fast,
         format: normalizedFormat,
         formatExplicit: typeof options.format === 'string',
       });

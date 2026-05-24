@@ -51,6 +51,7 @@ export async function createPlan(
     status: 'BACKLOG';
     runnerType?: string;
     model?: string;
+    fastMode?: boolean;
   }
 ): Promise<any> {
   const baseUrl = `${apiUrl}/api/projects/${projectId}/plans`;
@@ -94,6 +95,7 @@ export async function startPlanLifecycle(
     startBranch?: string;
     runnerType?: string;
     model?: string;
+    fastMode?: boolean;
   }
 ): Promise<any> {
   const baseUrl = `${apiUrl}/api/projects/${projectId}/plans`;
@@ -110,6 +112,7 @@ export async function finishPlanLifecycle(
     task?: string;
     runnerType?: string;
     model?: string;
+    fastMode?: boolean;
     completionReport?: {
       repositoryId?: string;
       title: string;

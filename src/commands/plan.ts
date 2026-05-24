@@ -279,7 +279,7 @@ export async function executePlanCommand(
 
       const startGitInfo = options.git === false ? {} : collectGitMetrics();
 
-      const body: { assignedTo?: string; task?: string; startCommit?: string; startBranch?: string } = {
+      const body: { assignedTo?: string; task?: string; startCommit?: string; startBranch?: string; runnerType?: string; model?: string; fastMode?: boolean } = {
         assignedTo: assignAgent,
       };
       if (options.task) {
@@ -290,6 +290,15 @@ export async function executePlanCommand(
       }
       if (startGitInfo.branchName) {
         body.startBranch = startGitInfo.branchName;
+      }
+      if (options.runnerType) {
+        body.runnerType = options.runnerType;
+      }
+      if (options.model) {
+        body.model = options.model;
+      }
+      if (options.fast === true) {
+        body.fastMode = true;
       }
 
       const result = await withSpinner(
@@ -321,6 +330,7 @@ export async function executePlanCommand(
         task?: string;
         runnerType?: string;
         model?: string;
+        fastMode?: boolean;
         completionReport?: {
           title: string;
           content: string;
@@ -346,6 +356,9 @@ export async function executePlanCommand(
       }
       if (options.model) {
         body.model = options.model;
+      }
+      if (options.fast === true) {
+        body.fastMode = true;
       }
 
       if (includeCompletionReport) {
@@ -455,6 +468,7 @@ export async function executePlanCommand(
           status: 'BACKLOG',
           runnerType: options.runnerType,
           model: options.model,
+          fastMode: options.fast === true,
         }),
         'Plan created',
       );
@@ -708,6 +722,7 @@ export async function executePlanCommand(
           status: 'BACKLOG',
           runnerType: options.runnerType,
           model: options.model,
+          fastMode: options.fast === true,
         }),
         'Plan created',
       );
@@ -721,7 +736,7 @@ export async function executePlanCommand(
       // 2. Start plan
       await withSpinner(
         'Starting plan...',
-        () => startPlanLifecycle(apiUrl, projectId, headers, planId, { assignedTo: assignAgent }),
+        () => startPlanLifecycle(apiUrl, projectId, headers, planId, { assignedTo: assignAgent, runnerType: options.runnerType, model: options.model, fastMode: options.fast === true }),
         'Plan started',
       );
 
