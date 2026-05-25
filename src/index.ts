@@ -280,10 +280,8 @@ program
 program
   .command('attachment')
   .description('Manage daemon trigger attachments')
-  .argument('<action>', 'Action to perform (upload, list, delete)')
+  .argument('<action>', 'Action to perform (list)')
   .option('--trigger-id <id>', 'Daemon trigger ID')
-  .option('--file <path>', 'File path to upload')
-  .option('--id <id>', 'Attachment ID')
   .option('--api-url <url>', 'Override API URL (optional)')
   .option('--api-key <key>', 'Override API key (optional)')
   .option('--project-id <id>', 'Override project ID (optional)')
@@ -298,8 +296,6 @@ program
       const normalizedFormat = normalizeFormat(options.format, 'json');
       const result = await executeCommand('attachment', action, {
         triggerId: options.triggerId,
-        file: options.file,
-        id: options.id,
         apiUrl: options.apiUrl,
         apiKey: options.apiKey,
         projectId: options.projectId,
