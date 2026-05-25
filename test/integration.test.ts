@@ -1894,10 +1894,10 @@ describe('CLI Integration Tests', () => {
           data: { data: [], meta: { total: 0, truncatedByTokenBudget: false } },
         });
 
-        await executeCommand('search', '', { query: 'test', types: 'PLAN,CO_ACTION' });
+        await executeCommand('search', '', { query: 'test', types: 'PLAN,DOCUMENT' });
         const calledUrl = axiosGetSpy.mock.calls[0]![0] as string;
         expect(calledUrl).toContain('types=PLAN');
-        expect(calledUrl).toContain('types=CO_ACTION');
+        expect(calledUrl).toContain('types=DOCUMENT');
       });
 
       it('should throw when query is missing', async () => {
