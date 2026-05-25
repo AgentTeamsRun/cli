@@ -13,6 +13,7 @@ import { executeCodeReviewCommand } from './codeReview.js';
 import { executeFeedbackCommand } from './feedback.js';
 import { executeSearchCommand } from './search.js';
 import { executeLinearCommand } from './linear.js';
+import { executeAttachmentCommand } from './attachment.js';
 import { loadConfig } from '../utils/config.js';
 import { attachErrorContext } from '../utils/errors.js';
 import type { Config } from '../types/index.js';
@@ -153,6 +154,11 @@ export async function executeCommand(
       const config = loadRequiredConfig(buildConfigOverrides(options));
       const { apiUrl, headers } = resolveApiContext(config);
       return withApiErrorContext(apiUrl, () => executeLinearCommand(apiUrl, headers, action, options));
+    }
+    case 'attachment': {
+      const config = loadRequiredConfig(buildConfigOverrides(options));
+      const { apiUrl, headers } = resolveApiContext(config);
+      return withApiErrorContext(apiUrl, () => executeAttachmentCommand(apiUrl, headers, action, options));
     }
     default:
       throw new Error(`Unknown resource: ${resource}`);

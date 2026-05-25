@@ -278,6 +278,51 @@ program
   });
 
 program
+  .command('attachment')
+  .description('Manage daemon trigger attachments')
+  .argument('<action>', 'Action to perform (upload, list, delete)')
+  .option('--trigger-id <id>', 'Daemon trigger ID')
+  .option('--file <path>', 'File path to upload')
+  .option('--id <id>', 'Attachment ID')
+  .option('--api-url <url>', 'Override API URL (optional)')
+  .option('--api-key <key>', 'Override API key (optional)')
+  .option('--project-id <id>', 'Override project ID (optional)')
+  .option('--team-id <id>', 'Override team ID (optional)')
+  .option('--agent-name <name>', 'Override agent name (optional)')
+  .option('--format <format>', 'Output format (json, text)', 'json')
+  .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
+  .option('--verbose', 'Print full output to stdout (useful with --output-file)', false)
+  .addHelpText('after', CONVENTION_HINT)
+  .action(async (action, options) => {
+    try {
+      const normalizedFormat = normalizeFormat(options.format, 'json');
+      const result = await executeCommand('attachment', action, {
+        triggerId: options.triggerId,
+        file: options.file,
+        id: options.id,
+        apiUrl: options.apiUrl,
+        apiKey: options.apiKey,
+        projectId: options.projectId,
+        teamId: options.teamId,
+        agentName: options.agentName,
+      });
+
+      printCommandResult({
+        result,
+        format: normalizedFormat,
+        outputFile: options.outputFile,
+        verbose: options.verbose,
+        resource: 'attachment',
+        action,
+        formatExplicit: typeof options.format === 'string',
+      });
+    } catch (error) {
+      console.error(handleError(error));
+      process.exit(1);
+    }
+  });
+
+program
   .command('report')
   .description('Manage completion reports')
   .argument('<action>', 'Action to perform (list, get, create, update, delete)')
