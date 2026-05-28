@@ -362,6 +362,27 @@ Output behavior by default:
 - `--verbose`: always prints full output to stdout.
 - `--output-file <path>`: always writes full output to file and keeps stdout short.
 
+### Plan HTML Preview Hints
+
+The summary for plan create/update can include a `Next:` hint that points to `agentteams plan upload-html`. The hint is a reminder for AI agents to generate an HTML preview that summarizes the plan body and upload it alongside the canonical Markdown/Tiptap content. The CLI never generates or uploads the HTML preview automatically — the canonical source is the plan body, and the preview is a separate human-facing summary.
+
+- `plan create` always emits the hint after the `plan start` hint:
+
+  ```text
+  Next: agentteams plan start --id <plan-id>
+  Next: agentteams plan upload-html --id <plan-id> --file <html-file>  # upload an HTML preview that summarizes the plan body
+  ```
+
+- `plan update` emits the hint only when the request changed the plan body (`--content` or `--file`). Updates that only touch `--status`, `--title`, `--type`, or `--priority` do not emit the hint, since the existing preview is still in sync.
+
+Example upload after generating a preview file:
+
+```bash
+agentteams plan upload-html \
+  --id <plan-id> \
+  --file .agentteams/cli/temp/plan-summary.html
+```
+
 Compatibility note:
 
 - If you need full JSON on stdout for automation, pass `--format json` explicitly.

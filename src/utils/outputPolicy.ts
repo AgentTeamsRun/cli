@@ -9,6 +9,23 @@ export interface OutputPolicyContext {
   verbose?: boolean;
 }
 
+export interface SummaryHints {
+  bodyChanged?: boolean;
+}
+
+export const SUMMARY_HINTS = Symbol.for('agentteams.cli.summaryHints');
+
+export function attachSummaryHints<T>(result: T, hints: SummaryHints): T {
+  if (!result || typeof result !== 'object') return result;
+  Object.defineProperty(result as object, SUMMARY_HINTS, {
+    value: hints,
+    enumerable: false,
+    configurable: true,
+    writable: true,
+  });
+  return result;
+}
+
 const summaryDefaultActions: Record<string, Set<string>> = {
   plan: new Set(['create', 'update', 'start', 'finish']),
   report: new Set(['create', 'update']),
@@ -17,10 +34,22 @@ const summaryDefaultActions: Record<string, Set<string>> = {
   linear: new Set(['comment-create']),
 };
 
-const nextActionHints: Record<string, Record<string, string>> = {
+type HintEntry =
+  | string
+  | ((context: { hints: SummaryHints | undefined }) => string | undefined);
+
+const nextActionHints: Record<string, Record<string, HintEntry[]>> = {
   plan: {
-    create: 'Next: agentteams plan start --id <id>',
-    finish: 'Next: agentteams report create --plan-id <id>',
+    create: [
+      'Next: agentteams plan start --id <id>',
+      'Next: agentteams plan upload-html --id <id> --file <html-file>  # upload an HTML preview that summarizes the plan body',
+    ],
+    update: [
+      ({ hints }) => hints?.bodyChanged
+        ? 'Next: agentteams plan upload-html --id <id> --file <html-file>  # plan body changed; regenerate and upload the HTML preview'
+        : undefined,
+    ],
+    finish: ['Next: agentteams report create --plan-id <id>'],
   },
 };
 
@@ -78,28 +107,43 @@ export function createSummaryLines(result: unknown, context: Pick<OutputPolicyCo
     lines.push(`planWebUrl: ${planWebUrl}`);
   }
 
-  const hint = resolveNextActionHint(id, result, context);
-  if (hint) {
-    lines.push(hint);
+  const hintLines = resolveNextActionHints(id, result, context);
+  for (const hintLine of hintLines) {
+    lines.push(hintLine);
   }
 
   return lines;
 }
 
-function resolveNextActionHint(
+function resolveNextActionHints(
   id: string | undefined,
   result: unknown,
   context: Pick<OutputPolicyContext, 'resource' | 'action'>
-): string | undefined {
-  if (!context.resource || !context.action) return undefined;
+): string[] {
+  if (!context.resource || !context.action) return [];
 
-  // plan finish: completionReport가 이미 생성된 경우 힌트 표시 안 함
   if (context.resource === 'plan' && context.action === 'finish') {
     const cr = extractCompletionReportFromResult(result);
-    if (cr !== null && cr !== undefined) return undefined;
+    if (cr !== null && cr !== undefined) return [];
   }
 
   const actionMap = nextActionHints[context.resource];
+  if (!actionMap) return [];
+  const entries = actionMap[context.action];
+  if (!entries) return [];
+
+  const resolvedId = id ?? extractDeepId(result);
+  if (!resolvedId) return [];
+
+  const hints = readSummaryHints(result);
+  const lines: string[] = [];
+  for (const entry of entries) {
+    const template = typeof entry === 'function' ? entry({ hints }) : entry;
+    if (!template) continue;
+    lines.push(template.replace('<id>', resolvedId));
+  }
+  return lines;
+}
 
 function extractCompletionReportFromResult(result: unknown): Record<string, unknown> | null | undefined {
   if (!result || typeof result !== 'object') return undefined;
@@ -112,12 +156,12 @@ function extractCompletionReportFromResult(result: unknown): Record<string, unkn
   if (typeof cr === 'object' && !Array.isArray(cr)) return cr as Record<string, unknown>;
   return undefined;
 }
-  if (!actionMap) return undefined;
-  const template = actionMap[context.action];
-  if (!template) return undefined;
-  const resolvedId = id ?? extractDeepId(result);
-  if (!resolvedId) return undefined;
-  return template.replace('<id>', resolvedId);
+
+function readSummaryHints(result: unknown): SummaryHints | undefined {
+  if (!result || typeof result !== 'object') return undefined;
+  const value = (result as Record<symbol, unknown>)[SUMMARY_HINTS];
+  if (!value || typeof value !== 'object') return undefined;
+  return value as SummaryHints;
 }
 
 function extractDeepId(result: unknown): string | undefined {

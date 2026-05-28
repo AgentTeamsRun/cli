@@ -4,6 +4,7 @@ import { checkConventionFreshness } from './convention.js';
 import { findProjectConfig } from '../utils/config.js';
 import { collectGitMetrics } from '../utils/git.js';
 import { withSpinner, printFileInfo } from '../utils/spinner.js';
+import { attachSummaryHints } from '../utils/outputPolicy.js';
 import { formatPlanWithDependenciesText, mergePlanWithDependencies, normalizeDependencies } from '../utils/planFormat.js';
 import {
   ensureUrlProtocol,
@@ -552,12 +553,15 @@ export async function executePlanCommand(
       if (options.type) body.type = options.type;
       if (options.priority) body.priority = options.priority;
 
+      const bodyChanged = typeof body.content === 'string';
+
       const updateResult = await withSpinner(
         'Updating plan...',
         () => updatePlan(apiUrl, projectId, headers, options.id, body),
         'Plan updated',
       );
       if (options.file) deleteIfTempFile(options.file);
+      attachSummaryHints(updateResult, { bodyChanged });
       return updateResult;
     }
     case 'delete': {
