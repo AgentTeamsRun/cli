@@ -1,3 +1,4 @@
+import { describe, expect, test } from '@jest/globals';
 import { buildAuthorizeUrl, detectOsType } from '../src/commands/init.js';
 
 describe('init helpers', () => {
