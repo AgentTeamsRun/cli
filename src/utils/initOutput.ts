@@ -60,13 +60,14 @@ export function printInitResult(result: unknown, format: OutputFormat): void {
   console.log('     If a -example file was created, merge it into your existing file.');
 
   if (result.seedPlanId) {
+    const seedPlanDisplayId = `agentteams_plan_${result.seedPlanId}`;
     console.log('  2. A "Set Up Project Conventions" plan is queued for this project.');
-    console.log(`     Plan ID:  ${chalk.bold(`plan_${result.seedPlanId}`)}`);
+    console.log(`     Plan ID:  ${chalk.bold(seedPlanDisplayId)}`);
     if (result.seedPlanWebUrl) {
       console.log(`     Open:     ${result.seedPlanWebUrl}`);
     }
     console.log('     Copy & paste to your AI agent:');
-    console.log(chalk.cyan(`       Start plan plan_${result.seedPlanId} and create conventions for this project.`));
+    console.log(chalk.cyan(`       Start plan ${seedPlanDisplayId} and create conventions for this project.`));
   } else {
     console.log('  2. Set up conventions for your project by saying to your AI agent:');
     console.log(chalk.cyan('       Read .agentteams/platform/convention-setup-guide.md and create conventions for this project.'));

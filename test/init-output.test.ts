@@ -74,6 +74,14 @@ describe('printInitResult', () => {
       expect(output).toContain('Check the generated agent files');
       expect(output).toContain('-example');
     });
+
+    it('seed plan ID를 agentteams_ 네임스페이스 prefix로 출력한다', () => {
+      printInitResult({ ...MOCK_INIT_RESULT, seedPlanId: '123e4567-e89b-12d3-a456-426614174000' }, 'text');
+
+      const output = captureOutput(logSpy);
+      expect(output).toContain('agentteams_plan_123e4567-e89b-12d3-a456-426614174000');
+      expect(output).not.toContain('Start plan plan_123e4567-e89b-12d3-a456-426614174000');
+    });
   });
 
   describe('json format', () => {
