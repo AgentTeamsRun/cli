@@ -1869,6 +1869,250 @@ describe('CLI Integration Tests', () => {
       );
     });
 
+    it('document: should map visibility, archive filters, and tag limit to document APIs', async () => {
+      const tempDir = mkdtempSync(join(tmpdir(), 'agentteams-document-'));
+      const filePath = join(tempDir, 'doc.md');
+      writeFileSync(filePath, '# Document body\n', 'utf-8');
+
+      try {
+        axiosPostSpy.mockResolvedValueOnce({
+          data: {
+            data: {
+              id: 'doc-1',
+              title: 'Doc',
+              visibility: 'PRIVATE',
+              tags: ['a'],
+              webUrl: 'https://agentteams.example/documents/doc-1',
+            },
+          },
+        } as any);
+        axiosPutSpy.mockResolvedValueOnce({
+          data: {
+            data: {
+              id: 'doc-1',
+              title: 'Updated',
+              visibility: 'PROJECT',
+              tags: [],
+            },
+          },
+        } as any);
+        axiosGetSpy.mockResolvedValueOnce({
+          data: {
+            data: [
+              {
+                id: 'doc-1',
+                title: 'Doc',
+                visibility: 'PRIVATE',
+                archivedAt: '2026-05-30T00:00:00.000Z',
+              },
+            ],
+          },
+        } as any);
+
+        await executeCommand('document', 'create', {
+          file: filePath,
+          visibility: 'private',
+          tags: 'a',
+        });
+        await executeCommand('document', 'update', {
+          id: 'doc-1',
+          title: 'Updated',
+          visibility: 'project',
+        });
+        const listResult = await executeCommand('document', 'list', {
+          visibility: 'PRIVATE',
+          archived: 'ARCHIVED',
+          page: 2,
+          pageSize: 10,
+        });
+
+        expect(axiosPostSpy).toHaveBeenCalledWith(
+          `${API_URL}/api/projects/${PROJECT_ID}/documents`,
+          {
+            title: 'doc',
+            body: '# Document body\n',
+            tags: ['a'],
+            visibility: 'PRIVATE',
+          },
+          { headers: authHeaders() }
+        );
+        expect(axiosPutSpy).toHaveBeenCalledWith(
+          `${API_URL}/api/projects/${PROJECT_ID}/documents/doc-1`,
+          { title: 'Updated', visibility: 'PROJECT' },
+          { headers: authHeaders() }
+        );
+        expect(axiosGetSpy).toHaveBeenCalledWith(
+          `${API_URL}/api/projects/${PROJECT_ID}/documents`,
+          {
+            headers: authHeaders(),
+            params: {
+              visibility: 'PRIVATE',
+              archived: 'ARCHIVED',
+              page: 2,
+              pageSize: 10,
+            },
+          }
+        );
+        expect(listResult).toContain('visibility: PRIVATE');
+        expect(listResult).toContain('archivedAt: 2026-05-30T00:00:00.000Z');
+        await expect(
+          executeCommand('document', 'create', {
+            file: filePath,
+            tags: Array.from({ length: 21 }, (_, index) => `tag${index}`).join(','),
+          })
+        ).rejects.toThrow('Documents can have up to 20 tags');
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it('document: should map archive and revision actions to document APIs', async () => {
+      axiosPostSpy
+        .mockResolvedValueOnce({
+          data: { data: { id: 'doc-1', title: 'Doc', archivedAt: '2026-05-30T00:00:00.000Z' } },
+        } as any)
+        .mockResolvedValueOnce({
+          data: { data: { id: 'doc-1', title: 'Doc', archivedAt: null } },
+        } as any)
+        .mockResolvedValueOnce({
+          data: { data: { id: 'doc-1', title: 'Restored', visibility: 'PROJECT' } },
+        } as any);
+      axiosGetSpy
+        .mockResolvedValueOnce({
+          data: {
+            data: [
+              {
+                id: 'rev-1',
+                revisionNumber: 3,
+                title: 'Doc',
+                bodyPreview: 'preview',
+                createdAt: '2026-05-30T00:00:00.000Z',
+              },
+            ],
+          },
+        } as any)
+        .mockResolvedValueOnce({
+          data: {
+            data: {
+              id: 'rev-1',
+              revisionNumber: 3,
+              title: 'Doc',
+              bodyPreview: 'preview',
+            },
+          },
+        } as any);
+
+      await executeCommand('document', 'archive', { id: 'doc-1' });
+      await executeCommand('document', 'unarchive', { id: 'doc-1' });
+      const revisions = await executeCommand('document', 'revisions', { id: 'doc-1', limit: 5 });
+      const revision = await executeCommand('document', 'revision-get', { id: 'doc-1', revisionId: 'rev-1' });
+      await executeCommand('document', 'revision-restore', { id: 'doc-1', revisionId: 'rev-1' });
+
+      expect(axiosPostSpy).toHaveBeenNthCalledWith(
+        1,
+        `${API_URL}/api/projects/${PROJECT_ID}/documents/doc-1/archive`,
+        {},
+        { headers: authHeaders() }
+      );
+      expect(axiosPostSpy).toHaveBeenNthCalledWith(
+        2,
+        `${API_URL}/api/projects/${PROJECT_ID}/documents/doc-1/unarchive`,
+        {},
+        { headers: authHeaders() }
+      );
+      expect(axiosGetSpy).toHaveBeenNthCalledWith(
+        1,
+        `${API_URL}/api/projects/${PROJECT_ID}/documents/doc-1/revisions`,
+        { headers: authHeaders(), params: { pageSize: 5 } }
+      );
+      expect(axiosGetSpy).toHaveBeenNthCalledWith(
+        2,
+        `${API_URL}/api/projects/${PROJECT_ID}/documents/doc-1/revisions/rev-1`,
+        { headers: authHeaders() }
+      );
+      expect(axiosPostSpy).toHaveBeenNthCalledWith(
+        3,
+        `${API_URL}/api/projects/${PROJECT_ID}/documents/doc-1/revisions/rev-1/restore`,
+        {},
+        { headers: authHeaders() }
+      );
+      expect(revisions).toContain('revisionNumber: 3');
+      expect(revision).toContain('Document revision');
+    });
+
+    it('document: should map comment actions to document comment APIs', async () => {
+      axiosGetSpy.mockResolvedValueOnce({
+        data: {
+          data: [
+            {
+              id: 'comment-1',
+              contentMarkdown: 'hello',
+              createdByName: 'test-agent',
+            },
+          ],
+        },
+      } as any);
+      axiosPostSpy.mockResolvedValueOnce({
+        data: {
+          data: {
+            id: 'comment-2',
+            contentMarkdown: 'created',
+            createdByName: 'test-agent',
+          },
+          documentWebUrl: 'https://agentteams.example/documents/doc-1',
+        },
+      } as any);
+      axiosPutSpy.mockResolvedValueOnce({
+        data: {
+          data: {
+            id: 'comment-2',
+            contentMarkdown: 'updated',
+          },
+        },
+      } as any);
+      axiosDeleteSpy.mockResolvedValueOnce({ status: 204 } as any);
+
+      const comments = await executeCommand('document', 'comment-list', {
+        id: 'doc-1',
+        order: 'asc',
+        page: 1,
+      });
+      const created = await executeCommand('document', 'comment-create', {
+        id: 'doc-1',
+        content: 'created',
+      });
+      await executeCommand('document', 'comment-update', {
+        id: 'doc-1',
+        commentId: 'comment-2',
+        content: 'updated',
+      });
+      await executeCommand('document', 'comment-delete', {
+        id: 'doc-1',
+        commentId: 'comment-2',
+      });
+
+      expect(axiosGetSpy).toHaveBeenCalledWith(
+        `${API_URL}/api/projects/${PROJECT_ID}/documents/doc-1/comments`,
+        { headers: authHeaders(), params: { page: 1, order: 'asc' } }
+      );
+      expect(axiosPostSpy).toHaveBeenCalledWith(
+        `${API_URL}/api/projects/${PROJECT_ID}/documents/doc-1/comments`,
+        { content: 'created' },
+        { headers: authHeaders() }
+      );
+      expect(axiosPutSpy).toHaveBeenCalledWith(
+        `${API_URL}/api/projects/${PROJECT_ID}/documents/doc-1/comments/comment-2`,
+        { content: 'updated' },
+        { headers: authHeaders() }
+      );
+      expect(axiosDeleteSpy).toHaveBeenCalledWith(
+        `${API_URL}/api/projects/${PROJECT_ID}/documents/doc-1/comments/comment-2`,
+        { headers: deleteHeaders() }
+      );
+      expect(comments).toContain('content: hello');
+      expect(created).toContain('[View in AgentTeams](https://agentteams.example/documents/doc-1)');
+    });
+
     describe('search', () => {
       it('should call search API with query', async () => {
         axiosGetSpy.mockResolvedValueOnce({

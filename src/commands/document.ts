@@ -1,8 +1,23 @@
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { atomicWriteFileSync } from "../utils/atomicWrite.js";
 import { basename, join, resolve } from "node:path";
-import httpClient from "../utils/httpClient.js";
-import { withoutJsonContentType } from "../utils/httpHeaders.js";
+import {
+  archiveDocument,
+  createDocument,
+  createDocumentComment,
+  deleteDocument,
+  deleteDocumentComment,
+  downloadDocumentBody,
+  getDocument,
+  getDocumentRevision,
+  listDocumentComments,
+  listDocumentRevisions,
+  listDocuments,
+  restoreDocumentRevision,
+  unarchiveDocument,
+  updateDocument,
+  updateDocumentComment
+} from "../api/document.js";
 
 type DocumentCommandOptions = {
   id?: string;
@@ -10,6 +25,12 @@ type DocumentCommandOptions = {
   file?: string;
   tags?: string;
   query?: string;
+  visibility?: string;
+  archived?: string;
+  revisionId?: string;
+  commentId?: string;
+  content?: string;
+  order?: string;
   limit?: string | number;
   page?: string | number;
   pageSize?: string | number;
@@ -21,12 +42,36 @@ type DocumentRecord = {
   body?: string;
   bodyPreview?: string;
   tags?: string[];
+  visibility?: string;
+  archivedAt?: string | null;
   webUrl?: string | null;
   updatedAt?: string;
   createdAt?: string;
 };
 
+type DocumentRevisionRecord = {
+  id: string;
+  revisionNumber?: number;
+  title?: string;
+  body?: string;
+  bodyPreview?: string;
+  createdAt?: string;
+  createdBy?: { nickname?: string | null } | null;
+};
+
+type DocumentCommentRecord = {
+  id: string;
+  content?: string;
+  contentMarkdown?: string;
+  createdByName?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
 const DOCUMENT_DOWNLOAD_DIR = join(".agentteams", "cli", "documents");
+const VISIBILITY_VALUES = ["PROJECT", "PRIVATE"] as const;
+const ARCHIVED_VALUES = ["ACTIVE", "ARCHIVED", "ALL"] as const;
+const ORDER_VALUES = ["asc", "desc"] as const;
 
 const toPositiveInteger = (value: unknown): number | undefined => {
   if (value === undefined || value === null || value === "") return undefined;
@@ -51,16 +96,11 @@ const normalizeTags = (input?: string) => {
     result.push(trimmed);
   }
 
-  if (result.length > 10) {
-    throw new Error("Documents can have up to 10 tags");
+  if (result.length > 20) {
+    throw new Error("Documents can have up to 20 tags");
   }
 
   return result;
-};
-
-const getBaseUrl = (apiUrl: string, projectId: string) => {
-  const normalizedApiUrl = apiUrl.endsWith("/") ? apiUrl.slice(0, -1) : apiUrl;
-  return `${normalizedApiUrl}/api/projects/${projectId}/documents`;
 };
 
 const readMarkdownFile = (file: string) => {
@@ -94,14 +134,77 @@ const viewLink = (webUrl?: string | null) => {
   return webUrl ? `[View in AgentTeams](${webUrl})` : null;
 };
 
+const normalizeEnumValue = <T extends string>(
+  value: string | undefined,
+  allowedValues: readonly T[],
+  label: string,
+  options?: { lowercase?: boolean }
+): T | undefined => {
+  if (value === undefined || value === "") return undefined;
+  const normalized = options?.lowercase ? value.toLowerCase() : value.toUpperCase();
+  if (!allowedValues.includes(normalized as T)) {
+    throw new Error(`${label} must be one of: ${allowedValues.join(", ")}`);
+  }
+  return normalized as T;
+};
+
+const normalizeVisibility = (value?: string) => normalizeEnumValue(value, VISIBILITY_VALUES, "--visibility");
+const normalizeArchived = (value?: string) => normalizeEnumValue(value, ARCHIVED_VALUES, "--archived");
+const normalizeOrder = (value?: string) => normalizeEnumValue(value, ORDER_VALUES, "--order", { lowercase: true });
+
 const formatDocument = (document: DocumentRecord) => {
   return [
     `id: ${document.id}`,
     `title: ${document.title}`,
+    document.visibility ? `visibility: ${document.visibility}` : null,
     document.tags && document.tags.length > 0 ? `tags: ${document.tags.join(", ")}` : null,
+    document.archivedAt ? `archivedAt: ${document.archivedAt}` : null,
     document.updatedAt ? `updatedAt: ${document.updatedAt}` : null,
     viewLink(document.webUrl)
   ].filter(Boolean).join("\n");
+};
+
+const formatRevision = (revision: DocumentRevisionRecord) => {
+  return [
+    `id: ${revision.id}`,
+    revision.revisionNumber !== undefined ? `revisionNumber: ${revision.revisionNumber}` : null,
+    revision.title ? `title: ${revision.title}` : null,
+    revision.bodyPreview ? `bodyPreview: ${revision.bodyPreview}` : null,
+    revision.createdBy?.nickname ? `createdBy: ${revision.createdBy.nickname}` : null,
+    revision.createdAt ? `createdAt: ${revision.createdAt}` : null
+  ].filter(Boolean).join("\n");
+};
+
+const formatComment = (comment: DocumentCommentRecord) => {
+  return [
+    `id: ${comment.id}`,
+    comment.createdByName ? `createdByName: ${comment.createdByName}` : null,
+    comment.contentMarkdown ? `content: ${comment.contentMarkdown}` : comment.content ? `content: ${comment.content}` : null,
+    comment.updatedAt ? `updatedAt: ${comment.updatedAt}` : null,
+    comment.createdAt ? `createdAt: ${comment.createdAt}` : null
+  ].filter(Boolean).join("\n");
+};
+
+const paginationParams = (options: DocumentCommandOptions) => {
+  const params: Record<string, string | number> = {};
+  const page = toPositiveInteger(options.page);
+  const pageSize = toPositiveInteger(options.pageSize ?? options.limit);
+  if (page) params.page = page;
+  if (pageSize) params.pageSize = pageSize;
+  return params;
+};
+
+const getCommentContent = (options: DocumentCommandOptions, action: string) => {
+  if (options.content !== undefined && options.file) {
+    throw new Error(`Use either --content or --file for document ${action}, not both`);
+  }
+  if (options.content !== undefined) return options.content;
+  if (options.file) return readMarkdownFile(options.file);
+  throw new Error(`--content or --file is required for document ${action}`);
+};
+
+const getDocumentData = (response: unknown) => {
+  return (response as { data: DocumentRecord }).data;
 };
 
 export async function executeDocumentCommand(
@@ -111,18 +214,17 @@ export async function executeDocumentCommand(
   action: string,
   options: DocumentCommandOptions
 ) {
-  const baseUrl = getBaseUrl(apiUrl, projectId);
-
   switch (action) {
     case "create": {
       if (!options.file) throw new Error("--file is required for document create");
       const body = readMarkdownFile(options.file);
-      const response = await httpClient.post(baseUrl, {
+      const response = await createDocument(apiUrl, projectId, headers, {
         title: options.title ?? titleFromFile(options.file),
         body,
-        tags: normalizeTags(options.tags)
-      }, { headers });
-      const document = response.data.data as DocumentRecord;
+        tags: normalizeTags(options.tags),
+        ...(options.visibility ? { visibility: normalizeVisibility(options.visibility) } : {})
+      });
+      const document = getDocumentData(response);
       return [
         "Document created",
         formatDocument(document)
@@ -135,12 +237,13 @@ export async function executeDocumentCommand(
       if (options.title) payload.title = options.title;
       if (options.file) payload.body = readMarkdownFile(options.file);
       if (options.tags !== undefined) payload.tags = normalizeTags(options.tags);
+      if (options.visibility !== undefined) payload.visibility = normalizeVisibility(options.visibility);
       if (Object.keys(payload).length === 0) {
-        throw new Error("At least one of --title, --file, or --tags is required for document update");
+        throw new Error("At least one of --title, --file, --tags, or --visibility is required for document update");
       }
 
-      const response = await httpClient.put(`${baseUrl}/${options.id}`, payload, { headers });
-      const document = response.data.data as DocumentRecord;
+      const response = await updateDocument(apiUrl, projectId, headers, options.id, payload);
+      const document = getDocumentData(response);
       return [
         "Document updated",
         formatDocument(document)
@@ -149,12 +252,13 @@ export async function executeDocumentCommand(
 
     case "download": {
       if (!options.id) throw new Error("--id is required for document download");
-      const response = await httpClient.get(`${baseUrl}/${options.id}`, { headers });
-      const document = response.data.data as DocumentRecord;
+      const documentResponse = await getDocument(apiUrl, projectId, headers, options.id);
+      const document = getDocumentData(documentResponse);
+      const body = await downloadDocumentBody(apiUrl, projectId, headers, options.id);
       const outputDir = resolve(DOCUMENT_DOWNLOAD_DIR);
       mkdirSync(outputDir, { recursive: true });
       const outputPath = join(outputDir, safeFileName(document.title, document.id));
-      atomicWriteFileSync(outputPath, document.body ?? "", "utf-8");
+      atomicWriteFileSync(outputPath, body ?? document.body ?? "", "utf-8");
       return [
         `Document downloaded to ${outputPath}`,
         formatDocument(document)
@@ -165,13 +269,12 @@ export async function executeDocumentCommand(
       const params: Record<string, string | number> = {};
       if (options.query) params.q = options.query;
       if (options.tags) params.tags = normalizeTags(options.tags).join(",");
-      const page = toPositiveInteger(options.page);
-      const pageSize = toPositiveInteger(options.pageSize ?? options.limit);
-      if (page) params.page = page;
-      if (pageSize) params.pageSize = pageSize;
+      if (options.visibility) params.visibility = normalizeVisibility(options.visibility) ?? "";
+      if (options.archived) params.archived = normalizeArchived(options.archived) ?? "";
+      Object.assign(params, paginationParams(options));
 
-      const response = await httpClient.get(baseUrl, { headers, params });
-      const documents = response.data.data as DocumentRecord[];
+      const response = await listDocuments(apiUrl, projectId, headers, params);
+      const documents = (response as { data: DocumentRecord[] }).data;
       if (documents.length === 0) {
         return "No documents found";
       }
@@ -180,13 +283,110 @@ export async function executeDocumentCommand(
 
     case "delete": {
       if (!options.id) throw new Error("--id is required for document delete");
-      await httpClient.delete(`${baseUrl}/${options.id}`, {
-        headers: withoutJsonContentType(headers)
-      });
+      await deleteDocument(apiUrl, projectId, headers, options.id);
       return `Document deleted\nid: ${options.id}`;
     }
 
+    case "archive":
+    case "unarchive": {
+      if (!options.id) throw new Error(`--id is required for document ${action}`);
+      const response = action === "archive"
+        ? await archiveDocument(apiUrl, projectId, headers, options.id)
+        : await unarchiveDocument(apiUrl, projectId, headers, options.id);
+      const document = getDocumentData(response);
+      return [
+        action === "archive" ? "Document archived" : "Document unarchived",
+        formatDocument(document)
+      ].join("\n");
+    }
+
+    case "revisions": {
+      if (!options.id) throw new Error("--id is required for document revisions");
+      const response = await listDocumentRevisions(apiUrl, projectId, headers, options.id, paginationParams(options));
+      const revisions = (response as { data: DocumentRevisionRecord[] }).data;
+      if (revisions.length === 0) {
+        return "No document revisions found";
+      }
+      return revisions.map(formatRevision).join("\n\n");
+    }
+
+    case "revision-get": {
+      if (!options.id) throw new Error("--id is required for document revision-get");
+      if (!options.revisionId) throw new Error("--revision-id is required for document revision-get");
+      const response = await getDocumentRevision(apiUrl, projectId, headers, options.id, options.revisionId);
+      const revision = (response as { data: DocumentRevisionRecord }).data;
+      return [
+        "Document revision",
+        formatRevision(revision)
+      ].join("\n");
+    }
+
+    case "revision-restore": {
+      if (!options.id) throw new Error("--id is required for document revision-restore");
+      if (!options.revisionId) throw new Error("--revision-id is required for document revision-restore");
+      const response = await restoreDocumentRevision(apiUrl, projectId, headers, options.id, options.revisionId);
+      const document = getDocumentData(response);
+      return [
+        "Document revision restored",
+        formatDocument(document)
+      ].join("\n");
+    }
+
+    case "comment-list": {
+      if (!options.id) throw new Error("--id is required for document comment-list");
+      const params = paginationParams(options);
+      if (options.order) params.order = normalizeOrder(options.order) ?? "";
+      const response = await listDocumentComments(apiUrl, projectId, headers, options.id, params);
+      const comments = (response as { data: DocumentCommentRecord[] }).data;
+      if (comments.length === 0) {
+        return "No document comments found";
+      }
+      return comments.map(formatComment).join("\n\n");
+    }
+
+    case "comment-create": {
+      if (!options.id) throw new Error("--id is required for document comment-create");
+      const response = await createDocumentComment(apiUrl, projectId, headers, options.id, {
+        content: getCommentContent(options, action)
+      });
+      const comment = (response as { data: DocumentCommentRecord }).data;
+      const documentWebUrl = (response as { documentWebUrl?: string | null }).documentWebUrl;
+      return [
+        "Document comment created",
+        formatComment(comment),
+        viewLink(documentWebUrl)
+      ].filter(Boolean).join("\n");
+    }
+
+    case "comment-update": {
+      if (!options.id) throw new Error("--id is required for document comment-update");
+      if (!options.commentId) throw new Error("--comment-id is required for document comment-update");
+      const response = await updateDocumentComment(apiUrl, projectId, headers, options.id, options.commentId, {
+        content: getCommentContent(options, action)
+      });
+      const comment = (response as { data: DocumentCommentRecord }).data;
+      return [
+        "Document comment updated",
+        formatComment(comment)
+      ].join("\n");
+    }
+
+    case "comment-delete": {
+      if (!options.id) throw new Error("--id is required for document comment-delete");
+      if (!options.commentId) throw new Error("--comment-id is required for document comment-delete");
+      await deleteDocumentComment(apiUrl, projectId, headers, options.id, options.commentId);
+      return [
+        "Document comment deleted",
+        `documentId: ${options.id}`,
+        `commentId: ${options.commentId}`
+      ].join("\n");
+    }
+
     default:
-      throw new Error(`Unknown document action: ${action}. Use create, update, download, list, or delete.`);
+      throw new Error(
+        "Unknown document action: " +
+        `${action}. Use create, update, download, list, delete, archive, unarchive, revisions, ` +
+        "revision-get, revision-restore, comment-list, comment-create, comment-update, or comment-delete."
+      );
   }
 }
