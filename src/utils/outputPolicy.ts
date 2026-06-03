@@ -9,23 +9,6 @@ export interface OutputPolicyContext {
   verbose?: boolean;
 }
 
-export interface SummaryHints {
-  bodyChanged?: boolean;
-}
-
-export const SUMMARY_HINTS = Symbol.for('agentteams.cli.summaryHints');
-
-export function attachSummaryHints<T>(result: T, hints: SummaryHints): T {
-  if (!result || typeof result !== 'object') return result;
-  Object.defineProperty(result as object, SUMMARY_HINTS, {
-    value: hints,
-    enumerable: false,
-    configurable: true,
-    writable: true,
-  });
-  return result;
-}
-
 const summaryDefaultActions: Record<string, Set<string>> = {
   plan: new Set(['create', 'update', 'start', 'finish']),
   report: new Set(['create', 'update']),
@@ -34,20 +17,10 @@ const summaryDefaultActions: Record<string, Set<string>> = {
   linear: new Set(['comment-create']),
 };
 
-type HintEntry =
-  | string
-  | ((context: { hints: SummaryHints | undefined }) => string | undefined);
-
-const nextActionHints: Record<string, Record<string, HintEntry[]>> = {
+const nextActionHints: Record<string, Record<string, string[]>> = {
   plan: {
     create: [
       'Next: agentteams plan start --id <id>',
-      'Next: agentteams plan upload-html --id <id> --file <html-file>  # upload an HTML preview that summarizes the plan body',
-    ],
-    update: [
-      ({ hints }) => hints?.bodyChanged
-        ? 'Next: agentteams plan upload-html --id <id> --file <html-file>  # plan body changed; regenerate and upload the HTML preview'
-        : undefined,
     ],
     finish: ['Next: agentteams report create --plan-id <id>'],
   },
@@ -135,10 +108,8 @@ function resolveNextActionHints(
   const resolvedId = id ?? extractDeepId(result);
   if (!resolvedId) return [];
 
-  const hints = readSummaryHints(result);
   const lines: string[] = [];
-  for (const entry of entries) {
-    const template = typeof entry === 'function' ? entry({ hints }) : entry;
+  for (const template of entries) {
     if (!template) continue;
     lines.push(template.replace('<id>', resolvedId));
   }
@@ -155,13 +126,6 @@ function extractCompletionReportFromResult(result: unknown): Record<string, unkn
   if (cr === null) return null;
   if (typeof cr === 'object' && !Array.isArray(cr)) return cr as Record<string, unknown>;
   return undefined;
-}
-
-function readSummaryHints(result: unknown): SummaryHints | undefined {
-  if (!result || typeof result !== 'object') return undefined;
-  const value = (result as Record<symbol, unknown>)[SUMMARY_HINTS];
-  if (!value || typeof value !== 'object') return undefined;
-  return value as SummaryHints;
 }
 
 function extractDeepId(result: unknown): string | undefined {

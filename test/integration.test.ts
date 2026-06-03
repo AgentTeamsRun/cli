@@ -248,6 +248,7 @@ describe('CLI Integration Tests', () => {
         priority: 'HIGH',
         runnerType: 'CLAUDE_CODE',
         model: 'claude-opus-4-6',
+        allowMissingHtmlPreview: true,
       });
       await executeCommand('plan', 'list', {});
       await executeCommand('plan', 'get', { id: 'plan-1' });
@@ -493,6 +494,7 @@ describe('CLI Integration Tests', () => {
         interpretEscapes: true,
         runnerType: 'CLAUDE_CODE',
         model: 'claude-opus-4-6',
+        allowMissingHtmlPreview: true,
       });
 
       expect(axiosPostSpy).toHaveBeenCalledWith(
@@ -515,6 +517,7 @@ describe('CLI Integration Tests', () => {
         template: 'refactor-minimal',
         runnerType: 'CLAUDE_CODE',
         model: 'claude-opus-4-6',
+        allowMissingHtmlPreview: true,
       });
 
       expect(axiosPostSpy).toHaveBeenCalledWith(
@@ -535,6 +538,7 @@ describe('CLI Integration Tests', () => {
         template: 'quick-minimal',
         runnerType: 'CLAUDE_CODE',
         model: 'claude-opus-4-6',
+        allowMissingHtmlPreview: true,
       });
 
       expect(axiosPostSpy).toHaveBeenCalledWith(
@@ -560,6 +564,7 @@ describe('CLI Integration Tests', () => {
         id: 'plan-1',
         content: 'Line1\\nLine2',
         interpretEscapes: true,
+        allowMissingHtmlPreview: true,
       });
 
       expect(axiosPutSpy).toHaveBeenCalledWith(
@@ -567,6 +572,135 @@ describe('CLI Integration Tests', () => {
         { content: 'Line1\nLine2' },
         { headers: authHeaders() }
       );
+    });
+
+    describe('plan create/update HTML preview enforcement', () => {
+      let htmlDir: string;
+      let htmlPath: string;
+
+      beforeEach(() => {
+        htmlDir = mkdtempSync(join(tmpdir(), 'agentteams-plan-html-'));
+        htmlPath = join(htmlDir, 'preview.html');
+        writeFileSync(htmlPath, '<!doctype html><html><body><h1>Plan</h1></body></html>', 'utf-8');
+      });
+
+      afterEach(() => {
+        rmSync(htmlDir, { recursive: true, force: true });
+      });
+
+      it('plan create: should fail when no HTML preview input is provided', async () => {
+        await expect(
+          executeCommand('plan', 'create', {
+            title: 'Plan',
+            content: 'body',
+            runnerType: 'CLAUDE_CODE',
+            model: 'claude-opus-4-6',
+          })
+        ).rejects.toThrow('An HTML preview is required for plan create');
+        expect(axiosPostSpy).not.toHaveBeenCalled();
+      });
+
+      it('plan create: should create the plan then upload the HTML preview', async () => {
+        axiosPostSpy.mockResolvedValue({ data: { data: { id: 'plan-html-1' } } } as any);
+        axiosPutSpy.mockResolvedValue({ data: { data: { id: 'plan-html-1' } } } as any);
+
+        await executeCommand('plan', 'create', {
+          title: 'Plan',
+          content: 'body',
+          runnerType: 'CLAUDE_CODE',
+          model: 'claude-opus-4-6',
+          htmlFile: htmlPath,
+        });
+
+        expect(axiosPostSpy).toHaveBeenCalledWith(
+          `${API_URL}/api/projects/${PROJECT_ID}/plans`,
+          expect.objectContaining({ title: 'Plan', content: 'body' }),
+          { headers: authHeaders() }
+        );
+        expect(axiosPutSpy).toHaveBeenCalledWith(
+          `${API_URL}/api/projects/${PROJECT_ID}/plans/plan-html-1/visualization/html`,
+          expect.objectContaining({ curationType: 'AI_CURATED', html: expect.stringContaining('<h1>Plan</h1>') }),
+          { headers: authHeaders() }
+        );
+      });
+
+      it('plan create: should reject when both --html-file and --html-stdin are provided', async () => {
+        await expect(
+          executeCommand('plan', 'create', {
+            title: 'Plan',
+            content: 'body',
+            runnerType: 'CLAUDE_CODE',
+            model: 'claude-opus-4-6',
+            htmlFile: htmlPath,
+            htmlStdin: true,
+          })
+        ).rejects.toThrow('Use either --html-file or --html-stdin');
+        expect(axiosPostSpy).not.toHaveBeenCalled();
+      });
+
+      it('plan create: should fail with a partial-failure message when HTML upload fails', async () => {
+        axiosPostSpy.mockResolvedValue({ data: { data: { id: 'plan-html-2' } } } as any);
+        axiosPutSpy.mockRejectedValue(new Error('boom'));
+
+        await expect(
+          executeCommand('plan', 'create', {
+            title: 'Plan',
+            content: 'body',
+            runnerType: 'CLAUDE_CODE',
+            model: 'claude-opus-4-6',
+            htmlFile: htmlPath,
+          })
+        ).rejects.toThrow('partial failure');
+        expect(axiosPostSpy).toHaveBeenCalled();
+      });
+
+      it('plan update: should require an HTML preview when the body changes', async () => {
+        await expect(
+          executeCommand('plan', 'update', { id: 'plan-1', content: 'new body' })
+        ).rejects.toThrow('An HTML preview is required when updating the plan body');
+        expect(axiosPutSpy).not.toHaveBeenCalled();
+      });
+
+      it('plan update: should require an HTML preview when title/type/priority changes', async () => {
+        await expect(
+          executeCommand('plan', 'update', { id: 'plan-1', priority: 'HIGH' })
+        ).rejects.toThrow('An HTML preview is required when updating the plan body');
+        expect(axiosPutSpy).not.toHaveBeenCalled();
+      });
+
+      it('plan update: should update body then upload the HTML preview', async () => {
+        axiosPutSpy.mockResolvedValue({ data: { data: { id: 'plan-1' } } } as any);
+
+        await executeCommand('plan', 'update', {
+          id: 'plan-1',
+          content: 'new body',
+          htmlFile: htmlPath,
+        });
+
+        expect(axiosPutSpy).toHaveBeenCalledWith(
+          `${API_URL}/api/projects/${PROJECT_ID}/plans/plan-1`,
+          { content: 'new body' },
+          { headers: authHeaders() }
+        );
+        expect(axiosPutSpy).toHaveBeenCalledWith(
+          `${API_URL}/api/projects/${PROJECT_ID}/plans/plan-1/visualization/html`,
+          expect.objectContaining({ curationType: 'AI_CURATED' }),
+          { headers: authHeaders() }
+        );
+      });
+
+      it('plan update: should not require an HTML preview for a status-only change', async () => {
+        axiosPutSpy.mockResolvedValue({ data: { data: { id: 'plan-1' } } } as any);
+
+        await executeCommand('plan', 'update', { id: 'plan-1', status: 'DONE' });
+
+        expect(axiosPutSpy).toHaveBeenCalledTimes(1);
+        expect(axiosPutSpy).toHaveBeenCalledWith(
+          `${API_URL}/api/projects/${PROJECT_ID}/plans/plan-1`,
+          { status: 'DONE' },
+          { headers: authHeaders() }
+        );
+      });
     });
 
     it('plan list: should pass status filter as query params', async () => {

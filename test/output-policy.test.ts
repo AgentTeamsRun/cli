@@ -1,5 +1,5 @@
 import { describe, it, expect } from '@jest/globals';
-import { attachSummaryHints, createSummaryLines, shouldPrintSummary } from '../src/utils/outputPolicy.js';
+import { createSummaryLines, shouldPrintSummary } from '../src/utils/outputPolicy.js';
 
 describe('outputPolicy', () => {
   it('prints summary by default for plan create', () => {
@@ -74,8 +74,21 @@ describe('outputPolicy', () => {
       'Success: plan create',
       'id: plan-123, title: CLI output fix',
       'Next: agentteams plan start --id plan-123',
-      'Next: agentteams plan upload-html --id plan-123 --file <html-file>  # upload an HTML preview that summarizes the plan body',
     ]);
+  });
+
+  it('does not emit a plan upload-html hint for plan create', () => {
+    const lines = createSummaryLines(
+      {
+        data: {
+          id: 'plan-123',
+          title: 'CLI output fix',
+        },
+      },
+      { resource: 'plan', action: 'create' }
+    );
+
+    expect(lines.some((line) => line.includes('plan upload-html'))).toBe(false);
   });
 
   it('prints summary by default for report/postmortem/coaction update', () => {
@@ -124,7 +137,6 @@ describe('outputPolicy', () => {
       'id: plan-123, title: CLI output fix',
       'webUrl: https://agentteams.example/plans/plan-123',
       'Next: agentteams plan start --id plan-123',
-      'Next: agentteams plan upload-html --id plan-123 --file <html-file>  # upload an HTML preview that summarizes the plan body',
     ]);
   });
 
@@ -184,25 +196,7 @@ describe('outputPolicy', () => {
     expect(lines.some((line) => line.startsWith('Next:'))).toBe(false);
   });
 
-  it('emits html preview hint for plan update when body changed', () => {
-    const result = attachSummaryHints(
-      {
-        data: {
-          id: 'plan-321',
-          title: 'CLI output fix',
-        },
-      },
-      { bodyChanged: true }
-    );
-
-    const lines = createSummaryLines(result, { resource: 'plan', action: 'update' });
-
-    expect(lines).toContain(
-      'Next: agentteams plan upload-html --id plan-321 --file <html-file>  # plan body changed; regenerate and upload the HTML preview'
-    );
-  });
-
-  it('omits html preview hint for plan update when body did not change', () => {
+  it('never emits an upload-html hint for plan update', () => {
     const lines = createSummaryLines(
       {
         data: {
@@ -214,35 +208,7 @@ describe('outputPolicy', () => {
     );
 
     expect(lines.some((line) => line.startsWith('Next:'))).toBe(false);
-  });
-
-  it('omits html preview hint for plan update when only metadata changed', () => {
-    const result = attachSummaryHints(
-      {
-        data: {
-          id: 'plan-321',
-          title: 'CLI output fix',
-        },
-      },
-      { bodyChanged: false }
-    );
-
-    const lines = createSummaryLines(result, { resource: 'plan', action: 'update' });
-
-    expect(lines.some((line) => line.startsWith('Next:'))).toBe(false);
-  });
-
-  it('keeps json output free of summary hint metadata', () => {
-    const result = attachSummaryHints(
-      {
-        data: { id: 'plan-321', title: 'CLI output fix' },
-      },
-      { bodyChanged: true }
-    );
-
-    expect(JSON.parse(JSON.stringify(result))).toEqual({
-      data: { id: 'plan-321', title: 'CLI output fix' },
-    });
+    expect(lines.some((line) => line.includes('plan upload-html'))).toBe(false);
   });
 
   it('prints summary by default for linear comment create', () => {

@@ -362,20 +362,38 @@ Output behavior by default:
 - `--verbose`: always prints full output to stdout.
 - `--output-file <path>`: always writes full output to file and keeps stdout short.
 
-### Plan HTML Preview Hints
+### Plan HTML Preview Enforcement
 
-The summary for plan create/update can include a `Next:` hint that points to `agentteams plan upload-html`. The hint is a reminder for AI agents to generate an HTML preview that summarizes the plan body and upload it alongside the canonical Markdown/Tiptap content. The CLI never generates or uploads the HTML preview automatically — the canonical source is the plan body, and the preview is a separate human-facing summary.
+`plan create` and preview-affecting `plan update` calls require an HTML preview in the same command. The CLI does **not** generate the HTML automatically — you (or an AI agent) author the preview that summarizes the plan body, and the CLI enforces that it is provided and uploaded. The canonical source remains the Markdown/Tiptap plan body; the HTML is a separate human-facing summary.
 
-- `plan create` always emits the hint after the `plan start` hint:
+Provide the preview with one of these mutually exclusive inputs:
 
-  ```text
-  Next: agentteams plan start --id <plan-id>
-  Next: agentteams plan upload-html --id <plan-id> --file <html-file>  # upload an HTML preview that summarizes the plan body
-  ```
+- `--html-file <path>`: read the HTML preview from a local file.
+- `--html-stdin`: read the HTML preview from stdin.
 
-- `plan update` emits the hint only when the request changed the plan body (`--content` or `--file`). Updates that only touch `--status`, `--title`, `--type`, or `--priority` do not emit the hint, since the existing preview is still in sync.
+```bash
+# create: plan body + required HTML preview, uploaded in one command
+agentteams plan create \
+  --title "My plan" \
+  --file .agentteams/cli/temp/plan-body.md \
+  --html-file .agentteams/cli/temp/plan-summary.html \
+  --runner-type CLAUDE_CODE --model <model-id>
 
-Example upload after generating a preview file:
+# update: body change requires the HTML preview too
+agentteams plan update \
+  --id <plan-id> \
+  --file .agentteams/cli/temp/plan-body.md \
+  --html-file .agentteams/cli/temp/plan-summary.html
+```
+
+Rules:
+
+- `plan create` fails if no HTML preview input is given. On success the plan is created, then the preview is uploaded in the same command.
+- `plan update` requires the HTML preview when the request changes `--content`/`--file`, `--title`, `--type`, or `--priority` (the fields that affect the preview's source hash). A status-only update (`--status`) does **not** require the preview.
+- If the HTML upload fails after the plan was created/updated, the command exits with an error noting the partial failure (the plan body and preview are out of sync). Re-run `agentteams plan upload-html` to recover.
+- `--allow-missing-html-preview` is an explicit escape hatch for migrations or emergencies: it lets create/update proceed without a preview, printing a warning that the body and preview may drift. Avoid it in normal use.
+
+The standalone `agentteams plan upload-html` action still exists for re-uploading or fixing a preview:
 
 ```bash
 agentteams plan upload-html \

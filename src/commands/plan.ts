@@ -4,7 +4,6 @@ import { checkConventionFreshness } from './convention.js';
 import { findProjectConfig } from '../utils/config.js';
 import { collectGitMetrics } from '../utils/git.js';
 import { withSpinner, printFileInfo } from '../utils/spinner.js';
-import { attachSummaryHints } from '../utils/outputPolicy.js';
 import { formatPlanWithDependenciesText, mergePlanWithDependencies, normalizeDependencies } from '../utils/planFormat.js';
 import {
   ensureUrlProtocol,
@@ -134,6 +133,68 @@ export function readPlanHtmlUploadInput(options: { file?: string; stdin?: boolea
   }
 
   return html;
+}
+
+export function hasPlanHtmlPreviewInput(options: { htmlFile?: string; htmlStdin?: boolean }): boolean {
+  const hasFile = typeof options.htmlFile === 'string' && options.htmlFile.trim().length > 0;
+  const hasStdin = options.htmlStdin === true;
+  return hasFile || hasStdin;
+}
+
+export function readPlanHtmlPreviewInput(options: { htmlFile?: string; htmlStdin?: boolean }): string {
+  const hasFile = typeof options.htmlFile === 'string' && options.htmlFile.trim().length > 0;
+  const hasStdin = options.htmlStdin === true;
+
+  if (hasFile && hasStdin) {
+    throw new Error('Use either --html-file or --html-stdin for the plan HTML preview, not both');
+  }
+  if (!hasFile && !hasStdin) {
+    throw new Error('--html-file or --html-stdin is required to provide the plan HTML preview');
+  }
+
+  const html = hasFile
+    ? (() => {
+      const filePath = resolve(options.htmlFile as string);
+      if (!existsSync(filePath)) {
+        throw new Error(`File not found: ${options.htmlFile}`);
+      }
+      return readFileSync(filePath, 'utf-8');
+    })()
+    : readFileSync(0, 'utf-8');
+
+  if (html.trim().length === 0) {
+    throw new Error('HTML preview content is empty');
+  }
+
+  return html;
+}
+
+async function uploadPlanHtmlPreview(
+  apiUrl: string,
+  projectId: string,
+  headers: any,
+  planId: string,
+  html: string,
+  sourceLabel: string | undefined,
+  action: 'created' | 'updated'
+): Promise<void> {
+  try {
+    await withSpinner(
+      'Uploading plan HTML preview...',
+      () => uploadPlanHtml(apiUrl, projectId, headers, planId, {
+        html,
+        curationType: 'AI_CURATED',
+        sourceLabel,
+      }),
+      'Plan HTML preview uploaded',
+    );
+  } catch (error: any) {
+    const cause = error?.message ?? error;
+    throw new Error(
+      `Plan ${planId} was ${action}, but uploading the HTML preview failed (partial failure: the plan body and preview are now out of sync). `
+      + `Re-run 'agentteams plan upload-html --id ${planId} --file <html-file>' to finish. Cause: ${cause}`
+    );
+  }
 }
 
 
@@ -458,6 +519,20 @@ export async function executePlanCommand(
         process.stderr.write(`[warn] plan create: --status ${options.status} is ignored. Plans are always created as BACKLOG.\n`);
       }
 
+      // HTML preview is required: validate the input before creating the plan so we fail fast.
+      const createHasHtmlInput = hasPlanHtmlPreviewInput(options);
+      const createAllowMissingHtml = options.allowMissingHtmlPreview === true;
+      if (!createHasHtmlInput && !createAllowMissingHtml) {
+        throw new Error(
+          'An HTML preview is required for plan create. Provide --html-file <path> or --html-stdin, '
+          + 'or pass --allow-missing-html-preview to skip (not recommended; the plan body and preview may drift).'
+        );
+      }
+      const createHtmlContent = createHasHtmlInput ? readPlanHtmlPreviewInput(options) : undefined;
+      if (!createHasHtmlInput && createAllowMissingHtml) {
+        process.stderr.write('[warn] plan create: creating without an HTML preview because --allow-missing-html-preview was set. The plan body and preview may be out of sync.\n');
+      }
+
       const createResult = await withSpinner(
         'Creating plan...',
         () => createPlan(apiUrl, projectId, headers, {
@@ -474,6 +549,12 @@ export async function executePlanCommand(
         'Plan created',
       );
       if (options.file) deleteIfTempFile(options.file);
+
+      const createdPlanId: string | undefined = createResult?.data?.id;
+      if (createHtmlContent && createdPlanId) {
+        await uploadPlanHtmlPreview(apiUrl, projectId, headers, createdPlanId, createHtmlContent, options.sourceLabel, 'created');
+        if (options.htmlFile) deleteIfTempFile(options.htmlFile);
+      }
 
       // --origin-issue flag: link origin issues after plan creation
       const originIssueFlags: string[] = Array.isArray(options.originIssue)
@@ -553,7 +634,27 @@ export async function executePlanCommand(
       if (options.type) body.type = options.type;
       if (options.priority) body.priority = options.priority;
 
-      const bodyChanged = typeof body.content === 'string';
+      // Preview-affecting fields mirror the source hash inputs (title, type, priority, content).
+      // A status-only change does not affect the preview, so the HTML preview is not required.
+      const previewAffecting =
+        typeof body.content === 'string'
+        || typeof body.title === 'string'
+        || typeof body.type === 'string'
+        || typeof body.priority === 'string';
+
+      const updateHasHtmlInput = hasPlanHtmlPreviewInput(options);
+      const updateAllowMissingHtml = options.allowMissingHtmlPreview === true;
+      if (previewAffecting && !updateHasHtmlInput && !updateAllowMissingHtml) {
+        throw new Error(
+          'An HTML preview is required when updating the plan body, title, type, or priority. '
+          + 'Provide --html-file <path> or --html-stdin, or pass --allow-missing-html-preview to skip '
+          + '(not recommended; the plan body and preview may drift).'
+        );
+      }
+      const updateHtmlContent = updateHasHtmlInput ? readPlanHtmlPreviewInput(options) : undefined;
+      if (previewAffecting && !updateHasHtmlInput && updateAllowMissingHtml) {
+        process.stderr.write('[warn] plan update: updating without an HTML preview because --allow-missing-html-preview was set. The plan body and preview may be out of sync.\n');
+      }
 
       const updateResult = await withSpinner(
         'Updating plan...',
@@ -561,7 +662,12 @@ export async function executePlanCommand(
         'Plan updated',
       );
       if (options.file) deleteIfTempFile(options.file);
-      attachSummaryHints(updateResult, { bodyChanged });
+
+      if (updateHtmlContent) {
+        await uploadPlanHtmlPreview(apiUrl, projectId, headers, options.id, updateHtmlContent, options.sourceLabel, 'updated');
+        if (options.htmlFile) deleteIfTempFile(options.htmlFile);
+      }
+
       return updateResult;
     }
     case 'delete': {
