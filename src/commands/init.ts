@@ -152,18 +152,21 @@ async function tryOpenBrowser(url: string): Promise<void> {
 function toConfig(authResult: {
   teamId: string;
   projectId: string;
-  repositoryId: string;
+  repositoryId?: string;
   agentName: string;
   apiKey: string;
   apiUrl: string;
 }): Config {
+  // 빈 문자열(미선택 인증)은 저장하지 않고 생략한다. 레포지토리는 서버가 인증된
+  // AgentConfig에서 resolve하므로 로컬 config의 repositoryId는 더 이상 기본값으로 쓰지 않는다.
+  const repositoryId = authResult.repositoryId?.trim() ? authResult.repositoryId : undefined;
   return {
     teamId: authResult.teamId,
     projectId: authResult.projectId,
     agentName: authResult.agentName,
     apiKey: authResult.apiKey,
     apiUrl: authResult.apiUrl,
-    repositoryId: authResult.repositoryId,
+    ...(repositoryId ? { repositoryId } : {}),
   };
 }
 

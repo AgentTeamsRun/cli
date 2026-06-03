@@ -80,7 +80,6 @@ export async function executeCommand(
         return withApiErrorContext(apiUrl, () => executePlanCommand(apiUrl, config.projectId, headers, action, {
           ...options,
           defaultCreatedBy: config.agentName,
-          defaultRepositoryId: config.repositoryId,
         }));
       }
 
@@ -103,7 +102,6 @@ export async function executeCommand(
         ...options,
         projectId: config.projectId,
         defaultCreatedBy: config.agentName,
-        defaultRepositoryId: config.repositoryId,
       }));
     }
     case 'code-review': {
@@ -112,7 +110,6 @@ export async function executeCommand(
       return withApiErrorContext(apiUrl, () => executeCodeReviewCommand(apiUrl, config.projectId, headers, action, {
         ...options,
         projectId: config.projectId,
-        defaultRepositoryId: config.repositoryId,
       }));
     }
     case 'postmortem': {
@@ -123,7 +120,6 @@ export async function executeCommand(
         ...options,
         projectId: config.projectId,
         defaultCreatedBy: config.agentName,
-        defaultRepositoryId: config.repositoryId,
       }));
     }
     case 'coaction': {
