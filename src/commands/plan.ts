@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, writeFileSync, rmSync, readdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { PLAN_COMPLEXITY_ORDER } from '@agentteams/core-constants';
 import { checkConventionFreshness } from './convention.js';
 import { findProjectConfig } from '../utils/config.js';
 import { collectGitMetrics } from '../utils/git.js';
@@ -34,8 +35,7 @@ import {
   uploadPlanHtml,
 } from '../api/plan.js';
 
-// Plan complexity tiers. Mirrors PlanComplexity in the API (api/src/constants/enums.ts).
-const PLAN_COMPLEXITY_VALUES = ['MINIMAL', 'STANDARD', 'FULL'];
+const PLAN_COMPLEXITY_VALUES: readonly string[] = PLAN_COMPLEXITY_ORDER;
 
 // Lightweight, warning-only heuristic that flags an obvious mismatch between the declared
 // complexity and the plan body length. It never rejects — precise structural validation is future work.
@@ -47,6 +47,22 @@ function warnOnComplexityMismatch(complexity: string, content: string): void {
     process.stderr.write('[warn] plan create: --complexity MINIMAL but the body is large. MINIMAL is for a single task touching 1–2 files — confirm the tier fits.\n');
   }
 }
+
+export function assertComplexityReasonCanBeRecorded(
+  complexityReason: unknown,
+  nextComplexity: string | undefined,
+  currentComplexity?: string | null
+): void {
+  if (!complexityReason) return;
+  if (!nextComplexity) {
+    throw new Error('--complexity-reason requires --complexity. The reason is only recorded when complexity is updated.');
+  }
+  if (currentComplexity === nextComplexity) {
+    throw new Error('--complexity-reason was provided, but --complexity matches the current plan complexity. Choose a different complexity or omit the reason.');
+  }
+}
+
+export const getPlanComplexityValues = (): readonly string[] => PLAN_COMPLEXITY_VALUES;
 
 function findProjectRoot(): string | null {
   const configPath = findProjectConfig(process.cwd());
@@ -656,6 +672,7 @@ export async function executePlanCommand(
       if (options.status) body.status = options.status;
       if (options.type) body.type = options.type;
       if (options.priority) body.priority = options.priority;
+      assertComplexityReasonCanBeRecorded(options.complexityReason, options.complexity ? String(options.complexity).toUpperCase() : undefined);
       if (options.complexity) {
         const updateComplexity = String(options.complexity).toUpperCase();
         if (!PLAN_COMPLEXITY_VALUES.includes(updateComplexity)) {
@@ -663,7 +680,14 @@ export async function executePlanCommand(
         }
         body.complexity = updateComplexity;
       }
-      if (options.complexityReason) body.complexityChangeReason = options.complexityReason;
+      if (options.complexityReason) {
+        if (typeof body.complexity === 'string') {
+          const currentPlan = await getPlan(apiUrl, projectId, headers, options.id);
+          const currentComplexity = currentPlan?.data?.complexity;
+          assertComplexityReasonCanBeRecorded(options.complexityReason, body.complexity, currentComplexity);
+        }
+        body.complexityChangeReason = options.complexityReason;
+      }
 
       // Preview-affecting fields mirror the source hash inputs (title, type, priority, content).
       // A status-only or complexity-only change does not affect the preview, so the HTML preview is not required.

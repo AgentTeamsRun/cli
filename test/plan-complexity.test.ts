@@ -1,5 +1,9 @@
 import { describe, it, expect } from '@jest/globals';
-import { executePlanCommand } from '../src/commands/plan.js';
+import {
+  assertComplexityReasonCanBeRecorded,
+  executePlanCommand,
+  getPlanComplexityValues,
+} from '../src/commands/plan.js';
 
 const apiUrl = 'http://localhost:0';
 const projectId = 'test-project';
@@ -35,9 +39,24 @@ describe('plan create complexity validation', () => {
 });
 
 describe('plan update complexity validation', () => {
+  it('uses the shared complexity tier order', () => {
+    expect(getPlanComplexityValues()).toEqual(['MINIMAL', 'STANDARD', 'FULL']);
+  });
+
   it('rejects update when --complexity is not a valid tier', async () => {
     await expect(
       executePlanCommand(apiUrl, projectId, headers, 'update', { id: 'p1', complexity: 'HUGE' }),
     ).rejects.toThrow(/Invalid --complexity/);
+  });
+
+  it('rejects update when --complexity-reason is provided without --complexity', async () => {
+    await expect(
+      executePlanCommand(apiUrl, projectId, headers, 'update', { id: 'p1', complexityReason: 'scope changed' }),
+    ).rejects.toThrow(/--complexity-reason requires --complexity/);
+  });
+
+  it('rejects a complexity reason when the requested tier equals the current tier', () => {
+    expect(() => assertComplexityReasonCanBeRecorded('scope changed', 'STANDARD', 'STANDARD'))
+      .toThrow(/matches the current plan complexity/);
   });
 });
