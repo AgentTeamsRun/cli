@@ -140,11 +140,12 @@ program
   .option('--stdin', 'Read plan HTML summary from stdin (upload-html only)', false)
   .option('--html-file <path>', 'Read the plan HTML preview from a local file (required for create and body/title/type/priority updates)')
   .option('--html-stdin', 'Read the plan HTML preview from stdin (create/update; mutually exclusive with --html-file)', false)
-  .option('--allow-missing-html-preview', 'Escape hatch: create/update without an HTML preview (not recommended; the plan body and preview may drift)', false)
   .option('--source-label <label>', 'Optional source label for uploaded plan HTML summary')
   .option('--template <name>', 'Plan content template (refactor-minimal, quick-minimal, create only)')
   .option('--status <status>', 'Plan status (BACKLOG, TODO, ASSIGNED, IN_PROGRESS, BLOCKED, DONE, CANCELLED)')
   .option('--type <type>', 'Plan type (FEATURE, BUG_FIX, ISSUE, REFACTOR, CHORE)')
+  .option('--complexity <level>', 'Plan complexity (MINIMAL, STANDARD, FULL; required for create)')
+  .option('--complexity-reason <text>', 'Reason for changing complexity (update only; recorded as a MODIFICATION comment)')
   .option('--priority <priority>', 'Plan priority (LOW, MEDIUM, HIGH)')
   .option('--assigned-to <id>', 'Assigned agent config ID (list filter)')
   .option('--task <text>', 'Task summary for plan start/finish')
@@ -191,11 +192,12 @@ program
         stdin: options.stdin,
         htmlFile: options.htmlFile,
         htmlStdin: options.htmlStdin,
-        allowMissingHtmlPreview: options.allowMissingHtmlPreview,
         sourceLabel: options.sourceLabel,
         template: options.template,
         status: options.status,
         type: options.type,
+        complexity: options.complexity,
+        complexityReason: options.complexityReason,
         priority: options.priority,
         assignedTo: options.assignedTo,
         task: options.task,

@@ -154,6 +154,7 @@ agentteams plan create \
   --title "Implement feature" \
   --content "Detailed content" \
   --type FEATURE \
+  --complexity FULL \
   --priority HIGH
 
 # optional checklist template for create
@@ -177,6 +178,8 @@ Status values: `BACKLOG`, `TODO`, `ASSIGNED`, `IN_PROGRESS`, `BLOCKED`, `DONE`, 
 
 Types: `FEATURE`, `BUG_FIX`, `ISSUE`, `REFACTOR`, `CHORE`
 
+Complexity: `MINIMAL`, `STANDARD`, `FULL` — required for `plan create` (`--complexity`). MINIMAL = 1 task / 1–2 files / single domain; STANDARD = 2–3 tasks / known scope; FULL = 4+ tasks, multi-wave, or risk signals (schema/auth/billing/quota/deployment, cross-workspace, large diff, unfamiliar domain). Changing complexity on update (`--complexity` with optional `--complexity-reason`) records a `MODIFICATION` comment.
+
 Priorities: `LOW`, `MEDIUM`, `HIGH`
 
 Plan template values (create): `refactor-minimal`, `quick-minimal`
@@ -185,6 +188,7 @@ Plan template values (create): `refactor-minimal`, `quick-minimal`
 
 - Creates a plan with `--content` as the plan body (`--content` or `--file` is required)
 - Uses `LOW` as the default priority (override with `--priority`)
+- Defaults to `MINIMAL` complexity (override with `--complexity`)
 - Starts and finishes the plan in one flow
 - Does not attach a completion report; use the full plan workflow for detailed reporting
 
@@ -391,7 +395,7 @@ Rules:
 - `plan create` fails if no HTML preview input is given. On success the plan is created, then the preview is uploaded in the same command.
 - `plan update` requires the HTML preview when the request changes `--content`/`--file`, `--title`, `--type`, or `--priority` (the fields that affect the preview's source hash). A status-only update (`--status`) does **not** require the preview.
 - If the HTML upload fails after the plan was created/updated, the command exits with an error noting the partial failure (the plan body and preview are out of sync). Re-run `agentteams plan upload-html` to recover.
-- `--allow-missing-html-preview` is an explicit escape hatch for migrations or emergencies: it lets create/update proceed without a preview, printing a warning that the body and preview may drift. Avoid it in normal use.
+- The HTML preview is mandatory for `plan create` and preview-affecting `plan update`; there is no escape hatch. This keeps the plan body and its human-facing preview in sync.
 
 The standalone `agentteams plan upload-html` action still exists for re-uploading or fixing a preview:
 

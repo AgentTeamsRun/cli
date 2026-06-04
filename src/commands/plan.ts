@@ -34,6 +34,20 @@ import {
   uploadPlanHtml,
 } from '../api/plan.js';
 
+// Plan complexity tiers. Mirrors PlanComplexity in the API (api/src/constants/enums.ts).
+const PLAN_COMPLEXITY_VALUES = ['MINIMAL', 'STANDARD', 'FULL'];
+
+// Lightweight, warning-only heuristic that flags an obvious mismatch between the declared
+// complexity and the plan body length. It never rejects — precise structural validation is future work.
+function warnOnComplexityMismatch(complexity: string, content: string): void {
+  const length = content.trim().length;
+  if (complexity === 'FULL' && length < 400) {
+    process.stderr.write('[warn] plan create: --complexity FULL but the body is short. FULL is for multi-wave / multi-domain work — confirm the tier fits.\n');
+  } else if (complexity === 'MINIMAL' && length > 4000) {
+    process.stderr.write('[warn] plan create: --complexity MINIMAL but the body is large. MINIMAL is for a single task touching 1–2 files — confirm the tier fits.\n');
+  }
+}
+
 function findProjectRoot(): string | null {
   const configPath = findProjectConfig(process.cwd());
   if (!configPath) return null;
@@ -486,6 +500,13 @@ export async function executePlanCommand(
       if (!options.runnerType || !options.model) {
         throw new Error('--runner-type and --model are required for plan create.');
       }
+      if (!options.complexity) {
+        throw new Error('--complexity is required for plan create. Choose one of MINIMAL, STANDARD, FULL.');
+      }
+      const createComplexity = String(options.complexity).toUpperCase();
+      if (!PLAN_COMPLEXITY_VALUES.includes(createComplexity)) {
+        throw new Error(`Invalid --complexity "${options.complexity}". Choose one of ${PLAN_COMPLEXITY_VALUES.join(', ')}.`);
+      }
 
       let content = options.content;
       const hasExplicitContent = typeof options.content === 'string' && options.content.trim().length > 0;
@@ -519,19 +540,20 @@ export async function executePlanCommand(
         process.stderr.write(`[warn] plan create: --status ${options.status} is ignored. Plans are always created as BACKLOG.\n`);
       }
 
-      // HTML preview is required: validate the input before creating the plan so we fail fast.
+      // HTML preview is mandatory for plan create — there is no escape hatch. This keeps the
+      // plan body and its human-facing preview in sync.
       const createHasHtmlInput = hasPlanHtmlPreviewInput(options);
-      const createAllowMissingHtml = options.allowMissingHtmlPreview === true;
-      if (!createHasHtmlInput && !createAllowMissingHtml) {
+      if (!createHasHtmlInput) {
         throw new Error(
-          'An HTML preview is required for plan create. Provide --html-file <path> or --html-stdin, '
-          + 'or pass --allow-missing-html-preview to skip (not recommended; the plan body and preview may drift).'
+          'An HTML preview is required for plan create. Provide --html-file <path> or --html-stdin.'
         );
       }
-      const createHtmlContent = createHasHtmlInput ? readPlanHtmlPreviewInput(options) : undefined;
-      if (!createHasHtmlInput && createAllowMissingHtml) {
-        process.stderr.write('[warn] plan create: creating without an HTML preview because --allow-missing-html-preview was set. The plan body and preview may be out of sync.\n');
-      }
+      const createHtmlContent = readPlanHtmlPreviewInput(options);
+
+      // Lightweight complexity sanity check (warning only). A FULL plan body should look multi-wave;
+      // a MINIMAL one should be short and single-scoped. This nudges authors toward the right tier
+      // without rejecting the create.
+      warnOnComplexityMismatch(createComplexity, content);
 
       const createResult = await withSpinner(
         'Creating plan...',
@@ -539,6 +561,7 @@ export async function executePlanCommand(
           title: options.title,
           content,
           type: options.type,
+          complexity: createComplexity,
           priority: options.priority ?? 'MEDIUM',
           repositoryId: options.repositoryId ?? options.defaultRepositoryId,
           status: 'BACKLOG',
@@ -633,9 +656,17 @@ export async function executePlanCommand(
       if (options.status) body.status = options.status;
       if (options.type) body.type = options.type;
       if (options.priority) body.priority = options.priority;
+      if (options.complexity) {
+        const updateComplexity = String(options.complexity).toUpperCase();
+        if (!PLAN_COMPLEXITY_VALUES.includes(updateComplexity)) {
+          throw new Error(`Invalid --complexity "${options.complexity}". Choose one of ${PLAN_COMPLEXITY_VALUES.join(', ')}.`);
+        }
+        body.complexity = updateComplexity;
+      }
+      if (options.complexityReason) body.complexityChangeReason = options.complexityReason;
 
       // Preview-affecting fields mirror the source hash inputs (title, type, priority, content).
-      // A status-only change does not affect the preview, so the HTML preview is not required.
+      // A status-only or complexity-only change does not affect the preview, so the HTML preview is not required.
       const previewAffecting =
         typeof body.content === 'string'
         || typeof body.title === 'string'
@@ -643,18 +674,13 @@ export async function executePlanCommand(
         || typeof body.priority === 'string';
 
       const updateHasHtmlInput = hasPlanHtmlPreviewInput(options);
-      const updateAllowMissingHtml = options.allowMissingHtmlPreview === true;
-      if (previewAffecting && !updateHasHtmlInput && !updateAllowMissingHtml) {
+      if (previewAffecting && !updateHasHtmlInput) {
         throw new Error(
           'An HTML preview is required when updating the plan body, title, type, or priority. '
-          + 'Provide --html-file <path> or --html-stdin, or pass --allow-missing-html-preview to skip '
-          + '(not recommended; the plan body and preview may drift).'
+          + 'Provide --html-file <path> or --html-stdin.'
         );
       }
       const updateHtmlContent = updateHasHtmlInput ? readPlanHtmlPreviewInput(options) : undefined;
-      if (previewAffecting && !updateHasHtmlInput && updateAllowMissingHtml) {
-        process.stderr.write('[warn] plan update: updating without an HTML preview because --allow-missing-html-preview was set. The plan body and preview may be out of sync.\n');
-      }
 
       const updateResult = await withSpinner(
         'Updating plan...',
@@ -820,6 +846,12 @@ export async function executePlanCommand(
 
       const priority = (options.priority as string | undefined) ?? 'LOW';
 
+      // Quick plans are one-shot, small-scope work, so they default to MINIMAL unless overridden.
+      const quickComplexity = options.complexity ? String(options.complexity).toUpperCase() : 'MINIMAL';
+      if (!PLAN_COMPLEXITY_VALUES.includes(quickComplexity)) {
+        throw new Error(`Invalid --complexity "${options.complexity}". Choose one of ${PLAN_COMPLEXITY_VALUES.join(', ')}.`);
+      }
+
       // 1. Create plan
       const createResult = await withSpinner(
         'Creating quick plan...',
@@ -827,6 +859,7 @@ export async function executePlanCommand(
           title: options.title,
           content: planContent,
           type: options.type,
+          complexity: quickComplexity,
           priority,
           repositoryId: options.repositoryId ?? options.defaultRepositoryId,
           status: 'BACKLOG',

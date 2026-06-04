@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, afterAll, jest } from '@jest/globals';
+import { describe, it, expect, beforeEach, beforeAll, afterEach, afterAll, jest } from '@jest/globals';
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -30,6 +30,21 @@ describe('CLI Integration Tests', () => {
   let axiosPatchSpy: jest.SpiedFunction<typeof axios.patch>;
   let axiosPutSpy: jest.SpiedFunction<typeof axios.put>;
   let axiosDeleteSpy: jest.SpiedFunction<typeof axios.delete>;
+
+  // Shared HTML preview file: plan create/update now mandates a preview (no escape hatch),
+  // so create/update tests pass --html-file pointing here.
+  let sharedHtmlDir: string;
+  let sharedHtmlPath: string;
+
+  beforeAll(() => {
+    sharedHtmlDir = mkdtempSync(join(tmpdir(), 'agentteams-shared-html-'));
+    sharedHtmlPath = join(sharedHtmlDir, 'preview.html');
+    writeFileSync(sharedHtmlPath, '<!doctype html><html><body><h1>Plan</h1></body></html>', 'utf-8');
+  });
+
+  afterAll(() => {
+    rmSync(sharedHtmlDir, { recursive: true, force: true });
+  });
 
   beforeEach(() => {
     process.env = {
@@ -246,9 +261,10 @@ describe('CLI Integration Tests', () => {
         title: 'Plan 1',
         content: 'content',
         priority: 'HIGH',
+        complexity: 'STANDARD',
         runnerType: 'CLAUDE_CODE',
         model: 'claude-opus-4-6',
-        allowMissingHtmlPreview: true,
+        htmlFile: sharedHtmlPath,
       });
       await executeCommand('plan', 'list', {});
       await executeCommand('plan', 'get', { id: 'plan-1' });
@@ -487,14 +503,16 @@ describe('CLI Integration Tests', () => {
 
     it('plan create: should interpret \\\\n sequences when interpretEscapes is enabled', async () => {
       axiosPostSpy.mockResolvedValue({ data: { data: { id: 't1' } } } as any);
+      axiosPutSpy.mockResolvedValue({ data: { data: { id: 't1' } } } as any);
 
       await executeCommand('plan', 'create', {
         title: 'Plan 1',
         content: 'Line1\\nLine2',
         interpretEscapes: true,
+        complexity: 'STANDARD',
         runnerType: 'CLAUDE_CODE',
         model: 'claude-opus-4-6',
-        allowMissingHtmlPreview: true,
+        htmlFile: sharedHtmlPath,
       });
 
       expect(axiosPostSpy).toHaveBeenCalledWith(
@@ -511,13 +529,15 @@ describe('CLI Integration Tests', () => {
 
     it('plan create: should use refactor-minimal template when content is missing', async () => {
       axiosPostSpy.mockResolvedValue({ data: { data: { id: 't1' } } } as any);
+      axiosPutSpy.mockResolvedValue({ data: { data: { id: 't1' } } } as any);
 
       await executeCommand('plan', 'create', {
         title: 'Plan with template',
         template: 'refactor-minimal',
+        complexity: 'STANDARD',
         runnerType: 'CLAUDE_CODE',
         model: 'claude-opus-4-6',
-        allowMissingHtmlPreview: true,
+        htmlFile: sharedHtmlPath,
       });
 
       expect(axiosPostSpy).toHaveBeenCalledWith(
@@ -532,13 +552,15 @@ describe('CLI Integration Tests', () => {
 
     it('plan create: should use quick-minimal template when content is missing', async () => {
       axiosPostSpy.mockResolvedValue({ data: { data: { id: 't1' } } } as any);
+      axiosPutSpy.mockResolvedValue({ data: { data: { id: 't1' } } } as any);
 
       await executeCommand('plan', 'create', {
         title: 'Quick plan',
         template: 'quick-minimal',
+        complexity: 'STANDARD',
         runnerType: 'CLAUDE_CODE',
         model: 'claude-opus-4-6',
-        allowMissingHtmlPreview: true,
+        htmlFile: sharedHtmlPath,
       });
 
       expect(axiosPostSpy).toHaveBeenCalledWith(
@@ -564,7 +586,7 @@ describe('CLI Integration Tests', () => {
         id: 'plan-1',
         content: 'Line1\\nLine2',
         interpretEscapes: true,
-        allowMissingHtmlPreview: true,
+        htmlFile: sharedHtmlPath,
       });
 
       expect(axiosPutSpy).toHaveBeenCalledWith(
@@ -593,6 +615,7 @@ describe('CLI Integration Tests', () => {
           executeCommand('plan', 'create', {
             title: 'Plan',
             content: 'body',
+            complexity: 'STANDARD',
             runnerType: 'CLAUDE_CODE',
             model: 'claude-opus-4-6',
           })
@@ -607,6 +630,7 @@ describe('CLI Integration Tests', () => {
         await executeCommand('plan', 'create', {
           title: 'Plan',
           content: 'body',
+          complexity: 'STANDARD',
           runnerType: 'CLAUDE_CODE',
           model: 'claude-opus-4-6',
           htmlFile: htmlPath,
@@ -614,7 +638,7 @@ describe('CLI Integration Tests', () => {
 
         expect(axiosPostSpy).toHaveBeenCalledWith(
           `${API_URL}/api/projects/${PROJECT_ID}/plans`,
-          expect.objectContaining({ title: 'Plan', content: 'body' }),
+          expect.objectContaining({ title: 'Plan', content: 'body', complexity: 'STANDARD' }),
           { headers: authHeaders() }
         );
         expect(axiosPutSpy).toHaveBeenCalledWith(
@@ -629,6 +653,7 @@ describe('CLI Integration Tests', () => {
           executeCommand('plan', 'create', {
             title: 'Plan',
             content: 'body',
+            complexity: 'STANDARD',
             runnerType: 'CLAUDE_CODE',
             model: 'claude-opus-4-6',
             htmlFile: htmlPath,
@@ -646,6 +671,7 @@ describe('CLI Integration Tests', () => {
           executeCommand('plan', 'create', {
             title: 'Plan',
             content: 'body',
+            complexity: 'STANDARD',
             runnerType: 'CLAUDE_CODE',
             model: 'claude-opus-4-6',
             htmlFile: htmlPath,
@@ -1947,7 +1973,7 @@ describe('CLI Integration Tests', () => {
 
     it('should validate required options for updated contracts', async () => {
       await expect(
-        executeCommand('plan', 'create', { title: 'no desc', runnerType: 'CLAUDE_CODE', model: 'claude-opus-4-6' })
+        executeCommand('plan', 'create', { title: 'no desc', complexity: 'STANDARD', runnerType: 'CLAUDE_CODE', model: 'claude-opus-4-6' })
       ).rejects.toThrow('--content, --file, or --template is required for plan create');
       await expect(
         executeCommand('comment', 'create', { planId: 'plan-1', content: 'x' })
@@ -1992,6 +2018,9 @@ describe('CLI Integration Tests', () => {
       expect(cliIndex).not.toContain("Action to perform (download)");
 
       expect(cliIndex).toContain("--metadata <json>");
+      expect(cliIndex).toContain("--complexity <level>");
+      expect(cliIndex).toContain("--complexity-reason <text>");
+      expect(cliIndex).not.toContain("--allow-missing-html-preview");
       expect(cliIndex).not.toContain("--author-id <id>");
       expect(cliIndex).not.toContain("--depends-on <id>");
       expect(cliIndex).toContain("BACKLOG, TODO, ASSIGNED, IN_PROGRESS, BLOCKED, DONE, CANCELLED");

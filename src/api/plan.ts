@@ -46,6 +46,7 @@ export async function createPlan(
     title: string;
     content: string;
     type?: string;
+    complexity: string;
     priority: string;
     repositoryId?: string;
     status: 'BACKLOG';
