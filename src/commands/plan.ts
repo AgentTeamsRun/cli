@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, writeFileSync, rmSync, readdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { PLAN_COMPLEXITY_ORDER } from '@agentteams/core-constants';
+import { PLAN_COMPLEXITY_ORDER } from '../constants/planComplexity.js';
 import { checkConventionFreshness } from './convention.js';
 import { findProjectConfig } from '../utils/config.js';
 import { collectGitMetrics } from '../utils/git.js';

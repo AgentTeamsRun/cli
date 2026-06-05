@@ -36,7 +36,6 @@
     "node": ">=18"
   },
   "dependencies": {
-    "@agentteams/core-constants": "file:../packages/core-constants",
     "@clack/prompts": "^1.4.0",
     "axios": "^1.16.1",
     "chalk": "^5.6.2",
