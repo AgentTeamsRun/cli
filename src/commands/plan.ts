@@ -17,6 +17,7 @@ import {
   deleteIfTempFile,
   pruneStaleCacheFiles,
 } from '../utils/parsers.js';
+import { validatePlanPreviewHtmlSafety } from '../utils/planPreviewHtmlSafety.js';
 import {
   assignPlan,
   createPlan,
@@ -45,6 +46,16 @@ function warnOnComplexityMismatch(complexity: string, content: string): void {
     process.stderr.write('[warn] plan create: --complexity FULL but the body is short. FULL is for multi-wave / multi-domain work — confirm the tier fits.\n');
   } else if (complexity === 'MINIMAL' && length > 4000) {
     process.stderr.write('[warn] plan create: --complexity MINIMAL but the body is large. MINIMAL is for a single task touching 1–2 files — confirm the tier fits.\n');
+  }
+}
+
+function assertPlanPreviewHtmlSafety(html: string): void {
+  const result = validatePlanPreviewHtmlSafety(html);
+  if (!result.ok) {
+    throw new Error(
+      'Plan HTML preview is not theme-safe. '
+      + `Fix the preview before uploading: ${result.reasons.join('; ')}.`
+    );
   }
 }
 
@@ -161,6 +172,7 @@ export function readPlanHtmlUploadInput(options: { file?: string; stdin?: boolea
   if (html.trim().length === 0) {
     throw new Error('HTML content is empty');
   }
+  assertPlanPreviewHtmlSafety(html);
 
   return html;
 }
@@ -195,6 +207,7 @@ export function readPlanHtmlPreviewInput(options: { htmlFile?: string; htmlStdin
   if (html.trim().length === 0) {
     throw new Error('HTML preview content is empty');
   }
+  assertPlanPreviewHtmlSafety(html);
 
   return html;
 }

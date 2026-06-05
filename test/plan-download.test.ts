@@ -69,10 +69,18 @@ describe('readPlanHtmlUploadInput', () => {
   it('reads non-empty HTML from --file', () => {
     const dir = mkdtempSync(join(tmpdir(), 'agentteams-plan-html-'));
     const file = join(dir, 'summary.html');
+    const html = [
+      '<!doctype html><html><head><style>',
+      ':root { --text: #111827; --surface: #ffffff; --code-bg: #f3f4f6; }',
+      '[data-theme="night"] { --text: #f9fafb; --surface: #111827; --code-bg: #1f2937; }',
+      'body { margin: 0; color: var(--text); background: transparent; }',
+      '.card { background: var(--surface); } code { background: var(--code-bg); }',
+      '</style></head><body><main class="card">Summary<code>ok</code></main></body></html>',
+    ].join('');
     try {
-      writeFileSync(file, '<main>Summary</main>', 'utf-8');
+      writeFileSync(file, html, 'utf-8');
 
-      expect(readPlanHtmlUploadInput({ file })).toBe('<main>Summary</main>');
+      expect(readPlanHtmlUploadInput({ file })).toBe(html);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

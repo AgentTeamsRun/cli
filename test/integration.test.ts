@@ -23,6 +23,17 @@ function deleteHeaders() {
   };
 }
 
+function createThemeSafePreviewHtml(label = 'Plan') {
+  return [
+    '<!doctype html><html><head><style>',
+    ':root { --text: #111827; --surface: #ffffff; --code-bg: #f3f4f6; }',
+    '[data-theme="night"] { --text: #f9fafb; --surface: #111827; --code-bg: #1f2937; }',
+    'body { margin: 0; color: var(--text); background: transparent; }',
+    '.card { background: var(--surface); } code { background: var(--code-bg); }',
+    `</style></head><body><main class="card"><h1>${label}</h1><code>ok</code></main></body></html>`,
+  ].join('');
+}
+
 describe('CLI Integration Tests', () => {
   const originalEnv = process.env;
   let axiosGetSpy: jest.SpiedFunction<typeof axios.get>;
@@ -39,7 +50,7 @@ describe('CLI Integration Tests', () => {
   beforeAll(() => {
     sharedHtmlDir = mkdtempSync(join(tmpdir(), 'agentteams-shared-html-'));
     sharedHtmlPath = join(sharedHtmlDir, 'preview.html');
-    writeFileSync(sharedHtmlPath, '<!doctype html><html><body><h1>Plan</h1></body></html>', 'utf-8');
+    writeFileSync(sharedHtmlPath, createThemeSafePreviewHtml(), 'utf-8');
   });
 
   afterAll(() => {
@@ -611,7 +622,7 @@ describe('CLI Integration Tests', () => {
       beforeEach(() => {
         htmlDir = mkdtempSync(join(tmpdir(), 'agentteams-plan-html-'));
         htmlPath = join(htmlDir, 'preview.html');
-        writeFileSync(htmlPath, '<!doctype html><html><body><h1>Plan</h1></body></html>', 'utf-8');
+        writeFileSync(htmlPath, createThemeSafePreviewHtml(), 'utf-8');
       });
 
       afterEach(() => {
@@ -671,6 +682,23 @@ describe('CLI Integration Tests', () => {
         expect(axiosPostSpy).not.toHaveBeenCalled();
       });
 
+      it('plan create: should reject theme-unsafe HTML before creating a plan', async () => {
+        writeFileSync(htmlPath, '<main>Missing CSS tokens</main>', 'utf-8');
+
+        await expect(
+          executeCommand('plan', 'create', {
+            title: 'Plan',
+            content: 'body',
+            complexity: 'STANDARD',
+            runnerType: 'CLAUDE_CODE',
+            model: 'claude-opus-4-6',
+            htmlFile: htmlPath,
+          })
+        ).rejects.toThrow('Plan HTML preview is not theme-safe');
+        expect(axiosPostSpy).not.toHaveBeenCalled();
+        expect(axiosPutSpy).not.toHaveBeenCalled();
+      });
+
       it('plan create: should fail with a partial-failure message when HTML upload fails', async () => {
         axiosPostSpy.mockResolvedValue({ data: { data: { id: 'plan-html-2' } } } as any);
         axiosPutSpy.mockRejectedValue(new Error('boom'));
@@ -721,6 +749,15 @@ describe('CLI Integration Tests', () => {
           expect.objectContaining({ curationType: 'AI_CURATED' }),
           { headers: authHeaders() }
         );
+      });
+
+      it('plan upload-html: should reject unsafe HTML before uploading', async () => {
+        writeFileSync(htmlPath, createThemeSafePreviewHtml().replace('</body>', '<script>alert(1)</script></body>'), 'utf-8');
+
+        await expect(
+          executeCommand('plan', 'upload-html', { id: 'plan-1', file: htmlPath })
+        ).rejects.toThrow('script tags are not allowed');
+        expect(axiosPutSpy).not.toHaveBeenCalled();
       });
 
       it('plan update: should not require an HTML preview for a status-only change', async () => {
