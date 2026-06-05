@@ -1,6 +1,15 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { createCodeReview, createPlanFromCodeReview, getCodeReview, listCodeReviews } from '../api/codeReview.js';
+import {
+  cancelCodeReview,
+  createCodeReview,
+  createPlanFromCodeReview,
+  deleteCodeReview,
+  dismissCodeReviewFinding,
+  getCodeReview,
+  listCodeReviews,
+  undismissCodeReviewFinding,
+} from '../api/codeReview.js';
 import { toNonEmptyString, toPositiveInteger } from '../utils/parsers.js';
 import { withSpinner } from '../utils/spinner.js';
 
@@ -139,6 +148,40 @@ export async function executeCodeReviewCommand(
           model: options.model,
         }),
         'Plan created',
+      );
+    }
+    case 'cancel': {
+      if (!options.id) throw new Error('--id is required for code-review cancel');
+      return withSpinner(
+        'Cancelling code review...',
+        () => cancelCodeReview(apiUrl, projectId, headers, options.id),
+        'Code review cancelled',
+      );
+    }
+    case 'delete': {
+      if (!options.id) throw new Error('--id is required for code-review delete');
+      return withSpinner(
+        'Deleting code review...',
+        () => deleteCodeReview(apiUrl, projectId, headers, options.id),
+        'Code review deleted',
+      );
+    }
+    case 'dismiss': {
+      if (!options.id) throw new Error('--id is required for code-review dismiss');
+      if (!options.findingId) throw new Error('--finding-id is required for code-review dismiss');
+      return withSpinner(
+        'Dismissing finding...',
+        () => dismissCodeReviewFinding(apiUrl, projectId, headers, options.id, options.findingId),
+        'Finding dismissed',
+      );
+    }
+    case 'undismiss': {
+      if (!options.id) throw new Error('--id is required for code-review undismiss');
+      if (!options.findingId) throw new Error('--finding-id is required for code-review undismiss');
+      return withSpinner(
+        'Restoring finding...',
+        () => undismissCodeReviewFinding(apiUrl, projectId, headers, options.id, options.findingId),
+        'Finding restored',
       );
     }
     default:

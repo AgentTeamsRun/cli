@@ -48,3 +48,49 @@ export async function createPlanFromCodeReview(
   const response = await httpClient.post(`${baseUrl}/${id}/plans`, body, { headers });
   return response.data;
 }
+
+export async function cancelCodeReview(
+  apiUrl: string,
+  projectId: string,
+  headers: any,
+  id: string
+): Promise<any> {
+  const baseUrl = `${apiUrl}/api/projects/${projectId}/code-reviews`;
+  const response = await httpClient.post(`${baseUrl}/${id}/cancel`, {}, { headers });
+  return response.data;
+}
+
+export async function deleteCodeReview(
+  apiUrl: string,
+  projectId: string,
+  headers: any,
+  id: string
+): Promise<any> {
+  const baseUrl = `${apiUrl}/api/projects/${projectId}/code-reviews`;
+  const response = await httpClient.delete(`${baseUrl}/${id}`, { headers });
+  return response.data;
+}
+
+export async function dismissCodeReviewFinding(
+  apiUrl: string,
+  projectId: string,
+  headers: any,
+  id: string,
+  findingId: string
+): Promise<any> {
+  const baseUrl = `${apiUrl}/api/projects/${projectId}/code-reviews`;
+  const response = await httpClient.post(`${baseUrl}/${id}/findings/${findingId}/dismiss`, {}, { headers });
+  return response.data;
+}
+
+export async function undismissCodeReviewFinding(
+  apiUrl: string,
+  projectId: string,
+  headers: any,
+  id: string,
+  findingId: string
+): Promise<any> {
+  const baseUrl = `${apiUrl}/api/projects/${projectId}/code-reviews`;
+  const response = await httpClient.post(`${baseUrl}/${id}/findings/${findingId}/undismiss`, {}, { headers });
+  return response.data;
+}

@@ -413,8 +413,9 @@ program
 program
   .command('code-review')
   .description('Manage independent code reviews')
-  .argument('<action>', 'Action to perform (list, get, show, create, create-plan)')
+  .argument('<action>', 'Action to perform (list, get, show, create, create-plan, cancel, delete, dismiss, undismiss)')
   .option('--id <id>', 'Code review ID')
+  .option('--finding-id <id>', 'Finding ID for dismiss/undismiss')
   .option('--title <title>', 'Code review or generated plan title')
   .option('--target-type <type>', 'Review target type (BRANCH_DIFF, GITHUB_PR, GITLAB_MR, LOCAL_DIFF, UPLOADED_DIFF, COMMIT_RANGE)')
   .option('--target-ref <ref>', 'Target reference such as branch, PR URL, MR URL, or commit range')
@@ -455,6 +456,7 @@ program
       const normalizedFormat = normalizeFormat(options.format, 'json');
       const result = await executeCommand('code-review', action, {
         id: options.id,
+        findingId: options.findingId,
         title: options.title,
         targetType: options.targetType,
         targetRef: options.targetRef,
