@@ -418,6 +418,12 @@ export async function executePlanCommand(
       const includeCompletionReport =
         typeof reportContent === 'string' && reportContent.trim().length > 0;
 
+      // 완료보고서를 첨부하면 runnerType/model 스냅샷이 보고서에 저장되므로,
+      // null로 남지 않도록 보고서 첨부 시점에 강제한다. (보고서 없는 finish는 제외)
+      if (includeCompletionReport && (!options.runnerType || !options.model)) {
+        throw new Error('--runner-type and --model are required when attaching a completion report.');
+      }
+
       const body: {
         task?: string;
         runnerType?: string;
@@ -910,7 +916,7 @@ export async function executePlanCommand(
       // 3. Finish plan (no completion report for quick plans)
       const finishResult = await withSpinner(
         'Finishing plan...',
-        () => finishPlanLifecycle(apiUrl, projectId, headers, planId, {}),
+        () => finishPlanLifecycle(apiUrl, projectId, headers, planId, { runnerType: options.runnerType, model: options.model }),
         'Plan finished',
       );
 
