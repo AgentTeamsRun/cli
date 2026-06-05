@@ -5,7 +5,7 @@ import { checkConventionFreshness } from './convention.js';
 import { findProjectConfig } from '../utils/config.js';
 import { collectGitMetrics } from '../utils/git.js';
 import { withSpinner, printFileInfo } from '../utils/spinner.js';
-import { formatPlanWithDependenciesText, mergePlanWithDependencies, normalizeDependencies } from '../utils/planFormat.js';
+import { mergePlanWithDependencies, normalizeDependencies } from '../utils/planFormat.js';
 import {
   ensureUrlProtocol,
   interpretEscapes,
@@ -306,10 +306,6 @@ export async function executePlanCommand(
         const dependencies = normalizeDependencies(depsResponse);
         const mergedPlan = mergePlanWithDependencies(response, dependencies);
 
-        if (options.format === 'text') {
-          return formatPlanWithDependenciesText(mergedPlan.data, dependencies);
-        }
-
         return mergedPlan;
       }
 
@@ -325,10 +321,6 @@ export async function executePlanCommand(
         const depsResponse = await getPlanDependencies(apiUrl, projectId, headers, options.id);
         const dependencies = normalizeDependencies(depsResponse);
         const mergedPlan = mergePlanWithDependencies(response, dependencies);
-
-        if (options.format === 'text') {
-          return formatPlanWithDependenciesText(mergedPlan.data, dependencies);
-        }
 
         return mergedPlan;
       }

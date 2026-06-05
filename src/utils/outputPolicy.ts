@@ -1,4 +1,4 @@
-export type OutputFormat = 'json' | 'text';
+export type OutputFormat = 'json';
 
 export interface OutputPolicyContext {
   resource?: string;
@@ -35,7 +35,7 @@ export function shouldPrintSummary(context: OutputPolicyContext): boolean {
 
   if (!context.resource || !context.action) return false;
 
-  if (context.format === 'json' && context.formatExplicit) {
+  if (context.formatExplicit) {
     return false;
   }
 

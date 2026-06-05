@@ -8,7 +8,7 @@ import { executeCommand } from './commands/index.js';
 import { formatOutput } from './utils/formatter.js';
 import { handleError } from './utils/errors.js';
 import { createSummaryLines, shouldPrintSummary, type OutputFormat } from './utils/outputPolicy.js';
-import { printInitResult } from './utils/initOutput.js';
+import { printInitResult, type InitOutputFormat } from './utils/initOutput.js';
 import { startUpdateCheck, readCache, compareVersions, formatUpdateMessage } from './utils/updateCheck.js';
 
 const require = createRequire(import.meta.url);
@@ -16,9 +16,16 @@ const pkg = require('../package.json') as { version: string };
 
 const program = new Command();
 
-function normalizeFormat(format: unknown, fallback: OutputFormat): OutputFormat {
-  if (format === 'json' || format === 'text') return format;
-  return fallback;
+function normalizeFormat(format: unknown): OutputFormat {
+  if (format === undefined || format === null || format === '') return 'json';
+  if (format === 'json') return 'json';
+  throw new Error(`Unsupported output format: ${String(format)}. Only json is supported.`);
+}
+
+function normalizeInteractiveFormat(format: unknown): InitOutputFormat {
+  if (format === undefined || format === null || format === '') return 'human';
+  if (format === 'json') return 'json';
+  throw new Error(`Unsupported output format: ${String(format)}. Use json or omit --format for the human-readable view.`);
 }
 
 function writeOutputFile(outputFile: string, content: string): { resolvedPath: string; bytes: number } {
@@ -39,7 +46,7 @@ function printCommandResult(params: {
   formatExplicit?: boolean;
 }): void {
   const outputText =
-    typeof params.result === 'string' ? params.result : formatOutput(params.result, params.format);
+    typeof params.result === 'string' ? params.result : formatOutput(params.result);
 
   const summaryLines = createSummaryLines(params.result, {
     resource: params.resource,
@@ -86,14 +93,14 @@ program
 program
   .command('init')
   .description('Initialize AgentTeams CLI via OAuth')
-  .option('--format <format>', 'Output format (json, text)', 'text')
+  .option('--format <format>', 'Output format (json; defaults to human-readable view)')
   .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
   .option('--verbose', 'Print full output to stdout (useful with --output-file)', false)
   .addHelpText('after', CONVENTION_HINT)
   .action(async (options) => {
     try {
       const result = await executeCommand('init', 'start', {});
-      const format = normalizeFormat(options.format, 'text');
+      const format = normalizeInteractiveFormat(options.format);
 
       printInitResult(result, format);
     } catch (error) {
@@ -105,7 +112,7 @@ program
 program
   .command('sync')
   .description('Sync local convention files from API')
-  .option('--format <format>', 'Output format (json, text)', 'text')
+  .option('--format <format>', 'Output format (json; defaults to human-readable view)')
   .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
   .option('--verbose', 'Print full output to stdout (useful with --output-file)', false)
   .addHelpText('after', CONVENTION_HINT)
@@ -114,10 +121,16 @@ program
       const result = await executeCommand('sync', 'download', {
         cwd: process.cwd(),
       });
+      const format = normalizeInteractiveFormat(options.format);
+
+      if (format === 'human' && !options.outputFile) {
+        console.log(typeof result === 'string' ? result : formatOutput(result));
+        return;
+      }
 
       printCommandResult({
-        result,
-        format: normalizeFormat(options.format, 'text'),
+        result: format === 'json' && typeof result === 'string' ? { message: result } : result,
+        format: 'json',
         outputFile: options.outputFile,
         verbose: options.verbose,
       });
@@ -175,13 +188,13 @@ program
   .option('--issue-id <id>', 'PlanExternalIssue ID (for unlink-issue)')
   .option('--metadata <json>', 'Provider metadata as JSON (e.g. {"owner":"org","repo":"name"})')
   .option('--include-deps', 'Include dependencies in plan get/show output', false)
-  .option('--format <format>', 'Output format (json, text)')
+  .option('--format <format>', 'Output format (json)')
   .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
   .option('--verbose', 'Print full output to stdout (useful with --output-file)', false)
   .addHelpText('after', CONVENTION_HINT)
   .action(async (action, options) => {
     try {
-      const normalizedFormat = normalizeFormat(options.format, 'json');
+      const normalizedFormat = normalizeFormat(options.format);
       const result = await executeCommand('plan', action, {
         id: options.id,
         title: options.title,
@@ -257,7 +270,7 @@ program
   .option('--affected-files <files>', 'Comma-separated list of affected file paths (create/update)')
   .option('--page <number>', 'Page number (list only)')
   .option('--page-size <number>', 'Page size (list only)')
-  .option('--format <format>', 'Output format (json, text)', 'json')
+  .option('--format <format>', 'Output format (json)', 'json')
   .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
   .option('--verbose', 'Print full output to stdout (useful with --output-file)', false)
   .addHelpText('after', CONVENTION_HINT)
@@ -275,7 +288,7 @@ program
 
       printCommandResult({
         result,
-        format: normalizeFormat(options.format, 'json'),
+        format: normalizeFormat(options.format),
         outputFile: options.outputFile,
         verbose: options.verbose,
       });
@@ -295,13 +308,13 @@ program
   .option('--project-id <id>', 'Override project ID (optional)')
   .option('--team-id <id>', 'Override team ID (optional)')
   .option('--agent-name <name>', 'Override agent name (optional)')
-  .option('--format <format>', 'Output format (json, text)', 'json')
+  .option('--format <format>', 'Output format (json)', 'json')
   .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
   .option('--verbose', 'Print full output to stdout (useful with --output-file)', false)
   .addHelpText('after', CONVENTION_HINT)
   .action(async (action, options) => {
     try {
-      const normalizedFormat = normalizeFormat(options.format, 'json');
+      const normalizedFormat = normalizeFormat(options.format);
       const result = await executeCommand('attachment', action, {
         triggerId: options.triggerId,
         apiUrl: options.apiUrl,
@@ -357,14 +370,14 @@ program
   .option('--project-id <id>', 'Override project ID (optional)')
   .option('--team-id <id>', 'Override team ID (optional)')
   .option('--agent-name <name>', 'Override agent name (optional)')
-  .option('--format <format>', 'Output format (json, text)')
+  .option('--format <format>', 'Output format (json)')
   .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
   .option('--verbose', 'Print full output to stdout (useful with --output-file)', false)
   .addHelpText('after', CONVENTION_HINT)
   .action(async (action, options) => {
     try {
 
-      const normalizedFormat = normalizeFormat(options.format, 'json');
+      const normalizedFormat = normalizeFormat(options.format);
       const result = await executeCommand('report', action, {
         id: options.id,
         planId: options.planId,
@@ -447,13 +460,13 @@ program
   .option('--project-id <id>', 'Override project ID (optional)')
   .option('--team-id <id>', 'Override team ID (optional)')
   .option('--agent-name <name>', 'Override agent name (optional)')
-  .option('--format <format>', 'Output format (json, text)')
+  .option('--format <format>', 'Output format (json)')
   .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
   .option('--verbose', 'Print full output to stdout (useful with --output-file)', false)
   .addHelpText('after', CONVENTION_HINT)
   .action(async (action, options) => {
     try {
-      const normalizedFormat = normalizeFormat(options.format, 'json');
+      const normalizedFormat = normalizeFormat(options.format);
       const result = await executeCommand('code-review', action, {
         id: options.id,
         findingId: options.findingId,
@@ -525,13 +538,13 @@ program
   .option('--project-id <id>', 'Override project ID (optional)')
   .option('--team-id <id>', 'Override team ID (optional)')
   .option('--agent-name <name>', 'Override agent name (optional)')
-  .option('--format <format>', 'Output format (json, text)')
+  .option('--format <format>', 'Output format (json)')
   .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
   .option('--verbose', 'Print full output to stdout (useful with --output-file)', false)
   .addHelpText('after', CONVENTION_HINT)
   .action(async (action, options) => {
     try {
-      const normalizedFormat = normalizeFormat(options.format, 'json');
+      const normalizedFormat = normalizeFormat(options.format);
       const result = await executeCommand('postmortem', action, {
         id: options.id,
         planId: options.planId,
@@ -589,13 +602,13 @@ program
   .option('--project-id <id>', 'Override project ID (optional)')
   .option('--team-id <id>', 'Override team ID (optional)')
   .option('--agent-name <name>', 'Override agent name (optional)')
-  .option('--format <format>', 'Output format (json, text)')
+  .option('--format <format>', 'Output format (json)')
   .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
   .option('--verbose', 'Print full output to stdout (useful with --output-file)', false)
   .addHelpText('after', CONVENTION_HINT)
   .action(async (action, options) => {
     try {
-      const normalizedFormat = normalizeFormat(options.format, 'json');
+      const normalizedFormat = normalizeFormat(options.format);
       const result = await executeCommand('coaction', action, {
         id: options.id,
         takeawayId: options.takeawayId,
@@ -645,13 +658,13 @@ program
   .option('--project-id <id>', 'Override project ID (optional)')
   .option('--team-id <id>', 'Override team ID (optional)')
   .option('--agent-name <name>', 'Override agent name (optional)')
-  .option('--format <format>', 'Output format (json, text)', 'text')
+  .option('--format <format>', 'Output format (json)', 'json')
   .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
   .option('--verbose', 'Print full output to stdout (useful with --output-file)', false)
   .addHelpText('after', CONVENTION_HINT)
   .action(async (action, options) => {
     try {
-      const normalizedFormat = normalizeFormat(options.format, 'text');
+      const normalizedFormat = normalizeFormat(options.format);
       const result = await executeCommand('feedback', action, {
         category: options.category,
         title: options.title,
@@ -703,7 +716,7 @@ program
 
       printCommandResult({
         result,
-        format: 'text',
+        format: 'json',
         outputFile: options.outputFile,
         verbose: options.verbose,
       });
@@ -739,7 +752,7 @@ program
   .option('--project-id <id>', 'Override project ID (optional)')
   .option('--team-id <id>', 'Override team ID (optional)')
   .option('--agent-name <name>', 'Override agent name (optional)')
-  .option('--format <format>', 'Output format (json, text)', 'text')
+  .option('--format <format>', 'Output format (json)', 'json')
   .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
   .option('--verbose', 'Print full output to stdout (useful with --output-file)', false)
   .addHelpText('after', CONVENTION_HINT)
@@ -749,7 +762,7 @@ program
 
       printCommandResult({
         result,
-        format: normalizeFormat(options.format, 'text'),
+        format: normalizeFormat(options.format),
         outputFile: options.outputFile,
         verbose: options.verbose,
         resource: 'document',
@@ -769,7 +782,7 @@ program
   .option('--plan-id <id>', 'Plan ID')
   .option('--blocking-plan-id <id>', 'Blocking plan ID')
   .option('--dep-id <id>', 'Dependency ID to delete')
-  .option('--format <format>', 'Output format (json, text)', 'json')
+  .option('--format <format>', 'Output format (json)', 'json')
   .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
   .option('--verbose', 'Print full output to stdout (useful with --output-file)', false)
   .addHelpText('after', CONVENTION_HINT)
@@ -783,7 +796,7 @@ program
 
       printCommandResult({
         result,
-        format: normalizeFormat(options.format, 'json'),
+        format: normalizeFormat(options.format),
         outputFile: options.outputFile,
         verbose: options.verbose,
       });
@@ -798,7 +811,7 @@ program
   .description('Manage agent configurations')
   .argument('<action>', 'Action to perform (list, get, delete)')
   .option('--id <id>', 'Agent config ID')
-  .option('--format <format>', 'Output format (json, text)', 'json')
+  .option('--format <format>', 'Output format (json)', 'json')
   .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
   .option('--verbose', 'Print full output to stdout (useful with --output-file)', false)
   .addHelpText('after', CONVENTION_HINT)
@@ -810,7 +823,7 @@ program
 
       printCommandResult({
         result,
-        format: normalizeFormat(options.format, 'json'),
+        format: normalizeFormat(options.format),
         outputFile: options.outputFile,
         verbose: options.verbose,
       });
@@ -824,7 +837,7 @@ program
   .command('config')
   .description('Manage configuration')
   .argument('<action>', 'Action to perform (whoami)')
-  .option('--format <format>', 'Output format (json, text)', 'json')
+  .option('--format <format>', 'Output format (json)', 'json')
   .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
   .option('--verbose', 'Print full output to stdout (useful with --output-file)', false)
   .addHelpText('after', CONVENTION_HINT)
@@ -834,7 +847,7 @@ program
 
       printCommandResult({
         result,
-        format: normalizeFormat(options.format, 'json'),
+        format: normalizeFormat(options.format),
         outputFile: options.outputFile,
         verbose: options.verbose,
       });
@@ -856,13 +869,13 @@ program
   .option('--project-id <id>', 'Override project ID (optional)')
   .option('--team-id <id>', 'Override team ID (optional)')
   .option('--agent-name <name>', 'Override agent name (optional)')
-  .option('--format <format>', 'Output format (json, text)', 'json')
+  .option('--format <format>', 'Output format (json)', 'json')
   .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
   .option('--verbose', 'Print full output to stdout (useful with --output-file)', false)
   .addHelpText('after', CONVENTION_HINT)
   .action(async (options) => {
     try {
-      const normalizedFormat = normalizeFormat(options.format, 'json');
+      const normalizedFormat = normalizeFormat(options.format);
       const result = await executeCommand('search', '', {
         query: options.query,
         types: options.types,
@@ -908,7 +921,7 @@ linearCommand
   .option('--api-key <key>', 'Override API key (optional)')
   .option('--project-id <id>', 'Override project ID (optional)')
   .option('--agent-name <name>', 'Override agent name (optional)')
-  .option('--format <format>', 'Output format (json, text)', 'text')
+  .option('--format <format>', 'Output format (json)', 'json')
   .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
   .option('--verbose', 'Print full output to stdout (useful with --output-file)', false)
   .action(async (action, options) => {
@@ -919,7 +932,7 @@ linearCommand
 
       const actionMap: Record<string, string> = { get: 'issue-get', create: 'issue-create', update: 'issue-update' };
       const commandAction = actionMap[action];
-      const normalizedFormat = normalizeFormat(options.format, action === 'get' ? 'text' : 'json');
+      const normalizedFormat = normalizeFormat(options.format);
       const result = await executeCommand('linear', commandAction, {
         issueId: options.issueId,
         teamId: options.teamId,
@@ -959,7 +972,7 @@ linearCommand
   .option('--project-id <id>', 'Override project ID (optional)')
   .option('--team-id <id>', 'Override team ID (optional)')
   .option('--agent-name <name>', 'Override agent name (optional)')
-  .option('--format <format>', 'Output format (json, text)', 'json')
+  .option('--format <format>', 'Output format (json)', 'json')
   .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
   .option('--verbose', 'Print full output to stdout (useful with --output-file)', false)
   .action(async (action, options) => {
@@ -969,7 +982,7 @@ linearCommand
       }
 
       const commentAction = action === 'list' ? 'comment-list' : 'comment-create';
-      const normalizedFormat = normalizeFormat(options.format, 'json');
+      const normalizedFormat = normalizeFormat(options.format);
       const result = await executeCommand('linear', commentAction, {
         issueId: options.issueId,
         body: options.body,

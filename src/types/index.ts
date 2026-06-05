@@ -65,4 +65,4 @@ export interface Plan {
 /**
  * Common CLI output format options
  */
-export type OutputFormat = "json" | "text";
+export type OutputFormat = "json";

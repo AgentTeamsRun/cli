@@ -40,7 +40,7 @@ describe('outputPolicy', () => {
       shouldPrintSummary({
         resource: 'plan',
         action: 'update',
-        format: 'text',
+        format: 'json',
         formatExplicit: false,
         verbose: true,
       })

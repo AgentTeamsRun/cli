@@ -1,7 +1,8 @@
 import chalk from 'chalk';
 import { formatOutput } from './formatter.js';
-import type { OutputFormat } from './outputPolicy.js';
 import type { AgentFileEntry } from '../commands/init.js';
+
+export type InitOutputFormat = 'human' | 'json';
 
 interface InitResultShape {
   success: true;
@@ -24,18 +25,14 @@ function isInitResult(result: unknown): result is InitResultShape {
   );
 }
 
-export function printInitResult(result: unknown, format: OutputFormat): void {
+export function printInitResult(result: unknown, format: InitOutputFormat): void {
   if (format === 'json') {
-    const outputText =
-      typeof result === 'string' ? result : formatOutput(result, format);
-    console.log(outputText);
+    console.log(formatOutput(result));
     return;
   }
 
   if (!isInitResult(result)) {
-    const outputText =
-      typeof result === 'string' ? result : formatOutput(result, format);
-    console.log(outputText);
+    console.log(typeof result === 'string' ? result : formatOutput(result));
     return;
   }
 

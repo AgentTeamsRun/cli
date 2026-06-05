@@ -130,10 +130,6 @@ const safeFileName = (title: string, id: string) => {
   return `${id.slice(0, 8)}-${slug}.md`;
 };
 
-const viewLink = (webUrl?: string | null) => {
-  return webUrl ? `[View in AgentTeams](${webUrl})` : null;
-};
-
 const normalizeEnumValue = <T extends string>(
   value: string | undefined,
   allowedValues: readonly T[],
@@ -151,39 +147,6 @@ const normalizeEnumValue = <T extends string>(
 const normalizeVisibility = (value?: string) => normalizeEnumValue(value, VISIBILITY_VALUES, "--visibility");
 const normalizeArchived = (value?: string) => normalizeEnumValue(value, ARCHIVED_VALUES, "--archived");
 const normalizeOrder = (value?: string) => normalizeEnumValue(value, ORDER_VALUES, "--order", { lowercase: true });
-
-const formatDocument = (document: DocumentRecord) => {
-  return [
-    `id: ${document.id}`,
-    `title: ${document.title}`,
-    document.visibility ? `visibility: ${document.visibility}` : null,
-    document.tags && document.tags.length > 0 ? `tags: ${document.tags.join(", ")}` : null,
-    document.archivedAt ? `archivedAt: ${document.archivedAt}` : null,
-    document.updatedAt ? `updatedAt: ${document.updatedAt}` : null,
-    viewLink(document.webUrl)
-  ].filter(Boolean).join("\n");
-};
-
-const formatRevision = (revision: DocumentRevisionRecord) => {
-  return [
-    `id: ${revision.id}`,
-    revision.revisionNumber !== undefined ? `revisionNumber: ${revision.revisionNumber}` : null,
-    revision.title ? `title: ${revision.title}` : null,
-    revision.bodyPreview ? `bodyPreview: ${revision.bodyPreview}` : null,
-    revision.createdBy?.nickname ? `createdBy: ${revision.createdBy.nickname}` : null,
-    revision.createdAt ? `createdAt: ${revision.createdAt}` : null
-  ].filter(Boolean).join("\n");
-};
-
-const formatComment = (comment: DocumentCommentRecord) => {
-  return [
-    `id: ${comment.id}`,
-    comment.createdByName ? `createdByName: ${comment.createdByName}` : null,
-    comment.contentMarkdown ? `content: ${comment.contentMarkdown}` : comment.content ? `content: ${comment.content}` : null,
-    comment.updatedAt ? `updatedAt: ${comment.updatedAt}` : null,
-    comment.createdAt ? `createdAt: ${comment.createdAt}` : null
-  ].filter(Boolean).join("\n");
-};
 
 const paginationParams = (options: DocumentCommandOptions) => {
   const params: Record<string, string | number> = {};
@@ -207,6 +170,13 @@ const getDocumentData = (response: unknown) => {
   return (response as { data: DocumentRecord }).data;
 };
 
+const withMessage = <T extends Record<string, unknown>>(response: T, message: string): T & { message: string } => {
+  return {
+    ...response,
+    message,
+  };
+};
+
 export async function executeDocumentCommand(
   apiUrl: string,
   projectId: string,
@@ -224,11 +194,7 @@ export async function executeDocumentCommand(
         tags: normalizeTags(options.tags),
         ...(options.visibility ? { visibility: normalizeVisibility(options.visibility) } : {})
       });
-      const document = getDocumentData(response);
-      return [
-        "Document created",
-        formatDocument(document)
-      ].join("\n");
+      return withMessage(response as Record<string, unknown>, "Document created");
     }
 
     case "update": {
@@ -243,11 +209,7 @@ export async function executeDocumentCommand(
       }
 
       const response = await updateDocument(apiUrl, projectId, headers, options.id, payload);
-      const document = getDocumentData(response);
-      return [
-        "Document updated",
-        formatDocument(document)
-      ].join("\n");
+      return withMessage(response as Record<string, unknown>, "Document updated");
     }
 
     case "download": {
@@ -261,8 +223,10 @@ export async function executeDocumentCommand(
       atomicWriteFileSync(outputPath, body ?? document.body ?? "", "utf-8");
       return [
         `Document downloaded to ${outputPath}`,
-        formatDocument(document)
-      ].join("\n");
+        `id: ${document.id}`,
+        `title: ${document.title}`,
+        document.webUrl ? `webUrl: ${document.webUrl}` : null
+      ].filter(Boolean).join("\n");
     }
 
     case "list": {
@@ -275,16 +239,20 @@ export async function executeDocumentCommand(
 
       const response = await listDocuments(apiUrl, projectId, headers, params);
       const documents = (response as { data: DocumentRecord[] }).data;
-      if (documents.length === 0) {
-        return "No documents found";
-      }
-      return documents.map(formatDocument).join("\n\n");
+      return documents.length === 0
+        ? withMessage(response as Record<string, unknown>, "No documents found")
+        : response;
     }
 
     case "delete": {
       if (!options.id) throw new Error("--id is required for document delete");
       await deleteDocument(apiUrl, projectId, headers, options.id);
-      return `Document deleted\nid: ${options.id}`;
+      return {
+        message: "Document deleted",
+        data: {
+          id: options.id,
+        },
+      };
     }
 
     case "archive":
@@ -293,43 +261,33 @@ export async function executeDocumentCommand(
       const response = action === "archive"
         ? await archiveDocument(apiUrl, projectId, headers, options.id)
         : await unarchiveDocument(apiUrl, projectId, headers, options.id);
-      const document = getDocumentData(response);
-      return [
-        action === "archive" ? "Document archived" : "Document unarchived",
-        formatDocument(document)
-      ].join("\n");
+      return withMessage(
+        response as Record<string, unknown>,
+        action === "archive" ? "Document archived" : "Document unarchived"
+      );
     }
 
     case "revisions": {
       if (!options.id) throw new Error("--id is required for document revisions");
       const response = await listDocumentRevisions(apiUrl, projectId, headers, options.id, paginationParams(options));
       const revisions = (response as { data: DocumentRevisionRecord[] }).data;
-      if (revisions.length === 0) {
-        return "No document revisions found";
-      }
-      return revisions.map(formatRevision).join("\n\n");
+      return revisions.length === 0
+        ? withMessage(response as Record<string, unknown>, "No document revisions found")
+        : response;
     }
 
     case "revision-get": {
       if (!options.id) throw new Error("--id is required for document revision-get");
       if (!options.revisionId) throw new Error("--revision-id is required for document revision-get");
       const response = await getDocumentRevision(apiUrl, projectId, headers, options.id, options.revisionId);
-      const revision = (response as { data: DocumentRevisionRecord }).data;
-      return [
-        "Document revision",
-        formatRevision(revision)
-      ].join("\n");
+      return withMessage(response as Record<string, unknown>, "Document revision");
     }
 
     case "revision-restore": {
       if (!options.id) throw new Error("--id is required for document revision-restore");
       if (!options.revisionId) throw new Error("--revision-id is required for document revision-restore");
       const response = await restoreDocumentRevision(apiUrl, projectId, headers, options.id, options.revisionId);
-      const document = getDocumentData(response);
-      return [
-        "Document revision restored",
-        formatDocument(document)
-      ].join("\n");
+      return withMessage(response as Record<string, unknown>, "Document revision restored");
     }
 
     case "comment-list": {
@@ -338,10 +296,9 @@ export async function executeDocumentCommand(
       if (options.order) params.order = normalizeOrder(options.order) ?? "";
       const response = await listDocumentComments(apiUrl, projectId, headers, options.id, params);
       const comments = (response as { data: DocumentCommentRecord[] }).data;
-      if (comments.length === 0) {
-        return "No document comments found";
-      }
-      return comments.map(formatComment).join("\n\n");
+      return comments.length === 0
+        ? withMessage(response as Record<string, unknown>, "No document comments found")
+        : response;
     }
 
     case "comment-create": {
@@ -349,13 +306,7 @@ export async function executeDocumentCommand(
       const response = await createDocumentComment(apiUrl, projectId, headers, options.id, {
         content: getCommentContent(options, action)
       });
-      const comment = (response as { data: DocumentCommentRecord }).data;
-      const documentWebUrl = (response as { documentWebUrl?: string | null }).documentWebUrl;
-      return [
-        "Document comment created",
-        formatComment(comment),
-        viewLink(documentWebUrl)
-      ].filter(Boolean).join("\n");
+      return withMessage(response as Record<string, unknown>, "Document comment created");
     }
 
     case "comment-update": {
@@ -364,22 +315,20 @@ export async function executeDocumentCommand(
       const response = await updateDocumentComment(apiUrl, projectId, headers, options.id, options.commentId, {
         content: getCommentContent(options, action)
       });
-      const comment = (response as { data: DocumentCommentRecord }).data;
-      return [
-        "Document comment updated",
-        formatComment(comment)
-      ].join("\n");
+      return withMessage(response as Record<string, unknown>, "Document comment updated");
     }
 
     case "comment-delete": {
       if (!options.id) throw new Error("--id is required for document comment-delete");
       if (!options.commentId) throw new Error("--comment-id is required for document comment-delete");
       await deleteDocumentComment(apiUrl, projectId, headers, options.id, options.commentId);
-      return [
-        "Document comment deleted",
-        `documentId: ${options.id}`,
-        `commentId: ${options.commentId}`
-      ].join("\n");
+      return {
+        message: "Document comment deleted",
+        data: {
+          documentId: options.id,
+          commentId: options.commentId,
+        },
+      };
     }
 
     default:

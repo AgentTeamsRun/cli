@@ -417,7 +417,7 @@ describe('CLI Integration Tests', () => {
       });
     });
 
-    it('plan show with include-deps and text: should render dependency section', async () => {
+    it('plan show with include-deps: should return dependencies in JSON data', async () => {
       axiosGetSpy.mockImplementation(async (url: string) => {
         if (url === `${API_URL}/api/platform/guides/hash`) {
           return { data: { data: { hash: 'platform-guides-hash-1' } } } as any;
@@ -446,7 +446,7 @@ describe('CLI Integration Tests', () => {
       const result = await executeCommand('plan', 'show', {
         id: 'plan-1',
         includeDeps: true,
-        format: 'text',
+        format: 'json',
       });
 
       expect(axiosGetSpy).toHaveBeenCalledWith(
@@ -457,9 +457,17 @@ describe('CLI Integration Tests', () => {
         `${API_URL}/api/projects/${PROJECT_ID}/plans/plan-1/dependencies`,
         { headers: authHeaders() }
       );
-      expect(typeof result).toBe('string');
-      expect(String(result)).toContain('## Dependencies');
-      expect(String(result)).toContain('No dependencies.');
+      expect(result).toEqual({
+        data: {
+          id: 'plan-1',
+          title: 'Main Plan',
+          status: 'IN_PROGRESS',
+          dependencies: {
+            blocking: [],
+            dependents: [],
+          },
+        },
+      });
     });
 
     it('plan status: should call GET /plans/:id/status', async () => {
@@ -2116,8 +2124,14 @@ describe('CLI Integration Tests', () => {
             },
           }
         );
-        expect(listResult).toContain('visibility: PRIVATE');
-        expect(listResult).toContain('archivedAt: 2026-05-30T00:00:00.000Z');
+        expect(listResult).toEqual({
+          data: [
+            expect.objectContaining({
+              visibility: 'PRIVATE',
+              archivedAt: '2026-05-30T00:00:00.000Z',
+            }),
+          ],
+        });
         await expect(
           executeCommand('document', 'create', {
             file: filePath,
@@ -2199,8 +2213,20 @@ describe('CLI Integration Tests', () => {
         {},
         { headers: authHeaders() }
       );
-      expect(revisions).toContain('revisionNumber: 3');
-      expect(revision).toContain('Document revision');
+      expect(revisions).toEqual({
+        data: [
+          expect.objectContaining({
+            revisionNumber: 3,
+          }),
+        ],
+      });
+      expect(revision).toEqual({
+        message: 'Document revision',
+        data: expect.objectContaining({
+          id: 'rev-1',
+          revisionNumber: 3,
+        }),
+      });
     });
 
     it('document: should map comment actions to document comment APIs', async () => {
@@ -2272,8 +2298,21 @@ describe('CLI Integration Tests', () => {
         `${API_URL}/api/projects/${PROJECT_ID}/documents/doc-1/comments/comment-2`,
         { headers: deleteHeaders() }
       );
-      expect(comments).toContain('content: hello');
-      expect(created).toContain('[View in AgentTeams](https://agentteams.example/documents/doc-1)');
+      expect(comments).toEqual({
+        data: [
+          expect.objectContaining({
+            contentMarkdown: 'hello',
+          }),
+        ],
+      });
+      expect(created).toEqual({
+        message: 'Document comment created',
+        data: expect.objectContaining({
+          id: 'comment-2',
+          contentMarkdown: 'created',
+        }),
+        documentWebUrl: 'https://agentteams.example/documents/doc-1',
+      });
     });
 
     describe('search', () => {
@@ -2333,12 +2372,12 @@ describe('CLI Integration Tests', () => {
   describe('Output Formatting', () => {
     it('should output JSON by default', () => {
       const data = { id: 1, name: 'test' };
-      const output = formatOutput(data, 'json');
+      const output = formatOutput(data);
 
       expect(output).toBe(JSON.stringify(data, null, 2));
     });
 
-    it('should output human-friendly text with --format text', () => {
+    it('should output arrays as JSON', () => {
       const data = {
         data: [
           { id: 1, agentName: 'agent1', status: 'IN_PROGRESS' },
@@ -2346,15 +2385,12 @@ describe('CLI Integration Tests', () => {
         ],
       };
 
-      const output = formatOutput(data, 'text');
+      const output = formatOutput(data);
 
-      expect(output).toContain('agent1');
-      expect(output).toContain('IN_PROGRESS');
-      expect(output).toContain('agent2');
-      expect(output).toContain('DONE');
+      expect(JSON.parse(output)).toEqual(data);
     });
 
-    it('should prioritize plan core keys in text output', () => {
+    it('should preserve plan key order from the input object in JSON output', () => {
       const data = {
         data: {
           updatedAt: '2026-01-01T00:00:00.000Z',
@@ -2366,14 +2402,11 @@ describe('CLI Integration Tests', () => {
         },
       };
 
-      const output = formatOutput(data, 'text');
+      const output = formatOutput(data);
       const lines = output.split('\n');
 
-      expect(lines[0]).toBe('id: plan-1');
-      expect(lines[1]).toBe('title: My Plan');
-      expect(lines[2]).toBe('status: IN_PROGRESS');
-      expect(lines[3]).toBe('priority: HIGH');
-      expect(lines[4]).toBe('updatedAt: 2026-01-01T00:00:00.000Z');
+      expect(JSON.parse(output)).toEqual(data);
+      expect(lines[2]).toContain('"updatedAt": "2026-01-01T00:00:00.000Z"');
     });
   });
 

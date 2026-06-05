@@ -30,37 +30,37 @@ describe('printInitResult', () => {
     logSpy.mockRestore();
   });
 
-  describe('text format (기본값)', () => {
+  describe('human format (기본값)', () => {
     it('에이전트명을 포함한 인증 완료 메시지를 출력한다', () => {
-      printInitResult(MOCK_INIT_RESULT, 'text');
+      printInitResult(MOCK_INIT_RESULT, 'human');
 
       const output = captureOutput(logSpy);
       expect(output).toContain('claude-main');
     });
 
     it('config 파일 경로를 출력한다', () => {
-      printInitResult(MOCK_INIT_RESULT, 'text');
+      printInitResult(MOCK_INIT_RESULT, 'human');
 
       const output = captureOutput(logSpy);
       expect(output).toContain('/project/.agentteams/config.json');
     });
 
     it('convention 파일 경로를 출력한다', () => {
-      printInitResult(MOCK_INIT_RESULT, 'text');
+      printInitResult(MOCK_INIT_RESULT, 'human');
 
       const output = captureOutput(logSpy);
       expect(output).toContain('/project/.agentteams/convention.md');
     });
 
     it('Next steps 섹션을 출력한다', () => {
-      printInitResult(MOCK_INIT_RESULT, 'text');
+      printInitResult(MOCK_INIT_RESULT, 'human');
 
       const output = captureOutput(logSpy);
       expect(output).toContain('Next steps:');
     });
 
     it('에이전트 파일 생성 결과를 출력한다', () => {
-      printInitResult(MOCK_INIT_RESULT, 'text');
+      printInitResult(MOCK_INIT_RESULT, 'human');
 
       const output = captureOutput(logSpy);
       expect(output).toContain('Agent file created: CLAUDE.md');
@@ -68,7 +68,7 @@ describe('printInitResult', () => {
     });
 
     it('에이전트 파일 확인 및 example 병합 안내를 출력한다', () => {
-      printInitResult(MOCK_INIT_RESULT, 'text');
+      printInitResult(MOCK_INIT_RESULT, 'human');
 
       const output = captureOutput(logSpy);
       expect(output).toContain('Check the generated agent files');
@@ -76,7 +76,7 @@ describe('printInitResult', () => {
     });
 
     it('seed plan ID를 agentteams_ 네임스페이스 prefix로 출력한다', () => {
-      printInitResult({ ...MOCK_INIT_RESULT, seedPlanId: '123e4567-e89b-12d3-a456-426614174000' }, 'text');
+      printInitResult({ ...MOCK_INIT_RESULT, seedPlanId: '123e4567-e89b-12d3-a456-426614174000' }, 'human');
 
       const output = captureOutput(logSpy);
       expect(output).toContain('agentteams_plan_123e4567-e89b-12d3-a456-426614174000');
