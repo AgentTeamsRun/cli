@@ -57,7 +57,7 @@ export function printInitResult(result: unknown, format: InitOutputFormat): void
   console.log('     If a -example file was created, merge it into your existing file.');
 
   if (result.seedPlanId) {
-    const seedPlanDisplayId = `agentteams_plan_${result.seedPlanId}`;
+    const seedPlanDisplayId = `agentteams_pln_${result.seedPlanId}`;
     console.log('  2. A "Set Up Project Conventions" plan is queued for this project.');
     console.log(`     Plan ID:  ${chalk.bold(seedPlanDisplayId)}`);
     if (result.seedPlanWebUrl) {

@@ -79,7 +79,8 @@ describe('printInitResult', () => {
       printInitResult({ ...MOCK_INIT_RESULT, seedPlanId: '123e4567-e89b-12d3-a456-426614174000' }, 'human');
 
       const output = captureOutput(logSpy);
-      expect(output).toContain('agentteams_plan_123e4567-e89b-12d3-a456-426614174000');
+      expect(output).toContain('agentteams_pln_123e4567-e89b-12d3-a456-426614174000');
+      expect(output).not.toContain('agentteams_plan_123e4567-e89b-12d3-a456-426614174000');
       expect(output).not.toContain('Start plan plan_123e4567-e89b-12d3-a456-426614174000');
     });
   });
