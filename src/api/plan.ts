@@ -53,6 +53,7 @@ export async function createPlan(
     runnerType?: string;
     model?: string;
     fastMode?: boolean;
+    kind?: string;
   }
 ): Promise<any> {
   const baseUrl = `${apiUrl}/api/projects/${projectId}/plans`;

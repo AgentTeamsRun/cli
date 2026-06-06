@@ -595,6 +595,7 @@ export async function executePlanCommand(
           runnerType: options.runnerType,
           model: options.model,
           fastMode: options.fast === true,
+          kind: 'NORMAL',
         }),
         'Plan created',
       );
@@ -901,6 +902,7 @@ export async function executePlanCommand(
           runnerType: options.runnerType,
           model: options.model,
           fastMode: options.fast === true,
+          kind: 'QUICK',
         }),
         'Plan created',
       );
