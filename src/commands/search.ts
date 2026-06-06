@@ -2,7 +2,23 @@ import { searchEntities } from '../api/search.js';
 import { splitCsv, toPositiveInteger } from '../utils/parsers.js';
 import { withSpinner } from '../utils/spinner.js';
 
-const VALID_TYPES = ['PLAN', 'CO_ACTION', 'COMPLETION_REPORT', 'POST_MORTEM', 'CONVENTION', 'CODE_REVIEW', 'DOCUMENT'] as const;
+const VALID_TYPES = [
+  'PLAN',
+  'CO_ACTION',
+  'COMPLETION_REPORT',
+  'POST_MORTEM',
+  'CONVENTION',
+  'COMMENT',
+  'CODE_REVIEW',
+  'DOCUMENT',
+  'GITHUB_ISSUE',
+  'GITHUB_PR',
+  'GITLAB_ISSUE',
+  'GITLAB_MERGE_REQUEST',
+  'BITBUCKET_ISSUE',
+  'BITBUCKET_PR',
+  'LINEAR_ISSUE',
+] as const;
 
 export async function executeSearchCommand(
   apiUrl: string,
