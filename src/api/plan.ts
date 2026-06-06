@@ -130,6 +130,8 @@ export async function finishPlanLifecycle(
       linesDeleted?: number;
       status?: string;
       qualityScore?: number;
+      reviewRecommendation?: string;
+      reviewReason?: string;
     };
   }
 ): Promise<any> {

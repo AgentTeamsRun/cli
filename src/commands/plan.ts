@@ -448,6 +448,8 @@ export async function executePlanCommand(
           commitStart?: string;
           commitEnd?: string;
           pullRequestId?: string;
+          reviewRecommendation?: string;
+          reviewReason?: string;
         };
       } = {};
 
@@ -491,6 +493,13 @@ export async function executePlanCommand(
         const pullRequestId = toNonEmptyString(options.pullRequestId);
         const qualityScore = toNonNegativeInteger(options.qualityScore);
         const reportStatus = toNonEmptyString(options.reportStatus);
+        const reviewRecommendationRaw = toNonEmptyString(options.reviewRecommendation);
+        const reviewRecommendation = reviewRecommendationRaw === 'REQUIRED' || reviewRecommendationRaw === 'NOT_NEEDED'
+          ? reviewRecommendationRaw
+          : (reviewRecommendationRaw !== undefined
+            ? (() => { console.warn(`Ignoring invalid --review-recommendation "${reviewRecommendationRaw}" (expected REQUIRED or NOT_NEEDED)`); return undefined; })()
+            : undefined);
+        const reviewReason = toNonEmptyString(options.reviewReason);
 
         const reportTitle = typeof options.reportTitle === 'string' && options.reportTitle.trim().length > 0
           ? options.reportTitle.trim()
@@ -512,6 +521,8 @@ export async function executePlanCommand(
         if (commitStart !== undefined) body.completionReport.commitStart = commitStart;
         if (commitEnd !== undefined) body.completionReport.commitEnd = commitEnd;
         if (pullRequestId !== undefined) body.completionReport.pullRequestId = pullRequestId;
+        if (reviewRecommendation !== undefined) body.completionReport.reviewRecommendation = reviewRecommendation;
+        if (reviewReason !== undefined) body.completionReport.reviewReason = reviewReason;
       }
 
       const finishResult = await withSpinner(

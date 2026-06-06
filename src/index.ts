@@ -166,6 +166,8 @@ program
   .option('--report-file <path>', 'Read completion report content from a local file (plan finish)')
   .option('--report-status <status>', 'Completion report status: COMPLETED, FAILED, PARTIAL (plan finish)')
   .option('--quality-score <n>', 'Quality score 0-100 (plan finish)')
+  .option('--review-recommendation <value>', 'Code review recommendation: REQUIRED or NOT_NEEDED (plan finish)')
+  .option('--review-reason <text>', 'One-line reason for the review recommendation (plan finish)')
   .option('--commit-hash <hash>', 'Git commit hash (plan finish, manual override)')
   .option('--branch-name <name>', 'Git branch name (plan finish, manual override)')
   .option('--files-modified <n>', 'Number of modified files (plan finish, manual override)')
@@ -218,6 +220,8 @@ program
         reportFile: options.reportFile,
         reportStatus: options.reportStatus,
         qualityScore: options.qualityScore,
+        reviewRecommendation: options.reviewRecommendation,
+        reviewReason: options.reviewReason,
         commitHash: options.commitHash,
         branchName: options.branchName,
         filesModified: options.filesModified,
