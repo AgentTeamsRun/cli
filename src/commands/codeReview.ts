@@ -8,6 +8,7 @@ import {
   dismissCodeReviewFinding,
   getCodeReview,
   listCodeReviews,
+  submitCodeReviewResult,
   undismissCodeReviewFinding,
 } from '../api/codeReview.js';
 import { toNonEmptyString, toPositiveInteger } from '../utils/parsers.js';
@@ -156,6 +157,28 @@ export async function executeCodeReviewCommand(
         'Cancelling code review...',
         () => cancelCodeReview(apiUrl, projectId, headers, options.id),
         'Code review cancelled',
+      );
+    }
+    case 'submit-result': {
+      if (!options.id) throw new Error('--id is required for code-review submit-result');
+      const status = toNonEmptyString(options.status);
+      if (status && status !== 'COMPLETED' && status !== 'FAILED') {
+        throw new Error('--status must be COMPLETED or FAILED for code-review submit-result');
+      }
+      const findings = parseFindingsFile(options.findingsFile);
+      const resultSummary = toNonEmptyString(options.resultSummary);
+      const errorMessage = toNonEmptyString(options.errorMessage);
+
+      const body: Record<string, unknown> = {};
+      if (status) body.status = status;
+      if (findings !== undefined) body.findings = findings;
+      if (resultSummary) body.resultSummary = resultSummary;
+      if (errorMessage) body.errorMessage = errorMessage;
+
+      return withSpinner(
+        'Submitting code review result...',
+        () => submitCodeReviewResult(apiUrl, projectId, headers, options.id, body),
+        'Code review result submitted',
       );
     }
     case 'delete': {

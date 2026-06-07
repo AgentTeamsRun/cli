@@ -60,6 +60,18 @@ export async function cancelCodeReview(
   return response.data;
 }
 
+export async function submitCodeReviewResult(
+  apiUrl: string,
+  projectId: string,
+  headers: any,
+  id: string,
+  body: Record<string, unknown>
+): Promise<any> {
+  const baseUrl = `${apiUrl}/api/projects/${projectId}/code-reviews`;
+  const response = await httpClient.post(`${baseUrl}/${id}/result`, body, { headers });
+  return response.data;
+}
+
 export async function deleteCodeReview(
   apiUrl: string,
   projectId: string,
