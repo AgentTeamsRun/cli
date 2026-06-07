@@ -430,7 +430,7 @@ program
 program
   .command('code-review')
   .description('Manage independent code reviews')
-  .argument('<action>', 'Action to perform (list, get, show, create, create-plan, cancel, delete, dismiss, undismiss)')
+  .argument('<action>', 'Action to perform (list, get, show, create, create-plan, submit-result, cancel, delete, dismiss, undismiss)')
   .option('--id <id>', 'Code review ID')
   .option('--finding-id <id>', 'Finding ID for dismiss/undismiss')
   .option('--title <title>', 'Code review or generated plan title')
@@ -449,13 +449,15 @@ program
   .option('--test-file <path>', 'Read verification summary from a local file')
   .option('--reviewer-context <text>', 'Reviewer context or instructions')
   .option('--recommendation-reason <text>', 'Why this review is recommended')
-  .option('--findings-file <path>', 'Read findings JSON array from a local file (create only)')
+  .option('--findings-file <path>', 'Read findings JSON array from a local file (create, submit-result)')
+  .option('--result-summary <text>', 'Review result summary (submit-result)')
+  .option('--error-message <text>', 'Failure reason when --status FAILED (submit-result)')
   .option('--finding-ids <ids>', 'Comma-separated finding IDs for create-plan')
   .option('--priority <priority>', 'Generated plan priority (LOW, MEDIUM, HIGH)')
   .option('--type <type>', 'Generated plan type (FEATURE, BUG_FIX, ISSUE, REFACTOR, CHORE)')
   .option('--runner-type <type>', 'Runner type snapshot: CLAUDE_CODE, CODEX, ANTIGRAVITY, AMP, OPENCODE')
   .option('--model <model>', 'Model ID snapshot')
-  .option('--status <status>', 'Status filter (list only)')
+  .option('--status <status>', 'Status filter (list); result status COMPLETED|FAILED (submit-result)')
   .option('--search <text>', 'Search keyword (list only)')
   .option('--page <number>', 'Page number (list only)')
   .option('--page-size <number>', 'Page size (list only)')
@@ -491,6 +493,8 @@ program
         reviewerContext: options.reviewerContext,
         recommendationReason: options.recommendationReason,
         findingsFile: options.findingsFile,
+        resultSummary: options.resultSummary,
+        errorMessage: options.errorMessage,
         findingIds: options.findingIds,
         priority: options.priority,
         type: options.type,
