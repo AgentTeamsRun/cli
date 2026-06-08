@@ -10,6 +10,7 @@ import {
   listCodeReviews,
   submitCodeReviewResult,
   undismissCodeReviewFinding,
+  updateCodeReview,
 } from '../api/codeReview.js';
 import { toNonEmptyString, toPositiveInteger } from '../utils/parsers.js';
 import { withSpinner } from '../utils/spinner.js';
@@ -59,6 +60,17 @@ const parseFindingsFile = (file: unknown): Array<Record<string, unknown>> | unde
   });
 
   return parsed as Array<Record<string, unknown>>;
+};
+
+const addOptionalStringField = (
+  body: Record<string, unknown>,
+  field: string,
+  value: unknown
+): void => {
+  const parsed = toNonEmptyString(value);
+  if (parsed) {
+    body[field] = parsed;
+  }
 };
 
 export async function executeCodeReviewCommand(
@@ -127,6 +139,38 @@ export async function executeCodeReviewCommand(
         'Creating code review...',
         () => createCodeReview(apiUrl, projectId, headers, body),
         'Code review created',
+      );
+    }
+    case 'update': {
+      if (!options.id) throw new Error('--id is required for code-review update');
+
+      const body: Record<string, unknown> = {};
+      addOptionalStringField(body, 'title', options.title);
+      addOptionalStringField(body, 'targetType', options.targetType);
+      addOptionalStringField(body, 'targetRef', options.targetRef);
+      addOptionalStringField(body, 'sourceCommitStart', options.sourceCommitStart);
+      addOptionalStringField(body, 'sourceCommitEnd', options.sourceCommitEnd);
+      addOptionalStringField(body, 'sourceBranchName', options.sourceBranchName);
+      addOptionalStringField(body, 'baseBranchName', options.baseBranchName);
+
+      const diffSummary = toNonEmptyString(options.diffSummary) ?? readOptionalFile(options.diffFile);
+      const testSummary = toNonEmptyString(options.testSummary) ?? readOptionalFile(options.testFile);
+      if (diffSummary !== undefined) body.diffSummary = diffSummary;
+      if (testSummary !== undefined) body.testSummary = testSummary;
+
+      addOptionalStringField(body, 'reviewerContext', options.reviewerContext);
+      addOptionalStringField(body, 'recommendationReason', options.recommendationReason);
+      addOptionalStringField(body, 'runnerType', options.runnerType);
+      addOptionalStringField(body, 'model', options.model);
+
+      if (Object.keys(body).length === 0) {
+        throw new Error('At least one metadata field is required for code-review update');
+      }
+
+      return withSpinner(
+        'Updating code review...',
+        () => updateCodeReview(apiUrl, projectId, headers, options.id, body),
+        'Code review updated',
       );
     }
     case 'create-plan': {

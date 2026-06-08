@@ -37,6 +37,18 @@ export async function createCodeReview(
   return response.data;
 }
 
+export async function updateCodeReview(
+  apiUrl: string,
+  projectId: string,
+  headers: any,
+  id: string,
+  body: Record<string, unknown>
+): Promise<any> {
+  const baseUrl = `${apiUrl}/api/projects/${projectId}/code-reviews`;
+  const response = await httpClient.patch(`${baseUrl}/${id}`, body, { headers });
+  return response.data;
+}
+
 export async function createPlanFromCodeReview(
   apiUrl: string,
   projectId: string,

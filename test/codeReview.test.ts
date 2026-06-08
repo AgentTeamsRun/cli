@@ -147,3 +147,70 @@ describe('code-review create with --findings-file', () => {
     expect(axiosPostSpy).not.toHaveBeenCalled();
   });
 });
+
+describe('code-review update', () => {
+  const apiUrl = 'http://localhost:3001';
+  const projectId = 'project_1';
+  const headers = { 'X-API-Key': 'key_test123', 'Content-Type': 'application/json' };
+
+  let axiosPatchSpy: jest.SpiedFunction<typeof axios.patch>;
+
+  beforeEach(() => {
+    jest.restoreAllMocks();
+    axiosPatchSpy = jest.spyOn(axios, 'patch');
+  });
+
+  it('forwards only provided metadata fields in the PATCH body', async () => {
+    axiosPatchSpy.mockResolvedValueOnce({
+      data: {
+        data: {
+          id: 'cdr_pending',
+          title: 'Updated review',
+          status: 'PENDING',
+          webUrl: 'https://agentteams.run/go?type=code-review&id=cdr_pending',
+        },
+      },
+    } as any);
+
+    await executeCodeReviewCommand(apiUrl, projectId, headers, 'update', {
+      id: 'cdr_pending',
+      title: 'Updated review',
+      targetType: 'BRANCH_DIFF',
+      targetRef: 'feat/update-metadata',
+      diffSummary: 'Updated diff summary',
+      runnerType: 'CODEX',
+      model: 'gpt-5-codex',
+    });
+
+    expect(axiosPatchSpy).toHaveBeenCalledTimes(1);
+    const [url, body, config] = axiosPatchSpy.mock.calls[0];
+    expect(url).toBe('http://localhost:3001/api/projects/project_1/code-reviews/cdr_pending');
+    expect(body).toEqual({
+      title: 'Updated review',
+      targetType: 'BRANCH_DIFF',
+      targetRef: 'feat/update-metadata',
+      diffSummary: 'Updated diff summary',
+      runnerType: 'CODEX',
+      model: 'gpt-5-codex',
+    });
+    expect(config).toMatchObject({ headers });
+  });
+
+  it('throws when --id is missing', async () => {
+    await expect(
+      executeCodeReviewCommand(apiUrl, projectId, headers, 'update', {
+        title: 'Updated review',
+      }),
+    ).rejects.toThrow(/--id is required/);
+    expect(axiosPatchSpy).not.toHaveBeenCalled();
+  });
+
+  it('throws when no metadata fields are provided', async () => {
+    await expect(
+      executeCodeReviewCommand(apiUrl, projectId, headers, 'update', {
+        id: 'cdr_pending',
+      }),
+    ).rejects.toThrow(/At least one metadata field/);
+    expect(axiosPatchSpy).not.toHaveBeenCalled();
+  });
+});

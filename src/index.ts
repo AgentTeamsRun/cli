@@ -430,7 +430,7 @@ program
 program
   .command('code-review')
   .description('Manage independent code reviews')
-  .argument('<action>', 'Action to perform (list, get, show, create, create-plan, submit-result, cancel, delete, dismiss, undismiss)')
+  .argument('<action>', 'Action to perform (list, get, show, create, update, create-plan, submit-result, cancel, delete, dismiss, undismiss)')
   .option('--id <id>', 'Code review ID')
   .option('--finding-id <id>', 'Finding ID for dismiss/undismiss')
   .option('--title <title>', 'Code review or generated plan title')
