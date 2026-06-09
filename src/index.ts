@@ -304,9 +304,12 @@ program
 
 program
   .command('attachment')
-  .description('Manage daemon trigger attachments')
-  .argument('<action>', 'Action to perform (list)')
-  .option('--trigger-id <id>', 'Daemon trigger ID')
+  .description('Manage attachments (list trigger attachments, create evidence attachments)')
+  .argument('<action>', 'Action to perform (list, create)')
+  .option('--trigger-id <id>', 'Daemon trigger ID (list)')
+  .option('--file <path>', 'Local file to upload (create)')
+  .option('--code-review-id <id>', 'Attach to this code review (create)')
+  .option('--completion-report-id <id>', 'Attach to this completion report (create)')
   .option('--api-url <url>', 'Override API URL (optional)')
   .option('--api-key <key>', 'Override API key (optional)')
   .option('--project-id <id>', 'Override project ID (optional)')
@@ -321,6 +324,9 @@ program
       const normalizedFormat = normalizeFormat(options.format);
       const result = await executeCommand('attachment', action, {
         triggerId: options.triggerId,
+        file: options.file,
+        codeReviewId: options.codeReviewId,
+        completionReportId: options.completionReportId,
         apiUrl: options.apiUrl,
         apiKey: options.apiKey,
         projectId: options.projectId,

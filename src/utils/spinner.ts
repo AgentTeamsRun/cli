@@ -33,7 +33,17 @@ export function formatFileInfo(filePath: string, content: string): string {
   return `${chalk.cyan(filePath)} ${chalk.dim(`(${size}, ${lines} lines)`)}`;
 }
 
+export function formatFileSizeInfo(filePath: string, bytes: number): string {
+  const size = bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toFixed(1)} KB`;
+  return `${chalk.cyan(filePath)} ${chalk.dim(`(${size})`)}`;
+}
+
 export function printFileInfo(filePath: string, content: string): void {
   if (!isInteractive) return;
   process.stderr.write(`  ${formatFileInfo(filePath, content)}\n`);
+}
+
+export function printFileSizeInfo(filePath: string, bytes: number): void {
+  if (!isInteractive) return;
+  process.stderr.write(`  ${formatFileSizeInfo(filePath, bytes)}\n`);
 }
