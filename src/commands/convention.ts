@@ -726,6 +726,15 @@ export async function conventionDownload(options?: ConventionCommandOptions): Pr
   return `Convention sync completed.\n${reportingLine}${platformLine}Downloaded ${conventions.length} file(s) into category directories under ${CONVENTION_DIR}`;
 }
 
+function parseConventionMarkdown(fileRelativePath: string, markdown: string): ReturnType<typeof matter> {
+  try {
+    return matter(markdown);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to parse frontmatter YAML for ${fileRelativePath}: ${reason}`);
+  }
+}
+
 export async function conventionCreate(options: ConventionCreateOptions): Promise<string> {
   const { config, apiUrl, headers } = getApiConfigOrThrow(options);
   const projectRoot = findProjectRoot(options?.cwd);
@@ -761,7 +770,7 @@ export async function conventionCreate(options: ConventionCreateOptions): Promis
     }
 
     const localMarkdown = readFileSync(absolutePath, "utf-8");
-    const parsed = matter(localMarkdown);
+    const parsed = parseConventionMarkdown(fileRelativePath, localMarkdown);
     const frontmatter = (parsed.data ?? {}) as Record<string, unknown>;
     const bodyMarkdown = String(parsed.content ?? "");
 
@@ -890,7 +899,7 @@ export async function conventionUpdate(options: ConventionUploadOptions): Promis
       continue;
     }
 
-    const parsed = matter(localMarkdown);
+    const parsed = parseConventionMarkdown(fileRelativePath, localMarkdown);
     const frontmatter = (parsed.data ?? {}) as Record<string, unknown>;
     const bodyMarkdown = String(parsed.content ?? "");
 
