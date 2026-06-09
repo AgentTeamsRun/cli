@@ -1267,6 +1267,168 @@ describe('CLI Integration Tests', () => {
       }
     });
 
+    it('convention update: should parse quoted dash trigger when --apply is set', async () => {
+      axiosGetSpy
+        .mockResolvedValueOnce({
+          data: { data: { id: 'cv-1', updatedAt: '2026-01-01T00:00:00.000Z' } },
+        } as any)
+        .mockResolvedValueOnce({ data: '# server version\n' } as any);
+
+      axiosPutSpy.mockResolvedValueOnce({
+        data: { data: { id: 'cv-1', updatedAt: '2026-02-01T00:00:00.000Z' } },
+      } as any);
+
+      const originalCwd = process.cwd();
+      const tempCwd = mkdtempSync(join(tmpdir(), 'agentteams-convention-update-quoted-trigger-'));
+
+      try {
+        const agentteamsDir = join(tempCwd, '.agentteams');
+        mkdirSync(agentteamsDir, { recursive: true });
+        mkdirSync(join(agentteamsDir, 'rules'), { recursive: true });
+
+        writeFileSync(
+          join(agentteamsDir, 'config.json'),
+          JSON.stringify(
+            {
+              teamId: 'team_1',
+              projectId: PROJECT_ID,
+              agentName: 'test-agent',
+              apiKey: 'key_test123',
+              apiUrl: API_URL,
+            },
+            null,
+            2
+          ) + '\n',
+          'utf-8'
+        );
+
+        const filePath = join(agentteamsDir, 'rules', 'core-rules.md');
+        writeFileSync(
+          filePath,
+          [
+            '---',
+            'trigger: "-"',
+            'description: ": description with # hash"',
+            '---',
+            '',
+            '# local version',
+            '',
+          ].join('\n'),
+          'utf-8'
+        );
+
+        writeFileSync(
+          join(agentteamsDir, 'conventions.manifest.json'),
+          JSON.stringify(
+            {
+              version: 1,
+              generatedAt: '2026-01-01T00:00:00.000Z',
+              entries: [
+                {
+                  conventionId: 'cv-1',
+                  fileRelativePath: '.agentteams/rules/core-rules.md',
+                  fileName: 'core-rules.md',
+                  categoryDir: 'rules',
+                  downloadedAt: '2026-01-01T00:00:00.000Z',
+                },
+              ],
+            },
+            null,
+            2
+          ) + '\n',
+          'utf-8'
+        );
+
+        process.chdir(tempCwd);
+        await executeCommand('convention', 'update', {
+          cwd: tempCwd,
+          file: [filePath],
+          apply: true,
+        });
+
+        expect(axiosPutSpy).toHaveBeenCalledWith(
+          `${API_URL}/api/projects/${PROJECT_ID}/conventions/cv-1`,
+          expect.objectContaining({
+            trigger: '-',
+            description: ': description with # hash',
+          }),
+          { headers: authHeaders() }
+        );
+      } finally {
+        process.chdir(originalCwd);
+        rmSync(tempCwd, { recursive: true, force: true });
+      }
+    });
+
+    it('convention update: should show actionable frontmatter parse errors', async () => {
+      axiosGetSpy
+        .mockResolvedValueOnce({
+          data: { data: { id: 'cv-1', updatedAt: '2026-01-01T00:00:00.000Z' } },
+        } as any)
+        .mockResolvedValueOnce({ data: '# server version\n' } as any);
+
+      const originalCwd = process.cwd();
+      const tempCwd = mkdtempSync(join(tmpdir(), 'agentteams-convention-update-bad-yaml-'));
+
+      try {
+        const agentteamsDir = join(tempCwd, '.agentteams');
+        mkdirSync(agentteamsDir, { recursive: true });
+        mkdirSync(join(agentteamsDir, 'rules'), { recursive: true });
+
+        writeFileSync(
+          join(agentteamsDir, 'config.json'),
+          JSON.stringify(
+            {
+              teamId: 'team_1',
+              projectId: PROJECT_ID,
+              agentName: 'test-agent',
+              apiKey: 'key_test123',
+              apiUrl: API_URL,
+            },
+            null,
+            2
+          ) + '\n',
+          'utf-8'
+        );
+
+        const filePath = join(agentteamsDir, 'rules', 'core-rules.md');
+        writeFileSync(filePath, '---\ntrigger: -\ndescription: broken\n---\n\n# local version\n', 'utf-8');
+
+        writeFileSync(
+          join(agentteamsDir, 'conventions.manifest.json'),
+          JSON.stringify(
+            {
+              version: 1,
+              generatedAt: '2026-01-01T00:00:00.000Z',
+              entries: [
+                {
+                  conventionId: 'cv-1',
+                  fileRelativePath: '.agentteams/rules/core-rules.md',
+                  fileName: 'core-rules.md',
+                  categoryDir: 'rules',
+                  downloadedAt: '2026-01-01T00:00:00.000Z',
+                },
+              ],
+            },
+            null,
+            2
+          ) + '\n',
+          'utf-8'
+        );
+
+        process.chdir(tempCwd);
+        await expect(executeCommand('convention', 'update', {
+          cwd: tempCwd,
+          file: [filePath],
+          apply: true,
+        })).rejects.toThrow(/Failed to parse frontmatter YAML for \.agentteams\/rules\/core-rules\.md:/);
+        expect(axiosPutSpy).not.toHaveBeenCalled();
+      } finally {
+        process.chdir(originalCwd);
+        rmSync(tempCwd, { recursive: true, force: true });
+      }
+    });
+
     it('convention update: should resolve .agentteams path from nested cwd', async () => {
       axiosGetSpy
         .mockResolvedValueOnce({
@@ -1608,6 +1770,45 @@ describe('CLI Integration Tests', () => {
             lastKnownUpdatedAt: '2026-02-19T00:00:00.000Z',
           })
         );
+      } finally {
+        process.chdir(originalCwd);
+        rmSync(tempCwd, { recursive: true, force: true });
+      }
+    });
+
+    it('convention create: should show actionable frontmatter parse errors', async () => {
+      const originalCwd = process.cwd();
+      const tempCwd = mkdtempSync(join(tmpdir(), 'agentteams-convention-create-bad-yaml-'));
+
+      try {
+        const agentteamsDir = join(tempCwd, '.agentteams');
+        mkdirSync(join(agentteamsDir, 'rules'), { recursive: true });
+
+        writeFileSync(
+          join(agentteamsDir, 'config.json'),
+          JSON.stringify(
+            {
+              teamId: 'team_1',
+              projectId: PROJECT_ID,
+              agentName: 'test-agent',
+              apiKey: 'key_test123',
+              apiUrl: API_URL,
+            },
+            null,
+            2
+          ) + '\n',
+          'utf-8'
+        );
+
+        const filePath = join(agentteamsDir, 'rules', 'new-rule.md');
+        writeFileSync(filePath, '---\ntrigger: -\ndescription: broken\n---\n\n# New Rule\n', 'utf-8');
+
+        process.chdir(tempCwd);
+        await expect(executeCommand('convention', 'create', {
+          cwd: tempCwd,
+          file: ['.agentteams/rules/new-rule.md'],
+        })).rejects.toThrow(/Failed to parse frontmatter YAML for \.agentteams\/rules\/new-rule\.md:/);
+        expect(axiosPostSpy).not.toHaveBeenCalled();
       } finally {
         process.chdir(originalCwd);
         rmSync(tempCwd, { recursive: true, force: true });
