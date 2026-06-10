@@ -280,6 +280,33 @@ function resolvePlanTemplate(template: unknown): string | undefined {
   throw new Error(`Unsupported plan template: ${value}. Only 'refactor-minimal' and 'quick-minimal' are supported.`);
 }
 
+// quick 플랜의 finish 응답({data:{...plan...}})에서 최종 상태를 안전하게 꺼낸다.
+function extractPlanStatus(result: unknown): string | undefined {
+  if (!result || typeof result !== 'object') return undefined;
+  const data = (result as Record<string, unknown>).data;
+  if (!data || typeof data !== 'object') return undefined;
+  const status = (data as Record<string, unknown>).status;
+  return typeof status === 'string' && status.length > 0 ? status : undefined;
+}
+
+// quick 플랜 결과 JSON. 기본 출력 포맷이 json이므로, 깊이 묻힌 최종 상태(DONE)와
+// 다음 단계를 최상위에 노출해 한눈에 보이게 한다(quick은 생성 즉시 DONE → 다음은 report create).
+export function buildQuickPlanResult(
+  planId: string,
+  createResult: unknown,
+  finishResult: unknown,
+): Record<string, unknown> {
+  const status = extractPlanStatus(finishResult);
+  return {
+    message: `Quick plan completed (${planId})`,
+    planId,
+    ...(status ? { status } : {}),
+    next: `agentteams report create --plan-id ${planId}`,
+    create: createResult,
+    finish: finishResult,
+  };
+}
+
 export async function executePlanCommand(
   apiUrl: string,
   projectId: string,
@@ -938,12 +965,7 @@ export async function executePlanCommand(
         'Plan finished',
       );
 
-      return {
-        message: `Quick plan completed (${planId})`,
-        planId,
-        create: createResult,
-        finish: finishResult,
-      };
+      return buildQuickPlanResult(planId, createResult, finishResult);
     }
     case 'link-issue': {
       const planId = toNonEmptyString(options.id);
