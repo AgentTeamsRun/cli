@@ -2,7 +2,14 @@ import { existsSync, readdirSync, statSync, unlinkSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 const STALE_CACHE_AGE_MS = 3 * 24 * 60 * 60 * 1000;
-const CACHE_DIRS = ['active-plan', 'active-coaction', 'temp'] as const;
+// .agentteams 기준 상대 경로. 대부분 cli/ 하위이지만 evidence는 .agentteams 직속이다.
+const CACHE_DIRS: readonly string[][] = [
+  ['cli', 'active-plan'],
+  ['cli', 'active-coaction'],
+  ['cli', 'temp'],
+  ['cli', 'documents'],
+  ['evidence'],
+];
 
 export function splitCsv(value: string): string[] {
   if (typeof value !== 'string') {
@@ -94,24 +101,27 @@ export function deleteIfTempFile(fileInput: string): void {
 }
 
 /**
- * .agentteams/cli/{active-plan,active-coaction,temp} 안에서 mtime이 3일 초과된
- * .md 파일을 best-effort로 정리합니다. 디렉토리/파일 접근 실패는 모두 무시합니다.
+ * .agentteams/cli/{active-plan,active-coaction,temp,documents}와 .agentteams/evidence
+ * 안에서 mtime이 3일 초과된 일반 파일을 best-effort로 정리합니다. temp/evidence에는
+ * .md 외에 html/json/txt/png 등 다양한 산출물이 쌓이므로 확장자를 가리지 않고
+ * 정리합니다. 하위 디렉토리는 건너뛰며, 디렉토리/파일 접근 실패는 모두 무시합니다.
  */
 export function pruneStaleCacheFiles(projectRoot: string): void {
   const cutoff = Date.now() - STALE_CACHE_AGE_MS;
   for (const sub of CACHE_DIRS) {
-    const dir = join(projectRoot, '.agentteams', 'cli', sub);
+    const dir = join(projectRoot, '.agentteams', ...sub);
     if (!existsSync(dir)) continue;
     let files: string[];
     try {
-      files = readdirSync(dir).filter((f) => f.endsWith('.md'));
+      files = readdirSync(dir);
     } catch {
       continue;
     }
     for (const file of files) {
       const filePath = join(dir, file);
       try {
-        if (statSync(filePath).mtimeMs < cutoff) {
+        const stat = statSync(filePath);
+        if (stat.isFile() && stat.mtimeMs < cutoff) {
           unlinkSync(filePath);
         }
       } catch {
