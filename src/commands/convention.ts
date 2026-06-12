@@ -452,6 +452,65 @@ export async function checkConventionFreshness(
   };
 }
 
+export type ConventionStatusResult = {
+  /** True when the local conventions are behind the server (any change or platform-guide drift). */
+  updateAvailable: boolean;
+  platformGuidesChanged: boolean;
+  conventionChanges: ConventionFreshnessChange[];
+  /** One-line human-readable summary. */
+  summary: string;
+};
+
+export function buildStatusSummary(result: ConventionFreshnessResult): string {
+  const parts: string[] = [];
+  if (result.platformGuidesChanged) parts.push("platform guides");
+  const counts = { new: 0, updated: 0, deleted: 0 } as Record<ConventionFreshnessChange["type"], number>;
+  for (const change of result.conventionChanges) counts[change.type] += 1;
+  if (counts.new > 0) parts.push(`${counts.new} new`);
+  if (counts.updated > 0) parts.push(`${counts.updated} updated`);
+  if (counts.deleted > 0) parts.push(`${counts.deleted} deleted`);
+
+  if (parts.length === 0) return "✓ Conventions up to date";
+  return `⚠ Updates available (${parts.join(", ")}). Run 'agentteams convention download' to sync.`;
+}
+
+/**
+ * Read-only freshness check exposed as `agentteams convention status`.
+ *
+ * Compares the local download manifest against the server and reports whether an
+ * update is available — it never downloads or mutates anything. Degrades gracefully
+ * (exit 0, updateAvailable=false) when the project is not configured or has no local
+ * conventions yet, so callers can safely "check then skip when unavailable".
+ */
+export async function conventionStatus(options?: ConventionCommandOptions): Promise<ConventionStatusResult> {
+  const config = options?.config ?? loadConfig();
+  const projectRoot = findProjectRoot(options?.cwd);
+
+  // Not configured or no local conventions → nothing to compare; treat as up to date.
+  if (!config || !projectRoot) {
+    return {
+      updateAvailable: false,
+      platformGuidesChanged: false,
+      conventionChanges: [],
+      summary: "✓ Conventions up to date",
+    };
+  }
+
+  const apiUrl = getApiBaseUrl(config.apiUrl);
+  const headers = {
+    "X-API-Key": config.apiKey,
+    "Content-Type": "application/json",
+  };
+
+  const freshness = await checkConventionFreshness(apiUrl, config.projectId, headers, projectRoot);
+  return {
+    updateAvailable: freshness.platformGuidesChanged || freshness.conventionChanges.length > 0,
+    platformGuidesChanged: freshness.platformGuidesChanged,
+    conventionChanges: freshness.conventionChanges,
+    summary: buildStatusSummary(freshness),
+  };
+}
+
 export async function conventionList(): Promise<any> {
   const { config, apiUrl, headers } = getApiConfigOrThrow();
 

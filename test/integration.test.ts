@@ -2228,7 +2228,7 @@ describe('CLI Integration Tests', () => {
         executeCommand('dependency', 'create', { planId: 'plan-1' })
       ).rejects.toThrow('--blocking-plan-id is required for dependency create');
       await expect(executeCommand('convention', 'append', {})).rejects.toThrow(
-        'Unknown convention action: append. Use list, show, download, create, update, or delete.'
+        'Unknown convention action: append. Use list, show, download, status, create, update, or delete.'
       );
       await expect(executeCommand('sync', 'list', {})).rejects.toThrow(
         'Unknown sync action: list. Use download.'

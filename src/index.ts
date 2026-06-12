@@ -708,7 +708,7 @@ program
 program
   .command('convention')
   .description('Manage project conventions')
-  .argument('<action>', 'Action to perform (list, show, download, create, update, delete)')
+  .argument('<action>', 'Action to perform (list, show, download, status, create, update, delete)')
   .option('--cwd <path>', 'Working directory (defaults to current)')
   .option(
     '-f, --file <path>',
