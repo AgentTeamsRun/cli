@@ -10,6 +10,7 @@ describe('plan quick with completion report integration', () => {
   const reportFile = join(tmp, 'report.md');
   writeFileSync(reportFile, '# Report\n\n' + 'Did the work. '.repeat(10), 'utf-8');
   let axiosPostSpy: jest.SpiedFunction<typeof axios.post>;
+  let axiosGetSpy: jest.SpiedFunction<typeof axios.get>;
 
   beforeEach(() => {
     jest.restoreAllMocks();
@@ -37,7 +38,7 @@ describe('plan quick with completion report integration', () => {
     });
 
     // getPlan mock
-    const axiosGetSpy = jest.spyOn(axios, 'get');
+    axiosGetSpy = jest.spyOn(axios, 'get');
     axiosGetSpy.mockResolvedValue({
       data: {
         data: {
@@ -87,5 +88,30 @@ describe('plan quick with completion report integration', () => {
     expect(finishBody.completionReport!.content).toContain('Did the work.');
     expect(finishBody.completionReport!.status).toBe('COMPLETED');
     expect(finishBody.completionReport!.qualityScore).toBe(95);
+  });
+
+  it('does not use the just-created quick plan startCommit as the report diff range', async () => {
+    await executePlanCommand('http://localhost:3001', 'test-project', {}, 'quick', {
+      title: 'Quick Plan Title',
+      content: 'Quick plan description',
+      agent: 'test-agent',
+      runnerType: 'CLAUDE_CODE',
+      model: 'claude-opus-4-8',
+      reportFile,
+      reportTitle: 'Quick Report Title',
+      reportStatus: 'COMPLETED',
+      qualityScore: 95,
+    });
+
+    expect(axiosGetSpy).not.toHaveBeenCalled();
+
+    const finishCall = axiosPostSpy.mock.calls.find((call) => call[0].includes('/finish'));
+    expect(finishCall).toBeDefined();
+    const finishBody = finishCall![1] as {
+      completionReport?: {
+        commitStart?: string;
+      };
+    };
+    expect(finishBody.completionReport?.commitStart).not.toBe('abcdef0123456789');
   });
 });

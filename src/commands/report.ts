@@ -1,7 +1,6 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { createReport, deleteReport, getReport, listReports, updateReport } from '../api/report.js';
-import { collectGitMetrics } from '../utils/git.js';
 import { findProjectConfig } from '../utils/config.js';
 import { parseReportOptions } from '../utils/report.js';
 

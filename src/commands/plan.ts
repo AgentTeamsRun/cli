@@ -12,7 +12,6 @@ import {
   interpretEscapes,
   stripFrontmatter,
   toNonEmptyString,
-  toNonNegativeInteger,
   toPositiveInteger,
   toSafeFileName,
   deleteIfTempFile,
@@ -971,17 +970,7 @@ export async function executePlanCommand(
       );
 
       // 3. Finish plan (with completion report if provided)
-      let planStartCommit: string | undefined;
       const includeCompletionReport = typeof options.reportFile === 'string' && options.reportFile.trim().length > 0;
-
-      if (includeCompletionReport && options.git !== false) {
-        try {
-          const planResponse = await getPlan(apiUrl, projectId, headers, planId);
-          planStartCommit = planResponse?.data?.startCommit ?? undefined;
-        } catch {
-          // Plan fetch failure is non-blocking; fall back to HEAD~1 diff
-        }
-      }
 
       const finishBody: {
         runnerType?: string;
@@ -993,7 +982,9 @@ export async function executePlanCommand(
       };
 
       if (includeCompletionReport) {
-        const payload = parseReportOptions(options, { planStartCommit });
+        // Quick plans are often registered after the work is already done. Using the just-created
+        // plan startCommit as the diff base would produce HEAD..HEAD and erase report metrics.
+        const payload = parseReportOptions(options);
         if (payload) {
           finishBody.completionReport = payload;
         }
