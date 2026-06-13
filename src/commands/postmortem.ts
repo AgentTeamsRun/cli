@@ -80,7 +80,7 @@ export async function executePostMortemCommand(
         'Creating post-mortem...',
         async () => {
           const data = await createPostMortem(apiUrl, options.projectId, headers, body);
-          if (options.file) deleteIfTempFile(options.file);
+          if (options.file) deleteIfTempFile(options.file, { keep: options.keepTemp });
           return data;
         },
         'Post-mortem created',
@@ -107,7 +107,7 @@ export async function executePostMortemCommand(
       if (options.status) body.status = options.status;
 
       const updateResult = await updatePostMortem(apiUrl, options.projectId, headers, options.id, body);
-      if (options.file) deleteIfTempFile(options.file);
+      if (options.file) deleteIfTempFile(options.file, { keep: options.keepTemp });
       return updateResult;
     }
     case 'delete': {

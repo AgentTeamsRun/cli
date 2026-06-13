@@ -147,7 +147,7 @@ export async function executeCoActionCommand(apiUrl: string, headers: any, actio
         'Creating co-action takeaway...',
         async () => {
           const data = await createCoActionTakeaway(apiUrl, options.projectId, headers, options.id, body);
-          if (options.file) deleteIfTempFile(options.file);
+          if (options.file) deleteIfTempFile(options.file, { keep: options.keepTemp });
           return data;
         },
         'Co-action takeaway created',
@@ -181,7 +181,7 @@ export async function executeCoActionCommand(apiUrl: string, headers: any, actio
             options.takeawayId,
             body,
           );
-          if (options.file) deleteIfTempFile(options.file);
+          if (options.file) deleteIfTempFile(options.file, { keep: options.keepTemp });
           return data;
         },
         'Co-action takeaway updated',
@@ -245,7 +245,7 @@ export async function executeCoActionCommand(apiUrl: string, headers: any, actio
           'Creating co-action...',
           async () => {
             const data = await createCoAction(apiUrl, options.projectId, headers, body);
-            if (options.file) deleteIfTempFile(options.file);
+            if (options.file) deleteIfTempFile(options.file, { keep: options.keepTemp });
             const id = (data as any)?.data?.id ?? options.id;
             if (id)
               process.stderr.write(
@@ -256,7 +256,7 @@ export async function executeCoActionCommand(apiUrl: string, headers: any, actio
           'Co-action created',
         );
       } catch (error) {
-        if (options.file) deleteIfTempFile(options.file);
+        if (options.file) deleteIfTempFile(options.file, { keep: options.keepTemp });
 
         if (
           isAxiosError(error) &&
@@ -295,7 +295,7 @@ export async function executeCoActionCommand(apiUrl: string, headers: any, actio
       }
 
       const updateResult = await updateCoAction(apiUrl, options.projectId, headers, options.id, body);
-      if (options.file) deleteIfTempFile(options.file);
+      if (options.file) deleteIfTempFile(options.file, { keep: options.keepTemp });
       if (options.id)
         process.stderr.write(
           `Tip: Add a takeaway to capture key insights or knowledge for the next reader — agentteams coaction takeaway-create --id ${options.id}\n`,

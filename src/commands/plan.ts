@@ -584,7 +584,7 @@ export async function executePlanCommand(
         () => finishPlanLifecycle(apiUrl, projectId, headers, options.id, body),
         'Plan finished',
       );
-      if (options.reportFile) deleteIfTempFile(options.reportFile);
+      if (options.reportFile) deleteIfTempFile(options.reportFile, { keep: options.keepTemp });
       return finishResult;
     }
     case 'create': {
@@ -667,7 +667,7 @@ export async function executePlanCommand(
           }),
         'Plan created',
       );
-      if (options.file) deleteIfTempFile(options.file);
+      if (options.file) deleteIfTempFile(options.file, { keep: options.keepTemp });
 
       const createdPlanId: string | undefined = createResult?.data?.id;
       if (createHtmlContent && createdPlanId) {
@@ -680,7 +680,7 @@ export async function executePlanCommand(
           options.sourceLabel,
           'created',
         );
-        if (options.htmlFile) deleteIfTempFile(options.htmlFile);
+        if (options.htmlFile) deleteIfTempFile(options.htmlFile, { keep: options.keepTemp });
       }
 
       // --origin-issue flag: link origin issues after plan creation
@@ -810,7 +810,7 @@ export async function executePlanCommand(
         () => updatePlan(apiUrl, projectId, headers, options.id, body),
         'Plan updated',
       );
-      if (options.file) deleteIfTempFile(options.file);
+      if (options.file) deleteIfTempFile(options.file, { keep: options.keepTemp });
 
       if (updateHtmlContent) {
         await uploadPlanHtmlPreview(
@@ -822,7 +822,7 @@ export async function executePlanCommand(
           options.sourceLabel,
           'updated',
         );
-        if (options.htmlFile) deleteIfTempFile(options.htmlFile);
+        if (options.htmlFile) deleteIfTempFile(options.htmlFile, { keep: options.keepTemp });
       }
 
       return updateResult;
@@ -1001,7 +1001,7 @@ export async function executePlanCommand(
           }),
         'Plan created',
       );
-      if (hasQuickFile) deleteIfTempFile(options.file as string);
+      if (hasQuickFile) deleteIfTempFile(options.file as string, { keep: options.keepTemp });
 
       const planId: string = createResult?.data?.id;
       if (!planId) {

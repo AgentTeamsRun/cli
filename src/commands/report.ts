@@ -113,7 +113,7 @@ export async function executeReportCommand(apiUrl: string, headers: any, action:
         'Creating report...',
         async () => {
           const data = await createReport(apiUrl, options.projectId, headers, body);
-          if (options.file) deleteIfTempFile(options.file);
+          if (options.file) deleteIfTempFile(options.file, { keep: options.keepTemp });
           return data;
         },
         'Report created',

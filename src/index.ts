@@ -153,6 +153,11 @@ program
   .option('--content <content>', 'Plan content (plain text or Tiptap JSON)')
   .option('--interpret-escapes', 'Interpret \\n sequences in --content as newlines (create/update only)', false)
   .option('--file <path>', 'Read plan content from a local file (create/update/upload-html)')
+  .option(
+    '--keep-temp',
+    'Keep the uploaded file under .agentteams/cli/temp/ instead of deleting it after upload',
+    false,
+  )
   .option('--stdin', 'Read plan HTML summary from stdin (upload-html only)', false)
   .option(
     '--html-file <path>',
@@ -373,6 +378,11 @@ program
   .option('--plan-id <id>', 'Plan ID (optional)')
   .option('--title <title>', 'Report title')
   .option('--file <path>', 'Read report content from a local file (create/update)')
+  .option(
+    '--keep-temp',
+    'Keep the uploaded file under .agentteams/cli/temp/ instead of deleting it after upload',
+    false,
+  )
   .option('--status <status>', 'Report status (COMPLETED, FAILED, PARTIAL)')
   .option('--commit-hash <hash>', 'Git commit hash (manual override)')
   .option('--branch-name <name>', 'Git branch name (manual override)')
@@ -565,6 +575,11 @@ program
   .option('--title <title>', 'Post mortem title')
   .option('--content <content>', 'Post mortem markdown content (short text; use --file for long content)')
   .option('--file <path>', 'Read postmortem content from a local file (create/update)')
+  .option(
+    '--keep-temp',
+    'Keep the uploaded file under .agentteams/cli/temp/ instead of deleting it after upload',
+    false,
+  )
   .option('--action-items <csv>', 'Action items (comma-separated)')
   .option('--status <status>', 'Post mortem status (OPEN, IN_PROGRESS, RESOLVED)')
   .option('--page <number>', 'Page number (list only)')
@@ -632,6 +647,11 @@ program
   .option('--title <title>', 'Co-action title')
   .option('--content <content>', 'Co-action content (short text; use --file for long content)')
   .option('--file <path>', 'Read co-action content from a local file (create/update)')
+  .option(
+    '--keep-temp',
+    'Keep the uploaded file under .agentteams/cli/temp/ instead of deleting it after upload',
+    false,
+  )
   .option('--status <status>', 'Co-action status (OPEN, CLOSED)')
   .option('--visibility <visibility>', 'Co-action visibility (PRIVATE, PROJECT)')
   .option('--page <number>', 'Page number (list only)')
