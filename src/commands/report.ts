@@ -1,8 +1,8 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { createReport, deleteReport, getReport, listReports, updateReport } from '../api/report.js';
-import { collectGitMetrics } from '../utils/git.js';
 import { findProjectConfig } from '../utils/config.js';
+import { parseReportOptions } from '../utils/report.js';
 
 import {
   deleteIfTempFile,
@@ -49,61 +49,21 @@ export async function executeReportCommand(apiUrl: string, headers: any, action:
       if (!options.runnerType || !options.model) {
         throw new Error('--runner-type and --model are required for report create.');
       }
-      const title = (options.title ?? options.summary) as string | undefined;
-      if (!title || title.trim().length === 0) {
-        throw new Error('--title is required for report create (or use --summary)');
-      }
 
-      if (!options.file) {
+      const payload = parseReportOptions(options, { defaultStatus: 'COMPLETED' });
+      if (!payload) {
         throw new Error('--file is required for report create.');
       }
-      const filePath = resolve(options.file);
-      if (!existsSync(filePath)) {
-        throw new Error(`File not found: ${options.file}`);
-      }
-      const content = readFileSync(filePath, 'utf-8');
-      printFileInfo(options.file, content);
-      if (!content || content.trim().length === 0) {
-        throw new Error('Report file is empty.');
-      }
-
-      const status = (options.status as string | undefined) ?? 'COMPLETED';
-
-      const autoGitMetrics = options.git === false ? {} : collectGitMetrics();
-
-      const commitHash = toNonEmptyString(options.commitHash) ?? autoGitMetrics.commitHash;
-      const branchName = toNonEmptyString(options.branchName) ?? autoGitMetrics.branchName;
-      const filesModified = toNonNegativeInteger(options.filesModified) ?? autoGitMetrics.filesModified;
-      const linesAdded = toNonNegativeInteger(options.linesAdded) ?? autoGitMetrics.linesAdded;
-      const linesDeleted = toNonNegativeInteger(options.linesDeleted) ?? autoGitMetrics.linesDeleted;
-      const durationSeconds = toNonNegativeInteger(options.durationSeconds);
-      const commitStart = toNonEmptyString(options.commitStart);
-      const commitEnd = toNonEmptyString(options.commitEnd);
-      const pullRequestId = toNonEmptyString(options.pullRequestId);
-      const qualityScore = toNonNegativeInteger(options.qualityScore);
 
       const body: Record<string, unknown> = {
         planId: options.planId,
         repositoryId: options.repositoryId ?? options.defaultRepositoryId,
-        title,
-        content,
-        status,
+        runnerType: options.runnerType,
+        model: options.model,
+        ...payload,
       };
 
-      if (options.runnerType) body.runnerType = options.runnerType;
-      if (options.model) body.model = options.model;
-      if (commitHash !== undefined) body.commitHash = commitHash;
-      if (branchName !== undefined) body.branchName = branchName;
-      if (filesModified !== undefined) body.filesModified = filesModified;
-      if (linesAdded !== undefined) body.linesAdded = linesAdded;
-      if (linesDeleted !== undefined) body.linesDeleted = linesDeleted;
-      if (durationSeconds !== undefined) body.durationSeconds = durationSeconds;
-      if (commitStart !== undefined) body.commitStart = commitStart;
-      if (commitEnd !== undefined) body.commitEnd = commitEnd;
-      if (pullRequestId !== undefined) body.pullRequestId = pullRequestId;
-      if (qualityScore !== undefined) body.qualityScore = qualityScore;
-
-      if (body.planId && durationSeconds === undefined) {
+      if (body.planId && body.durationSeconds === undefined) {
         process.stderr.write(
           '[info] durationSeconds is omitted; server will auto-calculate from linked plan timing when available.\n',
         );

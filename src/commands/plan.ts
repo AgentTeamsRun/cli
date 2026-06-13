@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, writeFileSync, rmSync, readdirSync, readFileSync
 import { join, resolve } from 'node:path';
 import { PLAN_COMPLEXITY_ORDER } from '../constants/planComplexity.js';
 import { checkConventionFreshness } from './convention.js';
+import { parseReportOptions } from '../utils/report.js';
 import { findProjectConfig } from '../utils/config.js';
 import { collectGitMetrics } from '../utils/git.js';
 import { withSpinner, printFileInfo } from '../utils/spinner.js';
@@ -11,7 +12,6 @@ import {
   interpretEscapes,
   stripFrontmatter,
   toNonEmptyString,
-  toNonNegativeInteger,
   toPositiveInteger,
   toSafeFileName,
   deleteIfTempFile,
@@ -301,6 +301,19 @@ function extractPlanStatus(result: unknown): string | undefined {
   return typeof status === 'string' && status.length > 0 ? status : undefined;
 }
 
+// quick 플랜의 finish 응답에서 completionReport를 안전하게 꺼낸다.
+function extractCompletionReport(result: unknown): { id?: string; webUrl?: string } | undefined {
+  if (!result || typeof result !== 'object') return undefined;
+  const data = (result as Record<string, unknown>).data;
+  if (!data || typeof data !== 'object') return undefined;
+  const report = (data as Record<string, unknown>).completionReport;
+  if (!report || typeof report !== 'object') return undefined;
+  return {
+    id: (report as Record<string, unknown>).id as string | undefined,
+    webUrl: (report as Record<string, unknown>).webUrl as string | undefined,
+  };
+}
+
 // quick 플랜 결과 JSON. 기본 출력 포맷이 json이므로, 깊이 묻힌 최종 상태(DONE)와
 // 다음 단계를 최상위에 노출해 한눈에 보이게 한다(quick은 생성 즉시 DONE → 다음은 report create).
 export function buildQuickPlanResult(
@@ -309,11 +322,22 @@ export function buildQuickPlanResult(
   finishResult: unknown,
 ): Record<string, unknown> {
   const status = extractPlanStatus(finishResult);
+  const report = extractCompletionReport(finishResult);
+  const reportCreated = !!report;
+
   return {
     message: `Quick plan completed (${planId})`,
     planId,
     ...(status ? { status } : {}),
-    next: `agentteams report create --plan-id ${planId}`,
+    reportCreated,
+    ...(reportCreated
+      ? {
+          reportId: report?.id,
+          reportWebUrl: report?.webUrl,
+        }
+      : {
+          next: `agentteams report create --plan-id ${planId}`,
+        }),
     create: createResult,
     finish: finishResult,
   };
@@ -456,18 +480,7 @@ export async function executePlanCommand(
     case 'finish': {
       if (!options.id) throw new Error('--id is required for plan finish');
 
-      let reportContent: string | undefined;
-
-      if (options.reportFile) {
-        const reportFilePath = resolve(options.reportFile);
-        if (!existsSync(reportFilePath)) {
-          throw new Error(`File not found: ${options.reportFile}`);
-        }
-        reportContent = readFileSync(reportFilePath, 'utf-8');
-        printFileInfo(options.reportFile, reportContent);
-      }
-
-      const includeCompletionReport = typeof reportContent === 'string' && reportContent.trim().length > 0;
+      const includeCompletionReport = typeof options.reportFile === 'string' && options.reportFile.trim().length > 0;
 
       // 완료보고서를 첨부하면 runnerType/model 스냅샷이 보고서에 저장되므로,
       // null로 남지 않도록 보고서 첨부 시점에 강제한다. (보고서 없는 finish는 제외)
@@ -480,23 +493,7 @@ export async function executePlanCommand(
         runnerType?: string;
         model?: string;
         fastMode?: boolean;
-        completionReport?: {
-          title: string;
-          content: string;
-          status?: string;
-          qualityScore?: number;
-          commitHash?: string;
-          branchName?: string;
-          filesModified?: number;
-          linesAdded?: number;
-          linesDeleted?: number;
-          durationSeconds?: number;
-          commitStart?: string;
-          commitEnd?: string;
-          pullRequestId?: string;
-          reviewRecommendation?: string;
-          reviewReason?: string;
-        };
+        completionReport?: any;
       } = {};
 
       if (options.task) {
@@ -524,59 +521,10 @@ export async function executePlanCommand(
           }
         }
 
-        const autoGitMetrics =
-          options.git === false ? {} : collectGitMetrics(undefined, { startCommit: planStartCommit });
-
-        const commitHash = toNonEmptyString(options.commitHash) ?? autoGitMetrics.commitHash;
-        const branchName = toNonEmptyString(options.branchName) ?? autoGitMetrics.branchName;
-        const filesModified = toNonNegativeInteger(options.filesModified) ?? autoGitMetrics.filesModified;
-        const linesAdded = toNonNegativeInteger(options.linesAdded) ?? autoGitMetrics.linesAdded;
-        const linesDeleted = toNonNegativeInteger(options.linesDeleted) ?? autoGitMetrics.linesDeleted;
-        const durationSeconds = toNonNegativeInteger(options.durationSeconds);
-        const commitStart = toNonEmptyString(options.commitStart) ?? planStartCommit;
-        const commitEnd = toNonEmptyString(options.commitEnd) ?? autoGitMetrics.commitHash;
-        const pullRequestId = toNonEmptyString(options.pullRequestId);
-        const qualityScore = toNonNegativeInteger(options.qualityScore);
-        const reportStatus = toNonEmptyString(options.reportStatus);
-        const reviewRecommendationRaw = toNonEmptyString(options.reviewRecommendation);
-        const reviewRecommendation =
-          reviewRecommendationRaw === 'REQUIRED' || reviewRecommendationRaw === 'NOT_NEEDED'
-            ? reviewRecommendationRaw
-            : reviewRecommendationRaw !== undefined
-              ? (() => {
-                  console.warn(
-                    `Ignoring invalid --review-recommendation "${reviewRecommendationRaw}" (expected REQUIRED or NOT_NEEDED)`,
-                  );
-                  return undefined;
-                })()
-              : undefined;
-        const reviewReason = toNonEmptyString(options.reviewReason);
-
-        const reportTitle =
-          typeof options.reportTitle === 'string' && options.reportTitle.trim().length > 0
-            ? options.reportTitle.trim()
-            : (() => {
-                throw new Error('--report-title is required when attaching a completion report');
-              })();
-
-        body.completionReport = {
-          title: reportTitle,
-          content: reportContent!.trim(),
-        };
-
-        if (reportStatus !== undefined) body.completionReport.status = reportStatus;
-        if (qualityScore !== undefined) body.completionReport.qualityScore = qualityScore;
-        if (commitHash !== undefined) body.completionReport.commitHash = commitHash;
-        if (branchName !== undefined) body.completionReport.branchName = branchName;
-        if (filesModified !== undefined) body.completionReport.filesModified = filesModified;
-        if (linesAdded !== undefined) body.completionReport.linesAdded = linesAdded;
-        if (linesDeleted !== undefined) body.completionReport.linesDeleted = linesDeleted;
-        if (durationSeconds !== undefined) body.completionReport.durationSeconds = durationSeconds;
-        if (commitStart !== undefined) body.completionReport.commitStart = commitStart;
-        if (commitEnd !== undefined) body.completionReport.commitEnd = commitEnd;
-        if (pullRequestId !== undefined) body.completionReport.pullRequestId = pullRequestId;
-        if (reviewRecommendation !== undefined) body.completionReport.reviewRecommendation = reviewRecommendation;
-        if (reviewReason !== undefined) body.completionReport.reviewReason = reviewReason;
+        const payload = parseReportOptions(options, { planStartCommit });
+        if (payload) {
+          body.completionReport = payload;
+        }
       }
 
       const finishResult = await withSpinner(
@@ -1021,16 +969,33 @@ export async function executePlanCommand(
         'Plan started',
       );
 
-      // 3. Finish plan (no completion report for quick plans)
+      // 3. Finish plan (with completion report if provided)
+      const includeCompletionReport = typeof options.reportFile === 'string' && options.reportFile.trim().length > 0;
+
+      const finishBody: {
+        runnerType?: string;
+        model?: string;
+        completionReport?: any;
+      } = {
+        runnerType: options.runnerType,
+        model: options.model,
+      };
+
+      if (includeCompletionReport) {
+        // Quick plans are often registered after the work is already done. Using the just-created
+        // plan startCommit as the diff base would produce HEAD..HEAD and erase report metrics.
+        const payload = parseReportOptions(options);
+        if (payload) {
+          finishBody.completionReport = payload;
+        }
+      }
+
       const finishResult = await withSpinner(
         'Finishing plan...',
-        () =>
-          finishPlanLifecycle(apiUrl, projectId, headers, planId, {
-            runnerType: options.runnerType,
-            model: options.model,
-          }),
+        () => finishPlanLifecycle(apiUrl, projectId, headers, planId, finishBody),
         'Plan finished',
       );
+      if (options.reportFile) deleteIfTempFile(options.reportFile, { keep: options.keepTemp });
 
       return buildQuickPlanResult(planId, createResult, finishResult);
     }
