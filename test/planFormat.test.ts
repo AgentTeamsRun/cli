@@ -1,8 +1,5 @@
 import { describe, expect, it } from '@jest/globals';
-import {
-  mergePlanWithDependencies,
-  normalizeDependencies,
-} from '../src/utils/planFormat.js';
+import { mergePlanWithDependencies, normalizeDependencies } from '../src/utils/planFormat.js';
 
 describe('planFormat', () => {
   it('normalizeDependencies extracts blocking and dependents from raw or wrapped payloads', () => {
@@ -34,5 +31,4 @@ describe('planFormat', () => {
       },
     });
   });
-
 });

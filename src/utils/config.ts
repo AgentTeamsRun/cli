@@ -1,15 +1,15 @@
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
-import { join, dirname, resolve } from "node:path";
-import { homedir } from "node:os";
-import type { Config } from "../types/index.js";
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { join, dirname, resolve } from 'node:path';
+import { homedir } from 'node:os';
+import type { Config } from '../types/index.js';
 
-const CONFIG_DIR = ".agentteams";
-const CONFIG_FILE = "config.json";
+const CONFIG_DIR = '.agentteams';
+const CONFIG_FILE = 'config.json';
 
 function readConfigFile(filePath: string): Partial<Config> | null {
   try {
     if (!existsSync(filePath)) return null;
-    const raw = readFileSync(filePath, "utf-8");
+    const raw = readFileSync(filePath, 'utf-8');
     return JSON.parse(raw) as Partial<Config>;
   } catch {
     return null;
@@ -89,17 +89,9 @@ export function loadConfig(options?: Partial<Config>): Config | null {
     ...cliOptions,
   };
 
-  const requiredFields: (keyof Config)[] = [
-    "teamId",
-    "projectId",
-    "agentName",
-    "apiKey",
-    "apiUrl",
-  ];
+  const requiredFields: (keyof Config)[] = ['teamId', 'projectId', 'agentName', 'apiKey', 'apiUrl'];
 
-  const hasAllFields = requiredFields.every(
-    (field) => typeof merged[field] === "string" && merged[field].length > 0
-  );
+  const hasAllFields = requiredFields.every((field) => typeof merged[field] === 'string' && merged[field].length > 0);
 
   if (!hasAllFields) return null;
 
@@ -121,5 +113,5 @@ export function saveConfig(configPath: string, config: Config): void {
     mkdirSync(dir, { recursive: true });
   }
 
-  writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n", "utf-8");
+  writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n', 'utf-8');
 }

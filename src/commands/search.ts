@@ -24,7 +24,7 @@ export async function executeSearchCommand(
   apiUrl: string,
   projectId: string,
   headers: any,
-  options: Record<string, unknown>
+  options: Record<string, unknown>,
 ): Promise<unknown> {
   const query = options.query as string | undefined;
   if (!query?.trim()) {
@@ -39,9 +39,7 @@ export async function executeSearchCommand(
     const types = splitCsv(options.types).map((t) => t.toUpperCase());
     const invalid = types.filter((t) => !VALID_TYPES.includes(t as any));
     if (invalid.length > 0) {
-      throw new Error(
-        `Invalid type(s): ${invalid.join(', ')}. Valid types: ${VALID_TYPES.join(', ')}`
-      );
+      throw new Error(`Invalid type(s): ${invalid.join(', ')}. Valid types: ${VALID_TYPES.join(', ')}`);
     }
     params.types = types;
   }
@@ -52,9 +50,5 @@ export async function executeSearchCommand(
   const maxTokens = toPositiveInteger(options.maxTokens);
   if (maxTokens !== undefined) params.maxTokens = maxTokens;
 
-  return withSpinner(
-    'Searching...',
-    () => searchEntities(apiUrl, projectId, headers, params),
-    'Search complete',
-  );
+  return withSpinner('Searching...', () => searchEntities(apiUrl, projectId, headers, params), 'Search complete');
 }

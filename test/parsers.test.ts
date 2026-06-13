@@ -72,9 +72,7 @@ describe('parsers', () => {
     }
 
     const unlinkSync = jest.fn();
-    const existsSync = jest.fn((target: string) =>
-      target.replace(/\\/g, '/').includes('.agentteams/cli/temp')
-    );
+    const existsSync = jest.fn((target: string) => target.replace(/\\/g, '/').includes('.agentteams/cli/temp'));
     const readdirSync = jest.fn(() => [] as string[]);
     const statSync = jest.fn(() => ({ mtimeMs: Date.now() }));
 
@@ -91,9 +89,56 @@ describe('parsers', () => {
     deleteIfTempFile('/tmp/project/src/report.md');
 
     expect(unlinkSync).toHaveBeenCalledTimes(1);
-    expect(unlinkSync).toHaveBeenCalledWith(
-      expect.stringMatching(/\.agentteams[/\\]cli[/\\]temp[/\\]report\.md$/)
-    );
+    expect(unlinkSync).toHaveBeenCalledWith(expect.stringMatching(/\.agentteams[/\\]cli[/\\]temp[/\\]report\.md$/));
+  });
+
+  it('deleteIfTempFile preserves the temp file when keep is set', async () => {
+    if (typeof (jest as any).unstable_mockModule !== 'function') {
+      return;
+    }
+
+    const unlinkSync = jest.fn();
+    const existsSync = jest.fn((target: string) => target.replace(/\\/g, '/').includes('.agentteams/cli/temp'));
+    const readdirSync = jest.fn(() => [] as string[]);
+    const statSync = jest.fn(() => ({ mtimeMs: Date.now() }));
+
+    (jest as any).unstable_mockModule('node:fs', () => ({
+      existsSync,
+      unlinkSync,
+      readdirSync,
+      statSync,
+    }));
+
+    const { deleteIfTempFile } = await import('../src/utils/parsers.js');
+
+    deleteIfTempFile('/tmp/project/.agentteams/cli/temp/report.md', { keep: true });
+
+    expect(unlinkSync).not.toHaveBeenCalled();
+  });
+
+  it('deleteIfTempFile writes a stderr notice when it deletes', async () => {
+    if (typeof (jest as any).unstable_mockModule !== 'function') {
+      return;
+    }
+
+    const unlinkSync = jest.fn();
+    const existsSync = jest.fn((target: string) => target.replace(/\\/g, '/').includes('.agentteams/cli/temp'));
+    const readdirSync = jest.fn(() => [] as string[]);
+    const statSync = jest.fn(() => ({ mtimeMs: Date.now() }));
+
+    (jest as any).unstable_mockModule('node:fs', () => ({
+      existsSync,
+      unlinkSync,
+      readdirSync,
+      statSync,
+    }));
+
+    const stderrSpy = jest.spyOn(process.stderr, 'write').mockReturnValue(true);
+    const { deleteIfTempFile } = await import('../src/utils/parsers.js');
+
+    deleteIfTempFile('/tmp/project/.agentteams/cli/temp/report.md');
+
+    expect(stderrSpy).toHaveBeenCalledWith(expect.stringContaining('--keep-temp'));
   });
 
   it('pruneStaleCacheFiles deletes stale files of any extension but keeps recent files and directories', async () => {
@@ -146,9 +191,7 @@ describe('parsers', () => {
 
     pruneStaleCacheFiles('/tmp/project');
 
-    const deleted = unlinkSync.mock.calls.map((c) =>
-      (c[0] as string).replace(/\\/g, '/').split('/').pop()
-    );
+    const deleted = unlinkSync.mock.calls.map((c) => (c[0] as string).replace(/\\/g, '/').split('/').pop());
     expect(deleted).toContain('old-summary.html'); // 비-md 산출물도 정리됨 (회귀 방지)
     expect(deleted).toContain('old-runbook.md');
     expect(deleted).toContain('old-evidence.txt'); // cli 밖 .agentteams/evidence 도 정리됨

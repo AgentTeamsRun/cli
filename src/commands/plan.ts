@@ -43,9 +43,13 @@ const PLAN_COMPLEXITY_VALUES: readonly string[] = PLAN_COMPLEXITY_ORDER;
 function warnOnComplexityMismatch(complexity: string, content: string): void {
   const length = content.trim().length;
   if (complexity === 'FULL' && length < 400) {
-    process.stderr.write('[warn] plan create: --complexity FULL but the body is short. FULL is for multi-wave / multi-domain work — confirm the tier fits.\n');
+    process.stderr.write(
+      '[warn] plan create: --complexity FULL but the body is short. FULL is for multi-wave / multi-domain work — confirm the tier fits.\n',
+    );
   } else if (complexity === 'MINIMAL' && length > 4000) {
-    process.stderr.write('[warn] plan create: --complexity MINIMAL but the body is large. MINIMAL is for a single task touching 1–2 files — confirm the tier fits.\n');
+    process.stderr.write(
+      '[warn] plan create: --complexity MINIMAL but the body is large. MINIMAL is for a single task touching 1–2 files — confirm the tier fits.\n',
+    );
   }
 }
 
@@ -53,8 +57,7 @@ function assertPlanPreviewHtmlSafety(html: string): void {
   const result = validatePlanPreviewHtmlSafety(html);
   if (!result.ok) {
     throw new Error(
-      'Plan HTML preview is not theme-safe. '
-      + `Fix the preview before uploading: ${result.reasons.join('; ')}.`
+      'Plan HTML preview is not theme-safe. ' + `Fix the preview before uploading: ${result.reasons.join('; ')}.`,
     );
   }
 }
@@ -62,14 +65,18 @@ function assertPlanPreviewHtmlSafety(html: string): void {
 export function assertComplexityReasonCanBeRecorded(
   complexityReason: unknown,
   nextComplexity: string | undefined,
-  currentComplexity?: string | null
+  currentComplexity?: string | null,
 ): void {
   if (!complexityReason) return;
   if (!nextComplexity) {
-    throw new Error('--complexity-reason requires --complexity. The reason is only recorded when complexity is updated.');
+    throw new Error(
+      '--complexity-reason requires --complexity. The reason is only recorded when complexity is updated.',
+    );
   }
   if (currentComplexity === nextComplexity) {
-    throw new Error('--complexity-reason was provided, but --complexity matches the current plan complexity. Choose a different complexity or omit the reason.');
+    throw new Error(
+      '--complexity-reason was provided, but --complexity matches the current plan complexity. Choose a different complexity or omit the reason.',
+    );
   }
 }
 
@@ -81,12 +88,18 @@ function findProjectRoot(): string | null {
   return resolve(configPath, '..', '..');
 }
 
-function formatFreshnessChangeLabel(change: { type: 'new' | 'updated' | 'deleted'; title?: string; fileName?: string; id: string }): string {
-  const target = (change.title && change.title.trim().length > 0)
-    ? change.title.trim()
-    : (change.fileName && change.fileName.trim().length > 0)
-      ? change.fileName.trim()
-      : change.id;
+function formatFreshnessChangeLabel(change: {
+  type: 'new' | 'updated' | 'deleted';
+  title?: string;
+  fileName?: string;
+  id: string;
+}): string {
+  const target =
+    change.title && change.title.trim().length > 0
+      ? change.title.trim()
+      : change.fileName && change.fileName.trim().length > 0
+        ? change.fileName.trim()
+        : change.id;
 
   if (change.type === 'new') return `new: ${target}`;
   if (change.type === 'deleted') return `deleted: ${target}`;
@@ -112,7 +125,7 @@ export function buildFreshnessNoticeLines(freshness: {
 async function runFreshnessCheckSilent(
   apiUrl: string,
   projectId: string,
-  headers: Record<string, string>
+  headers: Record<string, string>,
 ): Promise<void> {
   const projectRoot = findProjectRoot();
   if (!projectRoot) return;
@@ -161,12 +174,12 @@ export function readPlanHtmlUploadInput(options: { file?: string; stdin?: boolea
 
   const html = hasFile
     ? (() => {
-      const filePath = resolve(options.file as string);
-      if (!existsSync(filePath)) {
-        throw new Error(`File not found: ${options.file}`);
-      }
-      return readFileSync(filePath, 'utf-8');
-    })()
+        const filePath = resolve(options.file as string);
+        if (!existsSync(filePath)) {
+          throw new Error(`File not found: ${options.file}`);
+        }
+        return readFileSync(filePath, 'utf-8');
+      })()
     : readFileSync(0, 'utf-8');
 
   if (html.trim().length === 0) {
@@ -196,12 +209,12 @@ export function readPlanHtmlPreviewInput(options: { htmlFile?: string; htmlStdin
 
   const html = hasFile
     ? (() => {
-      const filePath = resolve(options.htmlFile as string);
-      if (!existsSync(filePath)) {
-        throw new Error(`File not found: ${options.htmlFile}`);
-      }
-      return readFileSync(filePath, 'utf-8');
-    })()
+        const filePath = resolve(options.htmlFile as string);
+        if (!existsSync(filePath)) {
+          throw new Error(`File not found: ${options.htmlFile}`);
+        }
+        return readFileSync(filePath, 'utf-8');
+      })()
     : readFileSync(0, 'utf-8');
 
   if (html.trim().length === 0) {
@@ -219,27 +232,27 @@ async function uploadPlanHtmlPreview(
   planId: string,
   html: string,
   sourceLabel: string | undefined,
-  action: 'created' | 'updated'
+  action: 'created' | 'updated',
 ): Promise<void> {
   try {
     await withSpinner(
       'Uploading plan HTML preview...',
-      () => uploadPlanHtml(apiUrl, projectId, headers, planId, {
-        html,
-        curationType: 'AI_CURATED',
-        sourceLabel,
-      }),
+      () =>
+        uploadPlanHtml(apiUrl, projectId, headers, planId, {
+          html,
+          curationType: 'AI_CURATED',
+          sourceLabel,
+        }),
       'Plan HTML preview uploaded',
     );
   } catch (error: any) {
     const cause = error?.message ?? error;
     throw new Error(
-      `Plan ${planId} was ${action}, but uploading the HTML preview failed (partial failure: the plan body and preview are now out of sync). `
-      + `Re-run 'agentteams plan upload-html --id ${planId} --file <html-file>' to finish. Cause: ${cause}`
+      `Plan ${planId} was ${action}, but uploading the HTML preview failed (partial failure: the plan body and preview are now out of sync). ` +
+        `Re-run 'agentteams plan upload-html --id ${planId} --file <html-file>' to finish. Cause: ${cause}`,
     );
   }
 }
-
 
 function minimalPlanRefactorChecklistTemplate(): string {
   return [
@@ -267,7 +280,6 @@ function minimalPlanQuickTemplate(): string {
     '',
   ].join('\n');
 }
-
 
 function resolvePlanTemplate(template: unknown): string | undefined {
   if (template === undefined || template === null) return undefined;
@@ -312,7 +324,7 @@ export async function executePlanCommand(
   projectId: string,
   headers: any,
   action: string,
-  options: any
+  options: any,
 ): Promise<any> {
   const root = findProjectRoot();
   if (root) pruneStaleCacheFiles(root);
@@ -384,18 +396,18 @@ export async function executePlanCommand(
 
       return withSpinner(
         'Uploading plan HTML summary...',
-        () => uploadPlanHtml(apiUrl, projectId, headers, options.id, {
-          html,
-          curationType: 'AI_CURATED',
-          sourceLabel: options.sourceLabel,
-        }),
+        () =>
+          uploadPlanHtml(apiUrl, projectId, headers, options.id, {
+            html,
+            curationType: 'AI_CURATED',
+            sourceLabel: options.sourceLabel,
+          }),
         'Plan HTML summary uploaded',
       );
     }
     case 'start': {
       if (!options.id) throw new Error('--id is required for plan start');
-      const assignAgent = (options.agent as string | undefined)
-        ?? (options.defaultCreatedBy as string | undefined);
+      const assignAgent = (options.agent as string | undefined) ?? (options.defaultCreatedBy as string | undefined);
 
       if (!assignAgent) {
         throw new Error('No agent available for assignment. Set AGENTTEAMS_AGENT_NAME or pass --agent.');
@@ -403,7 +415,15 @@ export async function executePlanCommand(
 
       const startGitInfo = options.git === false ? {} : collectGitMetrics();
 
-      const body: { assignedTo?: string; task?: string; startCommit?: string; startBranch?: string; runnerType?: string; model?: string; fastMode?: boolean } = {
+      const body: {
+        assignedTo?: string;
+        task?: string;
+        startCommit?: string;
+        startBranch?: string;
+        runnerType?: string;
+        model?: string;
+        fastMode?: boolean;
+      } = {
         assignedTo: assignAgent,
       };
       if (options.task) {
@@ -447,8 +467,7 @@ export async function executePlanCommand(
         printFileInfo(options.reportFile, reportContent);
       }
 
-      const includeCompletionReport =
-        typeof reportContent === 'string' && reportContent.trim().length > 0;
+      const includeCompletionReport = typeof reportContent === 'string' && reportContent.trim().length > 0;
 
       // 완료보고서를 첨부하면 runnerType/model 스냅샷이 보고서에 저장되므로,
       // null로 남지 않도록 보고서 첨부 시점에 강제한다. (보고서 없는 finish는 제외)
@@ -505,9 +524,8 @@ export async function executePlanCommand(
           }
         }
 
-        const autoGitMetrics = options.git === false
-          ? {}
-          : collectGitMetrics(undefined, { startCommit: planStartCommit });
+        const autoGitMetrics =
+          options.git === false ? {} : collectGitMetrics(undefined, { startCommit: planStartCommit });
 
         const commitHash = toNonEmptyString(options.commitHash) ?? autoGitMetrics.commitHash;
         const branchName = toNonEmptyString(options.branchName) ?? autoGitMetrics.branchName;
@@ -521,16 +539,25 @@ export async function executePlanCommand(
         const qualityScore = toNonNegativeInteger(options.qualityScore);
         const reportStatus = toNonEmptyString(options.reportStatus);
         const reviewRecommendationRaw = toNonEmptyString(options.reviewRecommendation);
-        const reviewRecommendation = reviewRecommendationRaw === 'REQUIRED' || reviewRecommendationRaw === 'NOT_NEEDED'
-          ? reviewRecommendationRaw
-          : (reviewRecommendationRaw !== undefined
-            ? (() => { console.warn(`Ignoring invalid --review-recommendation "${reviewRecommendationRaw}" (expected REQUIRED or NOT_NEEDED)`); return undefined; })()
-            : undefined);
+        const reviewRecommendation =
+          reviewRecommendationRaw === 'REQUIRED' || reviewRecommendationRaw === 'NOT_NEEDED'
+            ? reviewRecommendationRaw
+            : reviewRecommendationRaw !== undefined
+              ? (() => {
+                  console.warn(
+                    `Ignoring invalid --review-recommendation "${reviewRecommendationRaw}" (expected REQUIRED or NOT_NEEDED)`,
+                  );
+                  return undefined;
+                })()
+              : undefined;
         const reviewReason = toNonEmptyString(options.reviewReason);
 
-        const reportTitle = typeof options.reportTitle === 'string' && options.reportTitle.trim().length > 0
-          ? options.reportTitle.trim()
-          : (() => { throw new Error('--report-title is required when attaching a completion report'); })();
+        const reportTitle =
+          typeof options.reportTitle === 'string' && options.reportTitle.trim().length > 0
+            ? options.reportTitle.trim()
+            : (() => {
+                throw new Error('--report-title is required when attaching a completion report');
+              })();
 
         body.completionReport = {
           title: reportTitle,
@@ -557,7 +584,7 @@ export async function executePlanCommand(
         () => finishPlanLifecycle(apiUrl, projectId, headers, options.id, body),
         'Plan finished',
       );
-      if (options.reportFile) deleteIfTempFile(options.reportFile);
+      if (options.reportFile) deleteIfTempFile(options.reportFile, { keep: options.keepTemp });
       return finishResult;
     }
     case 'create': {
@@ -570,7 +597,9 @@ export async function executePlanCommand(
       }
       const createComplexity = String(options.complexity).toUpperCase();
       if (!PLAN_COMPLEXITY_VALUES.includes(createComplexity)) {
-        throw new Error(`Invalid --complexity "${options.complexity}". Choose one of ${PLAN_COMPLEXITY_VALUES.join(', ')}.`);
+        throw new Error(
+          `Invalid --complexity "${options.complexity}". Choose one of ${PLAN_COMPLEXITY_VALUES.join(', ')}.`,
+        );
       }
 
       let content = options.content;
@@ -602,16 +631,16 @@ export async function executePlanCommand(
       }
 
       if (options.status && options.status !== 'BACKLOG') {
-        process.stderr.write(`[warn] plan create: --status ${options.status} is ignored. Plans are always created as BACKLOG.\n`);
+        process.stderr.write(
+          `[warn] plan create: --status ${options.status} is ignored. Plans are always created as BACKLOG.\n`,
+        );
       }
 
       // HTML preview is mandatory for plan create — there is no escape hatch. This keeps the
       // plan body and its human-facing preview in sync.
       const createHasHtmlInput = hasPlanHtmlPreviewInput(options);
       if (!createHasHtmlInput) {
-        throw new Error(
-          'An HTML preview is required for plan create. Provide --html-file <path> or --html-stdin.'
-        );
+        throw new Error('An HTML preview is required for plan create. Provide --html-file <path> or --html-stdin.');
       }
       const createHtmlContent = readPlanHtmlPreviewInput(options);
 
@@ -622,33 +651,44 @@ export async function executePlanCommand(
 
       const createResult = await withSpinner(
         'Creating plan...',
-        () => createPlan(apiUrl, projectId, headers, {
-          title: options.title,
-          content,
-          type: options.type,
-          complexity: createComplexity,
-          priority: options.priority ?? 'MEDIUM',
-          repositoryId: options.repositoryId ?? options.defaultRepositoryId,
-          status: 'BACKLOG',
-          runnerType: options.runnerType,
-          model: options.model,
-          fastMode: options.fast === true,
-          kind: 'NORMAL',
-        }),
+        () =>
+          createPlan(apiUrl, projectId, headers, {
+            title: options.title,
+            content,
+            type: options.type,
+            complexity: createComplexity,
+            priority: options.priority ?? 'MEDIUM',
+            repositoryId: options.repositoryId ?? options.defaultRepositoryId,
+            status: 'BACKLOG',
+            runnerType: options.runnerType,
+            model: options.model,
+            fastMode: options.fast === true,
+            kind: 'NORMAL',
+          }),
         'Plan created',
       );
-      if (options.file) deleteIfTempFile(options.file);
+      if (options.file) deleteIfTempFile(options.file, { keep: options.keepTemp });
 
       const createdPlanId: string | undefined = createResult?.data?.id;
       if (createHtmlContent && createdPlanId) {
-        await uploadPlanHtmlPreview(apiUrl, projectId, headers, createdPlanId, createHtmlContent, options.sourceLabel, 'created');
-        if (options.htmlFile) deleteIfTempFile(options.htmlFile);
+        await uploadPlanHtmlPreview(
+          apiUrl,
+          projectId,
+          headers,
+          createdPlanId,
+          createHtmlContent,
+          options.sourceLabel,
+          'created',
+        );
+        if (options.htmlFile) deleteIfTempFile(options.htmlFile, { keep: options.keepTemp });
       }
 
       // --origin-issue flag: link origin issues after plan creation
       const originIssueFlags: string[] = Array.isArray(options.originIssue)
         ? options.originIssue
-        : options.originIssue ? [options.originIssue] : [];
+        : options.originIssue
+          ? [options.originIssue]
+          : [];
 
       if (originIssueFlags.length > 0 && createResult?.data?.id) {
         const createdPlanId = createResult.data.id;
@@ -658,7 +698,9 @@ export async function executePlanCommand(
           const firstColon = raw.indexOf(':');
           const secondColon = raw.indexOf(':', firstColon + 1);
           if (firstColon < 0 || secondColon < 0) {
-            process.stderr.write(`[warn] Skipping invalid --origin-issue: "${raw}" (expected provider:externalId:externalUrl[:title])\n`);
+            process.stderr.write(
+              `[warn] Skipping invalid --origin-issue: "${raw}" (expected provider:externalId:externalUrl[:title])\n`,
+            );
             continue;
           }
           const provider = raw.substring(0, firstColon);
@@ -694,7 +736,9 @@ export async function executePlanCommand(
           } catch (err: any) {
             // 409 CONFLICT = already linked, skip silently
             if (err?.response?.status !== 409) {
-              process.stderr.write(`[warn] Failed to link origin issue (${provider}:${externalId}): ${err?.message ?? err}\n`);
+              process.stderr.write(
+                `[warn] Failed to link origin issue (${provider}:${externalId}): ${err?.message ?? err}\n`,
+              );
             }
           }
         }
@@ -722,11 +766,16 @@ export async function executePlanCommand(
       if (options.status) body.status = options.status;
       if (options.type) body.type = options.type;
       if (options.priority) body.priority = options.priority;
-      assertComplexityReasonCanBeRecorded(options.complexityReason, options.complexity ? String(options.complexity).toUpperCase() : undefined);
+      assertComplexityReasonCanBeRecorded(
+        options.complexityReason,
+        options.complexity ? String(options.complexity).toUpperCase() : undefined,
+      );
       if (options.complexity) {
         const updateComplexity = String(options.complexity).toUpperCase();
         if (!PLAN_COMPLEXITY_VALUES.includes(updateComplexity)) {
-          throw new Error(`Invalid --complexity "${options.complexity}". Choose one of ${PLAN_COMPLEXITY_VALUES.join(', ')}.`);
+          throw new Error(
+            `Invalid --complexity "${options.complexity}". Choose one of ${PLAN_COMPLEXITY_VALUES.join(', ')}.`,
+          );
         }
         body.complexity = updateComplexity;
       }
@@ -742,16 +791,16 @@ export async function executePlanCommand(
       // Preview-affecting fields mirror the source hash inputs (title, type, priority, content).
       // A status-only or complexity-only change does not affect the preview, so the HTML preview is not required.
       const previewAffecting =
-        typeof body.content === 'string'
-        || typeof body.title === 'string'
-        || typeof body.type === 'string'
-        || typeof body.priority === 'string';
+        typeof body.content === 'string' ||
+        typeof body.title === 'string' ||
+        typeof body.type === 'string' ||
+        typeof body.priority === 'string';
 
       const updateHasHtmlInput = hasPlanHtmlPreviewInput(options);
       if (previewAffecting && !updateHasHtmlInput) {
         throw new Error(
-          'An HTML preview is required when updating the plan body, title, type, or priority. '
-          + 'Provide --html-file <path> or --html-stdin.'
+          'An HTML preview is required when updating the plan body, title, type, or priority. ' +
+            'Provide --html-file <path> or --html-stdin.',
         );
       }
       const updateHtmlContent = updateHasHtmlInput ? readPlanHtmlPreviewInput(options) : undefined;
@@ -761,11 +810,19 @@ export async function executePlanCommand(
         () => updatePlan(apiUrl, projectId, headers, options.id, body),
         'Plan updated',
       );
-      if (options.file) deleteIfTempFile(options.file);
+      if (options.file) deleteIfTempFile(options.file, { keep: options.keepTemp });
 
       if (updateHtmlContent) {
-        await uploadPlanHtmlPreview(apiUrl, projectId, headers, options.id, updateHtmlContent, options.sourceLabel, 'updated');
-        if (options.htmlFile) deleteIfTempFile(options.htmlFile);
+        await uploadPlanHtmlPreview(
+          apiUrl,
+          projectId,
+          headers,
+          options.id,
+          updateHtmlContent,
+          options.sourceLabel,
+          'updated',
+        );
+        if (options.htmlFile) deleteIfTempFile(options.htmlFile, { keep: options.keepTemp });
       }
 
       return updateResult;
@@ -784,9 +841,7 @@ export async function executePlanCommand(
       if (!options.id) throw new Error('--id is required for plan download');
       const projectRoot = findProjectRoot();
       if (!projectRoot) {
-        throw new Error(
-          "Project root not found. Run 'agentteams init' first."
-        );
+        throw new Error("Project root not found. Run 'agentteams init' first.");
       }
 
       const result = await withSpinner(
@@ -822,7 +877,9 @@ export async function executePlanCommand(
             plan.webUrl ? `webUrl: ${plan.webUrl}` : null,
             `downloadedAt: ${new Date().toISOString()}`,
             '---',
-          ].filter(Boolean).join('\n');
+          ]
+            .filter(Boolean)
+            .join('\n');
 
           const markdown = plan.contentMarkdown ?? '';
           writeFileSync(filePath, `${frontmatter}\n\n${markdown}`, 'utf-8');
@@ -840,9 +897,7 @@ export async function executePlanCommand(
     case 'cleanup': {
       const projectRoot = findProjectRoot();
       if (!projectRoot) {
-        throw new Error(
-          "Project root not found. Run 'agentteams init' first."
-        );
+        throw new Error("Project root not found. Run 'agentteams init' first.");
       }
 
       const activePlanDir = join(projectRoot, '.agentteams', 'cli', 'active-plan');
@@ -878,9 +933,7 @@ export async function executePlanCommand(
       );
 
       return {
-        message: deletedFiles.length > 0
-          ? `Deleted ${deletedFiles.length} file(s).`
-          : 'No matching files found.',
+        message: deletedFiles.length > 0 ? `Deleted ${deletedFiles.length} file(s).` : 'No matching files found.',
         deletedFiles,
       };
     }
@@ -890,8 +943,7 @@ export async function executePlanCommand(
         throw new Error('--runner-type and --model are required for plan quick.');
       }
 
-      const assignAgent = (options.agent as string | undefined)
-        ?? (options.defaultCreatedBy as string | undefined);
+      const assignAgent = (options.agent as string | undefined) ?? (options.defaultCreatedBy as string | undefined);
       if (!assignAgent) {
         throw new Error('No agent available for assignment. Set AGENTTEAMS_AGENT_NAME or pass --agent.');
       }
@@ -911,7 +963,9 @@ export async function executePlanCommand(
         planContent = stripFrontmatter(readFileSync(filePath, 'utf-8'));
         printFileInfo(options.file as string, planContent);
       } else {
-        throw new Error('--content or --file is required for plan quick. Provide the actual work description instead of using a template.');
+        throw new Error(
+          '--content or --file is required for plan quick. Provide the actual work description instead of using a template.',
+        );
       }
 
       if (typeof planContent === 'string' && options.interpretEscapes) {
@@ -923,28 +977,31 @@ export async function executePlanCommand(
       // Quick plans are one-shot, small-scope work, so they default to MINIMAL unless overridden.
       const quickComplexity = options.complexity ? String(options.complexity).toUpperCase() : 'MINIMAL';
       if (!PLAN_COMPLEXITY_VALUES.includes(quickComplexity)) {
-        throw new Error(`Invalid --complexity "${options.complexity}". Choose one of ${PLAN_COMPLEXITY_VALUES.join(', ')}.`);
+        throw new Error(
+          `Invalid --complexity "${options.complexity}". Choose one of ${PLAN_COMPLEXITY_VALUES.join(', ')}.`,
+        );
       }
 
       // 1. Create plan
       const createResult = await withSpinner(
         'Creating quick plan...',
-        () => createPlan(apiUrl, projectId, headers, {
-          title: options.title,
-          content: planContent,
-          type: options.type,
-          complexity: quickComplexity,
-          priority,
-          repositoryId: options.repositoryId ?? options.defaultRepositoryId,
-          status: 'BACKLOG',
-          runnerType: options.runnerType,
-          model: options.model,
-          fastMode: options.fast === true,
-          kind: 'QUICK',
-        }),
+        () =>
+          createPlan(apiUrl, projectId, headers, {
+            title: options.title,
+            content: planContent,
+            type: options.type,
+            complexity: quickComplexity,
+            priority,
+            repositoryId: options.repositoryId ?? options.defaultRepositoryId,
+            status: 'BACKLOG',
+            runnerType: options.runnerType,
+            model: options.model,
+            fastMode: options.fast === true,
+            kind: 'QUICK',
+          }),
         'Plan created',
       );
-      if (hasQuickFile) deleteIfTempFile(options.file as string);
+      if (hasQuickFile) deleteIfTempFile(options.file as string, { keep: options.keepTemp });
 
       const planId: string = createResult?.data?.id;
       if (!planId) {
@@ -954,14 +1011,24 @@ export async function executePlanCommand(
       // 2. Start plan
       await withSpinner(
         'Starting plan...',
-        () => startPlanLifecycle(apiUrl, projectId, headers, planId, { assignedTo: assignAgent, runnerType: options.runnerType, model: options.model, fastMode: options.fast === true }),
+        () =>
+          startPlanLifecycle(apiUrl, projectId, headers, planId, {
+            assignedTo: assignAgent,
+            runnerType: options.runnerType,
+            model: options.model,
+            fastMode: options.fast === true,
+          }),
         'Plan started',
       );
 
       // 3. Finish plan (no completion report for quick plans)
       const finishResult = await withSpinner(
         'Finishing plan...',
-        () => finishPlanLifecycle(apiUrl, projectId, headers, planId, { runnerType: options.runnerType, model: options.model }),
+        () =>
+          finishPlanLifecycle(apiUrl, projectId, headers, planId, {
+            runnerType: options.runnerType,
+            model: options.model,
+          }),
         'Plan finished',
       );
 

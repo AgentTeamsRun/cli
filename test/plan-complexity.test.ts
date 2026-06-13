@@ -20,9 +20,9 @@ const baseCreateOptions = {
 
 describe('plan create complexity validation', () => {
   it('rejects create when --complexity is missing', async () => {
-    await expect(
-      executePlanCommand(apiUrl, projectId, headers, 'create', { ...baseCreateOptions }),
-    ).rejects.toThrow(/--complexity is required/);
+    await expect(executePlanCommand(apiUrl, projectId, headers, 'create', { ...baseCreateOptions })).rejects.toThrow(
+      /--complexity is required/,
+    );
   });
 
   it('rejects create when --complexity is not a valid tier', async () => {
@@ -56,7 +56,8 @@ describe('plan update complexity validation', () => {
   });
 
   it('rejects a complexity reason when the requested tier equals the current tier', () => {
-    expect(() => assertComplexityReasonCanBeRecorded('scope changed', 'STANDARD', 'STANDARD'))
-      .toThrow(/matches the current plan complexity/);
+    expect(() => assertComplexityReasonCanBeRecorded('scope changed', 'STANDARD', 'STANDARD')).toThrow(
+      /matches the current plan complexity/,
+    );
   });
 });

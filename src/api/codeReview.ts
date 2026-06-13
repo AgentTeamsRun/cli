@@ -4,23 +4,16 @@ export async function listCodeReviews(
   apiUrl: string,
   projectId: string,
   headers: any,
-  params?: Record<string, string | number>
+  params?: Record<string, string | number>,
 ): Promise<any> {
   const baseUrl = `${apiUrl}/api/projects/${projectId}/code-reviews`;
-  const requestConfig = params && Object.keys(params).length > 0
-    ? { headers, params }
-    : { headers };
+  const requestConfig = params && Object.keys(params).length > 0 ? { headers, params } : { headers };
 
   const response = await httpClient.get(baseUrl, requestConfig);
   return response.data;
 }
 
-export async function getCodeReview(
-  apiUrl: string,
-  projectId: string,
-  headers: any,
-  id: string
-): Promise<any> {
+export async function getCodeReview(apiUrl: string, projectId: string, headers: any, id: string): Promise<any> {
   const baseUrl = `${apiUrl}/api/projects/${projectId}/code-reviews`;
   const response = await httpClient.get(`${baseUrl}/${id}`, { headers });
   return response.data;
@@ -30,7 +23,7 @@ export async function createCodeReview(
   apiUrl: string,
   projectId: string,
   headers: any,
-  body: Record<string, unknown>
+  body: Record<string, unknown>,
 ): Promise<any> {
   const baseUrl = `${apiUrl}/api/projects/${projectId}/code-reviews`;
   const response = await httpClient.post(baseUrl, body, { headers });
@@ -42,7 +35,7 @@ export async function updateCodeReview(
   projectId: string,
   headers: any,
   id: string,
-  body: Record<string, unknown>
+  body: Record<string, unknown>,
 ): Promise<any> {
   const baseUrl = `${apiUrl}/api/projects/${projectId}/code-reviews`;
   const response = await httpClient.patch(`${baseUrl}/${id}`, body, { headers });
@@ -54,19 +47,14 @@ export async function createPlanFromCodeReview(
   projectId: string,
   headers: any,
   id: string,
-  body: Record<string, unknown>
+  body: Record<string, unknown>,
 ): Promise<any> {
   const baseUrl = `${apiUrl}/api/projects/${projectId}/code-reviews`;
   const response = await httpClient.post(`${baseUrl}/${id}/plans`, body, { headers });
   return response.data;
 }
 
-export async function cancelCodeReview(
-  apiUrl: string,
-  projectId: string,
-  headers: any,
-  id: string
-): Promise<any> {
+export async function cancelCodeReview(apiUrl: string, projectId: string, headers: any, id: string): Promise<any> {
   const baseUrl = `${apiUrl}/api/projects/${projectId}/code-reviews`;
   const response = await httpClient.post(`${baseUrl}/${id}/cancel`, {}, { headers });
   return response.data;
@@ -77,19 +65,14 @@ export async function submitCodeReviewResult(
   projectId: string,
   headers: any,
   id: string,
-  body: Record<string, unknown>
+  body: Record<string, unknown>,
 ): Promise<any> {
   const baseUrl = `${apiUrl}/api/projects/${projectId}/code-reviews`;
   const response = await httpClient.post(`${baseUrl}/${id}/result`, body, { headers });
   return response.data;
 }
 
-export async function deleteCodeReview(
-  apiUrl: string,
-  projectId: string,
-  headers: any,
-  id: string
-): Promise<any> {
+export async function deleteCodeReview(apiUrl: string, projectId: string, headers: any, id: string): Promise<any> {
   const baseUrl = `${apiUrl}/api/projects/${projectId}/code-reviews`;
   const response = await httpClient.delete(`${baseUrl}/${id}`, { headers });
   return response.data;
@@ -100,7 +83,7 @@ export async function dismissCodeReviewFinding(
   projectId: string,
   headers: any,
   id: string,
-  findingId: string
+  findingId: string,
 ): Promise<any> {
   const baseUrl = `${apiUrl}/api/projects/${projectId}/code-reviews`;
   const response = await httpClient.post(`${baseUrl}/${id}/findings/${findingId}/dismiss`, {}, { headers });
@@ -112,7 +95,7 @@ export async function undismissCodeReviewFinding(
   projectId: string,
   headers: any,
   id: string,
-  findingId: string
+  findingId: string,
 ): Promise<any> {
   const baseUrl = `${apiUrl}/api/projects/${projectId}/code-reviews`;
   const response = await httpClient.post(`${baseUrl}/${id}/findings/${findingId}/undismiss`, {}, { headers });

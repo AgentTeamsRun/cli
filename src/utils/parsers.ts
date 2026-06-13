@@ -62,9 +62,7 @@ export function toPositiveInteger(value: unknown): number | undefined {
 }
 
 export function interpretEscapes(content: string): string {
-  return content
-    .replace(/\\r\\n/g, '\r\n')
-    .replace(/\\n/g, '\n');
+  return content.replace(/\\r\\n/g, '\r\n').replace(/\\n/g, '\n');
 }
 
 export function stripFrontmatter(content: string): string {
@@ -87,16 +85,25 @@ export function toSafeFileName(input: string): string {
 /**
  * 업로드에 사용된 파일이 .agentteams/cli/temp/ 경로에 있을 경우 삭제합니다.
  * convention 파일 등 실제 소스 파일은 삭제하지 않습니다.
+ *
+ * - `options.keep`(=`--keep-temp`)가 true면 업로드 후에도 temp 원본을 보존합니다.
+ * - 입력으로 받은 파일을 말없이 지우지 않도록, 실제 삭제 시 stderr로 한 줄 알립니다
+ *   (정본은 서버에 있으므로 temp 사본은 소모성입니다).
  */
-export function deleteIfTempFile(fileInput: string): void {
+export function deleteIfTempFile(fileInput: string, options?: { keep?: boolean }): void {
   const resolved = resolve(fileInput);
   const normalized = resolved.replace(/\\/g, '/');
-  if (normalized.includes('/.agentteams/cli/temp/') && existsSync(resolved)) {
-    try {
-      unlinkSync(resolved);
-    } catch {
-      // 삭제 실패는 무시 (읽기 전용 파일시스템 등 예외 상황)
-    }
+  if (!normalized.includes('/.agentteams/cli/temp/') || !existsSync(resolved)) {
+    return;
+  }
+  if (options?.keep) {
+    return;
+  }
+  try {
+    unlinkSync(resolved);
+    process.stderr.write(`Removed temp upload file: ${resolved} (use --keep-temp to preserve)\n`);
+  } catch {
+    // 삭제 실패는 무시 (읽기 전용 파일시스템 등 예외 상황)
   }
 }
 

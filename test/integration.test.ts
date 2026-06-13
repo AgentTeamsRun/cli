@@ -151,7 +151,7 @@ describe('CLI Integration Tests', () => {
           teamId: 'team_1',
           projectId: PROJECT_ID,
           agentName: 'test-agent',
-        })
+        }),
       );
       const parsedAuthUrl = new URL(result.authUrl);
       expect(parsedAuthUrl.searchParams.get('ap')).toBeTruthy();
@@ -169,33 +169,24 @@ describe('CLI Integration Tests', () => {
 
       const savedConvention = readFileSync(result.conventionPath, 'utf-8');
       expect(savedConvention).toBe('# team convention\n- follow rules\n');
-      expect(axiosGetSpy).toHaveBeenCalledWith(
-        `${API_URL}/api/projects/${PROJECT_ID}/agent-configs/7/convention`,
-        {
-          headers: {
-            'X-API-Key': 'key_oauth_123',
-            'Content-Type': 'application/json',
-          },
-        }
-      );
-      expect(axiosGetSpy).toHaveBeenCalledWith(
-        `${API_URL}/api/projects/${PROJECT_ID}/agent-configs`,
-        {
-          headers: {
-            'X-API-Key': 'key_oauth_123',
-            'Content-Type': 'application/json',
-          },
-        }
-      );
-      expect(axiosGetSpy).toHaveBeenCalledWith(
-        `${API_URL}/api/projects/${PROJECT_ID}/conventions/download-all`,
-        {
-          headers: {
-            'X-API-Key': 'key_oauth_123',
-            'Content-Type': 'application/json',
-          },
-        }
-      );
+      expect(axiosGetSpy).toHaveBeenCalledWith(`${API_URL}/api/projects/${PROJECT_ID}/agent-configs/7/convention`, {
+        headers: {
+          'X-API-Key': 'key_oauth_123',
+          'Content-Type': 'application/json',
+        },
+      });
+      expect(axiosGetSpy).toHaveBeenCalledWith(`${API_URL}/api/projects/${PROJECT_ID}/agent-configs`, {
+        headers: {
+          'X-API-Key': 'key_oauth_123',
+          'Content-Type': 'application/json',
+        },
+      });
+      expect(axiosGetSpy).toHaveBeenCalledWith(`${API_URL}/api/projects/${PROJECT_ID}/conventions/download-all`, {
+        headers: {
+          'X-API-Key': 'key_oauth_123',
+          'Content-Type': 'application/json',
+        },
+      });
 
       rmSync(tempCwd, { recursive: true, force: true });
     });
@@ -240,27 +231,27 @@ describe('CLI Integration Tests', () => {
               apiUrl: API_URL,
             },
             null,
-            2
+            2,
           ) + '\n',
-          'utf-8'
+          'utf-8',
         );
 
         process.chdir(tempCwd);
         await executeCommand('sync', 'download', { cwd: tempCwd });
 
-         const downloadedCore = readFileSync(join(agentteamsDir, 'rules', 'core-rules.md'), 'utf-8');
-         const downloadedApi = readFileSync(join(agentteamsDir, 'rules', 'api-rules.md'), 'utf-8');
-       const reporting = readFileSync(join(agentteamsDir, 'convention.md'), 'utf-8');
-          const planGuide = readFileSync(join(agentteamsDir, 'platform', 'plan-guide.md'), 'utf-8');
-          expect(downloadedCore).toBe('# core rules');
-         expect(downloadedApi).toBe('# api rules');
-         expect(reporting).toBe('# reporting from sync\n');
-         expect(planGuide).toBe('# plan guide\n');
-       } finally {
-         process.chdir(originalCwd);
-         rmSync(tempCwd, { recursive: true, force: true });
-       }
-     });
+        const downloadedCore = readFileSync(join(agentteamsDir, 'rules', 'core-rules.md'), 'utf-8');
+        const downloadedApi = readFileSync(join(agentteamsDir, 'rules', 'api-rules.md'), 'utf-8');
+        const reporting = readFileSync(join(agentteamsDir, 'convention.md'), 'utf-8');
+        const planGuide = readFileSync(join(agentteamsDir, 'platform', 'plan-guide.md'), 'utf-8');
+        expect(downloadedCore).toBe('# core rules');
+        expect(downloadedApi).toBe('# api rules');
+        expect(reporting).toBe('# reporting from sync\n');
+        expect(planGuide).toBe('# plan guide\n');
+      } finally {
+        process.chdir(originalCwd);
+        rmSync(tempCwd, { recursive: true, force: true });
+      }
+    });
 
     it('plan CRUD/assign: should use project-scoped plan endpoints', async () => {
       axiosPostSpy.mockResolvedValue({ data: { data: { id: 't1' } } } as any);
@@ -292,31 +283,28 @@ describe('CLI Integration Tests', () => {
           content: 'content',
           priority: 'HIGH',
         }),
-        { headers: authHeaders() }
+        { headers: authHeaders() },
       );
-      expect(axiosGetSpy).toHaveBeenCalledWith(
-        `${API_URL}/api/projects/${PROJECT_ID}/plans`,
-        { headers: authHeaders() }
-      );
-      expect(axiosGetSpy).toHaveBeenCalledWith(
-        `${API_URL}/api/projects/${PROJECT_ID}/plans/plan-1`,
-        { headers: authHeaders() }
-      );
+      expect(axiosGetSpy).toHaveBeenCalledWith(`${API_URL}/api/projects/${PROJECT_ID}/plans`, {
+        headers: authHeaders(),
+      });
+      expect(axiosGetSpy).toHaveBeenCalledWith(`${API_URL}/api/projects/${PROJECT_ID}/plans/plan-1`, {
+        headers: authHeaders(),
+      });
       expect(axiosPutSpy).toHaveBeenCalledWith(
         `${API_URL}/api/projects/${PROJECT_ID}/plans/plan-1`,
         { status: 'IN_PROGRESS' },
-        { headers: authHeaders() }
+        { headers: authHeaders() },
       );
       expect(axiosPostSpy).toHaveBeenNthCalledWith(
         2,
         `${API_URL}/api/projects/${PROJECT_ID}/plans/plan-1/assign`,
         { assignedTo: 'agent-a' },
-        { headers: authHeaders() }
+        { headers: authHeaders() },
       );
-      expect(axiosDeleteSpy).toHaveBeenCalledWith(
-        `${API_URL}/api/projects/${PROJECT_ID}/plans/plan-1`,
-        { headers: deleteHeaders() }
-      );
+      expect(axiosDeleteSpy).toHaveBeenCalledWith(`${API_URL}/api/projects/${PROJECT_ID}/plans/plan-1`, {
+        headers: deleteHeaders(),
+      });
     });
 
     it('linear issue get: should call the linear issue endpoint', async () => {
@@ -341,10 +329,7 @@ describe('CLI Integration Tests', () => {
           title: 'Linear issue',
         },
       });
-      expect(axiosGetSpy).toHaveBeenCalledWith(
-        `${API_URL}/api/linear/issues/issue-1`,
-        { headers: authHeaders() }
-      );
+      expect(axiosGetSpy).toHaveBeenCalledWith(`${API_URL}/api/linear/issues/issue-1`, { headers: authHeaders() });
     });
 
     it('linear comment create: should post to the linear comment endpoint', async () => {
@@ -371,7 +356,7 @@ describe('CLI Integration Tests', () => {
       expect(axiosPostSpy).toHaveBeenCalledWith(
         `${API_URL}/api/linear/issues/issue-1/comments`,
         { body: 'Created from CLI' },
-        { headers: authHeaders() }
+        { headers: authHeaders() },
       );
     });
 
@@ -414,14 +399,12 @@ describe('CLI Integration Tests', () => {
         format: 'json',
       });
 
-      expect(axiosGetSpy).toHaveBeenCalledWith(
-        `${API_URL}/api/projects/${PROJECT_ID}/plans/plan-1`,
-        { headers: authHeaders() }
-      );
-      expect(axiosGetSpy).toHaveBeenCalledWith(
-        `${API_URL}/api/projects/${PROJECT_ID}/plans/plan-1/dependencies`,
-        { headers: authHeaders() }
-      );
+      expect(axiosGetSpy).toHaveBeenCalledWith(`${API_URL}/api/projects/${PROJECT_ID}/plans/plan-1`, {
+        headers: authHeaders(),
+      });
+      expect(axiosGetSpy).toHaveBeenCalledWith(`${API_URL}/api/projects/${PROJECT_ID}/plans/plan-1/dependencies`, {
+        headers: authHeaders(),
+      });
       expect((result as any).data.dependencies).toEqual({
         blocking: [{ id: 'p-2', title: 'Blocker', status: 'PENDING' }],
         dependents: [{ id: 'p-3', title: 'Dependent', status: 'PENDING' }],
@@ -460,14 +443,12 @@ describe('CLI Integration Tests', () => {
         format: 'json',
       });
 
-      expect(axiosGetSpy).toHaveBeenCalledWith(
-        `${API_URL}/api/projects/${PROJECT_ID}/plans/plan-1`,
-        { headers: authHeaders() }
-      );
-      expect(axiosGetSpy).toHaveBeenCalledWith(
-        `${API_URL}/api/projects/${PROJECT_ID}/plans/plan-1/dependencies`,
-        { headers: authHeaders() }
-      );
+      expect(axiosGetSpy).toHaveBeenCalledWith(`${API_URL}/api/projects/${PROJECT_ID}/plans/plan-1`, {
+        headers: authHeaders(),
+      });
+      expect(axiosGetSpy).toHaveBeenCalledWith(`${API_URL}/api/projects/${PROJECT_ID}/plans/plan-1/dependencies`, {
+        headers: authHeaders(),
+      });
       expect(result).toEqual({
         data: {
           id: 'plan-1',
@@ -488,15 +469,13 @@ describe('CLI Integration Tests', () => {
 
       await executeCommand('plan', 'status', { id: 'plan-1' });
 
-      expect(axiosGetSpy).toHaveBeenCalledWith(
-        `${API_URL}/api/projects/${PROJECT_ID}/plans/plan-1/status`,
-        { headers: authHeaders() }
-      );
+      expect(axiosGetSpy).toHaveBeenCalledWith(`${API_URL}/api/projects/${PROJECT_ID}/plans/plan-1/status`, {
+        headers: authHeaders(),
+      });
     });
 
     it('plan status: should throw when --id is missing', async () => {
-      await expect(executeCommand('plan', 'status', {}))
-        .rejects.toThrow('--id is required for plan status');
+      await expect(executeCommand('plan', 'status', {})).rejects.toThrow('--id is required for plan status');
     });
 
     it('plan set-status: should call PATCH /plans/:id/status', async () => {
@@ -509,15 +488,17 @@ describe('CLI Integration Tests', () => {
       expect(axiosPatchSpy).toHaveBeenCalledWith(
         `${API_URL}/api/projects/${PROJECT_ID}/plans/plan-1/status`,
         { status: 'PENDING' },
-        { headers: authHeaders() }
+        { headers: authHeaders() },
       );
     });
 
     it('plan set-status: should throw when --id or --status is missing', async () => {
-      await expect(executeCommand('plan', 'set-status', { status: 'PENDING' }))
-        .rejects.toThrow('--id is required for plan set-status');
-      await expect(executeCommand('plan', 'set-status', { id: 'plan-1' }))
-        .rejects.toThrow('--status is required for plan set-status');
+      await expect(executeCommand('plan', 'set-status', { status: 'PENDING' })).rejects.toThrow(
+        '--id is required for plan set-status',
+      );
+      await expect(executeCommand('plan', 'set-status', { id: 'plan-1' })).rejects.toThrow(
+        '--status is required for plan set-status',
+      );
     });
 
     it('plan create: should interpret \\\\n sequences when interpretEscapes is enabled', async () => {
@@ -542,7 +523,7 @@ describe('CLI Integration Tests', () => {
           runnerType: 'CLAUDE_CODE',
           model: 'claude-opus-4-6',
         }),
-        { headers: authHeaders() }
+        { headers: authHeaders() },
       );
     });
 
@@ -565,7 +546,7 @@ describe('CLI Integration Tests', () => {
           title: 'Plan with template',
           content: expect.stringContaining('## Refactor Checklist'),
         }),
-        { headers: authHeaders() }
+        { headers: authHeaders() },
       );
     });
 
@@ -588,14 +569,14 @@ describe('CLI Integration Tests', () => {
           title: 'Quick plan',
           content: expect.stringContaining('## TL;DR'),
         }),
-        { headers: authHeaders() }
+        { headers: authHeaders() },
       );
     });
 
     it('plan create: should fail when --runner-type or --model is missing', async () => {
-      await expect(
-        executeCommand('plan', 'create', { title: 'Plan', content: 'body' })
-      ).rejects.toThrow('--runner-type and --model are required');
+      await expect(executeCommand('plan', 'create', { title: 'Plan', content: 'body' })).rejects.toThrow(
+        '--runner-type and --model are required',
+      );
     });
 
     it('plan update: should interpret \\\\n sequences when interpretEscapes is enabled', async () => {
@@ -611,7 +592,7 @@ describe('CLI Integration Tests', () => {
       expect(axiosPutSpy).toHaveBeenCalledWith(
         `${API_URL}/api/projects/${PROJECT_ID}/plans/plan-1`,
         { content: 'Line1\nLine2' },
-        { headers: authHeaders() }
+        { headers: authHeaders() },
       );
     });
 
@@ -637,7 +618,7 @@ describe('CLI Integration Tests', () => {
             complexity: 'STANDARD',
             runnerType: 'CLAUDE_CODE',
             model: 'claude-opus-4-6',
-          })
+          }),
         ).rejects.toThrow('An HTML preview is required for plan create');
         expect(axiosPostSpy).not.toHaveBeenCalled();
       });
@@ -658,12 +639,12 @@ describe('CLI Integration Tests', () => {
         expect(axiosPostSpy).toHaveBeenCalledWith(
           `${API_URL}/api/projects/${PROJECT_ID}/plans`,
           expect.objectContaining({ title: 'Plan', content: 'body', complexity: 'STANDARD' }),
-          { headers: authHeaders() }
+          { headers: authHeaders() },
         );
         expect(axiosPutSpy).toHaveBeenCalledWith(
           `${API_URL}/api/projects/${PROJECT_ID}/plans/plan-html-1/visualization/html`,
           expect.objectContaining({ curationType: 'AI_CURATED', html: expect.stringContaining('<h1>Plan</h1>') }),
-          { headers: authHeaders() }
+          { headers: authHeaders() },
         );
       });
 
@@ -677,7 +658,7 @@ describe('CLI Integration Tests', () => {
             model: 'claude-opus-4-6',
             htmlFile: htmlPath,
             htmlStdin: true,
-          })
+          }),
         ).rejects.toThrow('Use either --html-file or --html-stdin');
         expect(axiosPostSpy).not.toHaveBeenCalled();
       });
@@ -693,7 +674,7 @@ describe('CLI Integration Tests', () => {
             runnerType: 'CLAUDE_CODE',
             model: 'claude-opus-4-6',
             htmlFile: htmlPath,
-          })
+          }),
         ).rejects.toThrow('Plan HTML preview is not theme-safe');
         expect(axiosPostSpy).not.toHaveBeenCalled();
         expect(axiosPutSpy).not.toHaveBeenCalled();
@@ -711,22 +692,22 @@ describe('CLI Integration Tests', () => {
             runnerType: 'CLAUDE_CODE',
             model: 'claude-opus-4-6',
             htmlFile: htmlPath,
-          })
+          }),
         ).rejects.toThrow('partial failure');
         expect(axiosPostSpy).toHaveBeenCalled();
       });
 
       it('plan update: should require an HTML preview when the body changes', async () => {
-        await expect(
-          executeCommand('plan', 'update', { id: 'plan-1', content: 'new body' })
-        ).rejects.toThrow('An HTML preview is required when updating the plan body');
+        await expect(executeCommand('plan', 'update', { id: 'plan-1', content: 'new body' })).rejects.toThrow(
+          'An HTML preview is required when updating the plan body',
+        );
         expect(axiosPutSpy).not.toHaveBeenCalled();
       });
 
       it('plan update: should require an HTML preview when title/type/priority changes', async () => {
-        await expect(
-          executeCommand('plan', 'update', { id: 'plan-1', priority: 'HIGH' })
-        ).rejects.toThrow('An HTML preview is required when updating the plan body');
+        await expect(executeCommand('plan', 'update', { id: 'plan-1', priority: 'HIGH' })).rejects.toThrow(
+          'An HTML preview is required when updating the plan body',
+        );
         expect(axiosPutSpy).not.toHaveBeenCalled();
       });
 
@@ -742,21 +723,25 @@ describe('CLI Integration Tests', () => {
         expect(axiosPutSpy).toHaveBeenCalledWith(
           `${API_URL}/api/projects/${PROJECT_ID}/plans/plan-1`,
           { content: 'new body' },
-          { headers: authHeaders() }
+          { headers: authHeaders() },
         );
         expect(axiosPutSpy).toHaveBeenCalledWith(
           `${API_URL}/api/projects/${PROJECT_ID}/plans/plan-1/visualization/html`,
           expect.objectContaining({ curationType: 'AI_CURATED' }),
-          { headers: authHeaders() }
+          { headers: authHeaders() },
         );
       });
 
       it('plan upload-html: should reject unsafe HTML before uploading', async () => {
-        writeFileSync(htmlPath, createThemeSafePreviewHtml().replace('</body>', '<script>alert(1)</script></body>'), 'utf-8');
+        writeFileSync(
+          htmlPath,
+          createThemeSafePreviewHtml().replace('</body>', '<script>alert(1)</script></body>'),
+          'utf-8',
+        );
 
-        await expect(
-          executeCommand('plan', 'upload-html', { id: 'plan-1', file: htmlPath })
-        ).rejects.toThrow('script tags are not allowed');
+        await expect(executeCommand('plan', 'upload-html', { id: 'plan-1', file: htmlPath })).rejects.toThrow(
+          'script tags are not allowed',
+        );
         expect(axiosPutSpy).not.toHaveBeenCalled();
       });
 
@@ -769,7 +754,7 @@ describe('CLI Integration Tests', () => {
         expect(axiosPutSpy).toHaveBeenCalledWith(
           `${API_URL}/api/projects/${PROJECT_ID}/plans/plan-1`,
           { status: 'DONE' },
-          { headers: authHeaders() }
+          { headers: authHeaders() },
         );
       });
     });
@@ -779,10 +764,10 @@ describe('CLI Integration Tests', () => {
 
       await executeCommand('plan', 'list', { status: 'PENDING' });
 
-      expect(axiosGetSpy).toHaveBeenCalledWith(
-        `${API_URL}/api/projects/${PROJECT_ID}/plans`,
-        { headers: authHeaders(), params: { status: 'PENDING' } }
-      );
+      expect(axiosGetSpy).toHaveBeenCalledWith(`${API_URL}/api/projects/${PROJECT_ID}/plans`, {
+        headers: authHeaders(),
+        params: { status: 'PENDING' },
+      });
     });
 
     it('plan list: should pass extended filters and pagination', async () => {
@@ -796,19 +781,16 @@ describe('CLI Integration Tests', () => {
         pageSize: '25',
       });
 
-      expect(axiosGetSpy).toHaveBeenCalledWith(
-        `${API_URL}/api/projects/${PROJECT_ID}/plans`,
-        {
-          headers: authHeaders(),
-          params: {
-            title: 'CLI bug',
-            search: 'pending',
-            assignedTo: 'acfg-1',
-            page: 3,
-            pageSize: 25,
-          },
-        }
-      );
+      expect(axiosGetSpy).toHaveBeenCalledWith(`${API_URL}/api/projects/${PROJECT_ID}/plans`, {
+        headers: authHeaders(),
+        params: {
+          title: 'CLI bug',
+          search: 'pending',
+          assignedTo: 'acfg-1',
+          page: 3,
+          pageSize: 25,
+        },
+      });
     });
 
     it('plan start: should call single lifecycle endpoint without runnerType/model', async () => {
@@ -819,7 +801,7 @@ describe('CLI Integration Tests', () => {
       expect(axiosPostSpy).toHaveBeenCalledWith(
         `${API_URL}/api/projects/${PROJECT_ID}/plans/plan-1/start`,
         expect.objectContaining({ assignedTo: 'test-agent' }),
-        { headers: authHeaders() }
+        { headers: authHeaders() },
       );
       const sentBody = axiosPostSpy.mock.calls[0][1] as Record<string, unknown>;
       expect(sentBody).not.toHaveProperty('runnerType');
@@ -834,7 +816,7 @@ describe('CLI Integration Tests', () => {
       expect(axiosPostSpy).toHaveBeenCalledWith(
         `${API_URL}/api/projects/${PROJECT_ID}/plans/plan-1/start`,
         expect.objectContaining({ assignedTo: 'test-agent', task: 'Work started custom' }),
-        { headers: authHeaders() }
+        { headers: authHeaders() },
       );
     });
 
@@ -854,7 +836,7 @@ describe('CLI Integration Tests', () => {
       expect(axiosPostSpy).toHaveBeenCalledWith(
         `${API_URL}/api/projects/${PROJECT_ID}/plans/plan-1/finish`,
         {},
-        { headers: authHeaders() }
+        { headers: authHeaders() },
       );
     });
 
@@ -884,7 +866,7 @@ describe('CLI Integration Tests', () => {
             content: '## Summary\n- done',
           },
         },
-        { headers: authHeaders() }
+        { headers: authHeaders() },
       );
 
       rmSync(reportDir, { recursive: true, force: true });
@@ -909,33 +891,28 @@ describe('CLI Integration Tests', () => {
       });
       await executeCommand('comment', 'delete', { id: 'comment-1' });
 
-      expect(axiosGetSpy).toHaveBeenNthCalledWith(
-        1,
-        `${API_URL}/api/projects/${PROJECT_ID}/plans/plan-1/comments`,
-        { headers: authHeaders() }
-      );
-      expect(axiosGetSpy).toHaveBeenNthCalledWith(
-        2,
-        `${API_URL}/api/projects/${PROJECT_ID}/comments/comment-1`,
-        { headers: authHeaders() }
-      );
+      expect(axiosGetSpy).toHaveBeenNthCalledWith(1, `${API_URL}/api/projects/${PROJECT_ID}/plans/plan-1/comments`, {
+        headers: authHeaders(),
+      });
+      expect(axiosGetSpy).toHaveBeenNthCalledWith(2, `${API_URL}/api/projects/${PROJECT_ID}/comments/comment-1`, {
+        headers: authHeaders(),
+      });
       expect(axiosPostSpy).toHaveBeenCalledWith(
         `${API_URL}/api/projects/${PROJECT_ID}/plans/plan-1/comments`,
         {
           type: 'GENERAL',
           content: 'Test comment',
         },
-        { headers: authHeaders() }
+        { headers: authHeaders() },
       );
       expect(axiosPutSpy).toHaveBeenCalledWith(
         `${API_URL}/api/projects/${PROJECT_ID}/comments/comment-1`,
         { content: 'Updated' },
-        { headers: authHeaders() }
+        { headers: authHeaders() },
       );
-      expect(axiosDeleteSpy).toHaveBeenCalledWith(
-        `${API_URL}/api/projects/${PROJECT_ID}/comments/comment-1`,
-        { headers: deleteHeaders() }
-      );
+      expect(axiosDeleteSpy).toHaveBeenCalledWith(`${API_URL}/api/projects/${PROJECT_ID}/comments/comment-1`, {
+        headers: deleteHeaders(),
+      });
     });
 
     it('comment list: should pass type and pagination filters', async () => {
@@ -948,13 +925,10 @@ describe('CLI Integration Tests', () => {
         pageSize: '20',
       });
 
-      expect(axiosGetSpy).toHaveBeenCalledWith(
-        `${API_URL}/api/projects/${PROJECT_ID}/plans/plan-1/comments`,
-        {
-          headers: authHeaders(),
-          params: { type: 'RISK', page: 2, pageSize: 20 },
-        }
-      );
+      expect(axiosGetSpy).toHaveBeenCalledWith(`${API_URL}/api/projects/${PROJECT_ID}/plans/plan-1/comments`, {
+        headers: authHeaders(),
+        params: { type: 'RISK', page: 2, pageSize: 20 },
+      });
     });
 
     it('dependency commands: should use project-scoped URL and blockingPlanId', async () => {
@@ -969,18 +943,17 @@ describe('CLI Integration Tests', () => {
       await executeCommand('dependency', 'create', { planId, blockingPlanId });
       await executeCommand('dependency', 'delete', { planId, depId: 'dep-1' });
 
-      expect(axiosGetSpy).toHaveBeenCalledWith(
-        `${API_URL}/api/projects/${PROJECT_ID}/plans/${planId}/dependencies`,
-        { headers: authHeaders() }
-      );
+      expect(axiosGetSpy).toHaveBeenCalledWith(`${API_URL}/api/projects/${PROJECT_ID}/plans/${planId}/dependencies`, {
+        headers: authHeaders(),
+      });
       expect(axiosPostSpy).toHaveBeenCalledWith(
         `${API_URL}/api/projects/${PROJECT_ID}/plans/${planId}/dependencies`,
         { blockingPlanId },
-        { headers: authHeaders() }
+        { headers: authHeaders() },
       );
       expect(axiosDeleteSpy).toHaveBeenCalledWith(
         `${API_URL}/api/projects/${PROJECT_ID}/plans/${planId}/dependencies/dep-1`,
-        { headers: deleteHeaders() }
+        { headers: deleteHeaders() },
       );
       expect(axiosPostSpy.mock.calls[0]?.[0]).not.toContain('NaN');
     });
@@ -990,19 +963,18 @@ describe('CLI Integration Tests', () => {
 
       await executeCommand('convention', 'list', {});
 
-      expect(axiosGetSpy).toHaveBeenCalledWith(
-        `${API_URL}/api/projects/${PROJECT_ID}/conventions`,
-        { headers: authHeaders(), params: { page: 1, pageSize: 100 } }
-      );
+      expect(axiosGetSpy).toHaveBeenCalledWith(`${API_URL}/api/projects/${PROJECT_ID}/conventions`, {
+        headers: authHeaders(),
+        params: { page: 1, pageSize: 100 },
+      });
     });
 
     it('convention show: should fetch full markdown for all conventions', async () => {
-      axiosGetSpy
-        .mockResolvedValueOnce({
-          data: {
-            data: [{ id: 'cv-1', title: 'Core', category: 'rules', contentMarkdown: '# full markdown' }],
-          },
-        } as any);
+      axiosGetSpy.mockResolvedValueOnce({
+        data: {
+          data: [{ id: 'cv-1', title: 'Core', category: 'rules', contentMarkdown: '# full markdown' }],
+        },
+      } as any);
 
       const result = await executeCommand('convention', 'show', {});
 
@@ -1011,11 +983,9 @@ describe('CLI Integration Tests', () => {
       expect(result).toContain('category: rules');
       expect(result).toContain('id: cv-1');
       expect(result).toContain('# full markdown');
-      expect(axiosGetSpy).toHaveBeenNthCalledWith(
-        1,
-        `${API_URL}/api/projects/${PROJECT_ID}/conventions/download-all`,
-        { headers: authHeaders() }
-      );
+      expect(axiosGetSpy).toHaveBeenNthCalledWith(1, `${API_URL}/api/projects/${PROJECT_ID}/conventions/download-all`, {
+        headers: authHeaders(),
+      });
     });
 
     it('convention download: should write convention files and update convention.md', async () => {
@@ -1059,9 +1029,9 @@ describe('CLI Integration Tests', () => {
               apiUrl: API_URL,
             },
             null,
-            2
+            2,
           ) + '\n',
-          'utf-8'
+          'utf-8',
         );
         writeFileSync(join(agentteamsDir, 'convention.md'), '# convention baseline\n', 'utf-8');
 
@@ -1114,9 +1084,9 @@ describe('CLI Integration Tests', () => {
               apiUrl: API_URL,
             },
             null,
-            2
+            2,
           ) + '\n',
-          'utf-8'
+          'utf-8',
         );
 
         const filePath = join(agentteamsDir, 'rules', 'core-rules.md');
@@ -1139,9 +1109,9 @@ describe('CLI Integration Tests', () => {
               ],
             },
             null,
-            2
+            2,
           ) + '\n',
-          'utf-8'
+          'utf-8',
         );
 
         process.chdir(tempCwd);
@@ -1169,7 +1139,9 @@ describe('CLI Integration Tests', () => {
         .mockResolvedValueOnce({ data: '# server version\n' } as any);
 
       axiosPutSpy.mockResolvedValueOnce({
-        data: { data: { id: 'cv-1', updatedAt: '2026-02-01T00:00:00.000Z', webUrl: 'https://app.example/conventions/cv-1' } },
+        data: {
+          data: { id: 'cv-1', updatedAt: '2026-02-01T00:00:00.000Z', webUrl: 'https://app.example/conventions/cv-1' },
+        },
       } as any);
 
       const originalCwd = process.cwd();
@@ -1191,9 +1163,9 @@ describe('CLI Integration Tests', () => {
               apiUrl: API_URL,
             },
             null,
-            2
+            2,
           ) + '\n',
-          'utf-8'
+          'utf-8',
         );
 
         const filePath = join(agentteamsDir, 'rules', 'core-rules.md');
@@ -1211,7 +1183,7 @@ describe('CLI Integration Tests', () => {
             '# local version',
             '',
           ].join('\n'),
-          'utf-8'
+          'utf-8',
         );
 
         writeFileSync(
@@ -1231,9 +1203,9 @@ describe('CLI Integration Tests', () => {
               ],
             },
             null,
-            2
+            2,
           ) + '\n',
-          'utf-8'
+          'utf-8',
         );
 
         process.chdir(tempCwd);
@@ -1256,7 +1228,7 @@ describe('CLI Integration Tests', () => {
             agentInstruction: 'line1\nline2',
             content: expect.any(String),
           }),
-          { headers: authHeaders() }
+          { headers: authHeaders() },
         );
 
         const manifest = JSON.parse(readFileSync(join(agentteamsDir, 'conventions.manifest.json'), 'utf-8')) as any;
@@ -1297,24 +1269,18 @@ describe('CLI Integration Tests', () => {
               apiUrl: API_URL,
             },
             null,
-            2
+            2,
           ) + '\n',
-          'utf-8'
+          'utf-8',
         );
 
         const filePath = join(agentteamsDir, 'rules', 'core-rules.md');
         writeFileSync(
           filePath,
-          [
-            '---',
-            'trigger: "-"',
-            'description: ": description with # hash"',
-            '---',
-            '',
-            '# local version',
-            '',
-          ].join('\n'),
-          'utf-8'
+          ['---', 'trigger: "-"', 'description: ": description with # hash"', '---', '', '# local version', ''].join(
+            '\n',
+          ),
+          'utf-8',
         );
 
         writeFileSync(
@@ -1334,9 +1300,9 @@ describe('CLI Integration Tests', () => {
               ],
             },
             null,
-            2
+            2,
           ) + '\n',
-          'utf-8'
+          'utf-8',
         );
 
         process.chdir(tempCwd);
@@ -1352,7 +1318,7 @@ describe('CLI Integration Tests', () => {
             trigger: '-',
             description: ': description with # hash',
           }),
-          { headers: authHeaders() }
+          { headers: authHeaders() },
         );
       } finally {
         process.chdir(originalCwd);
@@ -1386,9 +1352,9 @@ describe('CLI Integration Tests', () => {
               apiUrl: API_URL,
             },
             null,
-            2
+            2,
           ) + '\n',
-          'utf-8'
+          'utf-8',
         );
 
         const filePath = join(agentteamsDir, 'rules', 'core-rules.md');
@@ -1411,17 +1377,19 @@ describe('CLI Integration Tests', () => {
               ],
             },
             null,
-            2
+            2,
           ) + '\n',
-          'utf-8'
+          'utf-8',
         );
 
         process.chdir(tempCwd);
-        await expect(executeCommand('convention', 'update', {
-          cwd: tempCwd,
-          file: [filePath],
-          apply: true,
-        })).rejects.toThrow(/Failed to parse frontmatter YAML for \.agentteams\/rules\/core-rules\.md:/);
+        await expect(
+          executeCommand('convention', 'update', {
+            cwd: tempCwd,
+            file: [filePath],
+            apply: true,
+          }),
+        ).rejects.toThrow(/Failed to parse frontmatter YAML for \.agentteams\/rules\/core-rules\.md:/);
         expect(axiosPutSpy).not.toHaveBeenCalled();
       } finally {
         process.chdir(originalCwd);
@@ -1456,9 +1424,9 @@ describe('CLI Integration Tests', () => {
               apiUrl: API_URL,
             },
             null,
-            2
+            2,
           ) + '\n',
-          'utf-8'
+          'utf-8',
         );
 
         const filePath = join(agentteamsDir, 'rules', 'core-rules.md');
@@ -1481,9 +1449,9 @@ describe('CLI Integration Tests', () => {
               ],
             },
             null,
-            2
+            2,
           ) + '\n',
-          'utf-8'
+          'utf-8',
         );
 
         process.chdir(join(tempCwd, 'cli'));
@@ -1524,9 +1492,9 @@ describe('CLI Integration Tests', () => {
               apiUrl: API_URL,
             },
             null,
-            2
+            2,
           ) + '\n',
-          'utf-8'
+          'utf-8',
         );
 
         const filePath = join(agentteamsDir, 'rules', 'core-rules.md');
@@ -1549,9 +1517,9 @@ describe('CLI Integration Tests', () => {
               ],
             },
             null,
-            2
+            2,
           ) + '\n',
-          'utf-8'
+          'utf-8',
         );
 
         process.chdir(tempCwd);
@@ -1567,10 +1535,9 @@ describe('CLI Integration Tests', () => {
 
         const manifest = JSON.parse(readFileSync(join(agentteamsDir, 'conventions.manifest.json'), 'utf-8')) as any;
         expect(manifest.entries.length).toBe(0);
-        expect(axiosDeleteSpy).toHaveBeenCalledWith(
-          `${API_URL}/api/projects/${PROJECT_ID}/conventions/cv-1`,
-          { headers: deleteHeaders() }
-        );
+        expect(axiosDeleteSpy).toHaveBeenCalledWith(`${API_URL}/api/projects/${PROJECT_ID}/conventions/cv-1`, {
+          headers: deleteHeaders(),
+        });
       } finally {
         process.chdir(originalCwd);
         rmSync(tempCwd, { recursive: true, force: true });
@@ -1583,9 +1550,7 @@ describe('CLI Integration Tests', () => {
 
       try {
         process.chdir(tempCwd);
-        await expect(executeCommand('convention', 'download', {})).rejects.toThrow(
-          'No .agentteams directory found'
-        );
+        await expect(executeCommand('convention', 'download', {})).rejects.toThrow('No .agentteams directory found');
       } finally {
         process.chdir(originalCwd);
         rmSync(tempCwd, { recursive: true, force: true });
@@ -1624,9 +1589,9 @@ describe('CLI Integration Tests', () => {
               apiUrl: API_URL,
             },
             null,
-            2
+            2,
           ) + '\n',
-          'utf-8'
+          'utf-8',
         );
 
         process.chdir(tempCwd);
@@ -1677,9 +1642,9 @@ describe('CLI Integration Tests', () => {
               apiUrl: API_URL,
             },
             null,
-            2
+            2,
           ) + '\n',
-          'utf-8'
+          'utf-8',
         );
 
         process.chdir(tempCwd);
@@ -1698,7 +1663,13 @@ describe('CLI Integration Tests', () => {
 
     it('convention create: should POST and update manifest immediately', async () => {
       axiosPostSpy.mockResolvedValueOnce({
-        data: { data: { id: 'cv-new', updatedAt: '2026-02-19T00:00:00.000Z', webUrl: 'https://app.example/conventions/cv-new' } },
+        data: {
+          data: {
+            id: 'cv-new',
+            updatedAt: '2026-02-19T00:00:00.000Z',
+            webUrl: 'https://app.example/conventions/cv-new',
+          },
+        },
       } as any);
 
       const originalCwd = process.cwd();
@@ -1719,16 +1690,16 @@ describe('CLI Integration Tests', () => {
               apiUrl: API_URL,
             },
             null,
-            2
+            2,
           ) + '\n',
-          'utf-8'
+          'utf-8',
         );
 
         const filePath = join(agentteamsDir, 'rules', 'new-rule.md');
         writeFileSync(
           filePath,
           `---\ntrigger: always_on\ndescription: \"test\"\nagentInstruction: |\n  Do the thing\n---\n\n# New Rule\n\n- ok\n`,
-          'utf-8'
+          'utf-8',
         );
 
         process.chdir(tempCwd);
@@ -1750,7 +1721,7 @@ describe('CLI Integration Tests', () => {
             description: 'test',
             agentInstruction: 'Do the thing',
           }),
-          { headers: authHeaders() }
+          { headers: authHeaders() },
         );
 
         const manifestRaw = readFileSync(join(agentteamsDir, 'conventions.manifest.json'), 'utf-8');
@@ -1768,7 +1739,7 @@ describe('CLI Integration Tests', () => {
             category: 'rules',
             updatedAt: '2026-02-19T00:00:00.000Z',
             lastKnownUpdatedAt: '2026-02-19T00:00:00.000Z',
-          })
+          }),
         );
       } finally {
         process.chdir(originalCwd);
@@ -1795,19 +1766,21 @@ describe('CLI Integration Tests', () => {
               apiUrl: API_URL,
             },
             null,
-            2
+            2,
           ) + '\n',
-          'utf-8'
+          'utf-8',
         );
 
         const filePath = join(agentteamsDir, 'rules', 'new-rule.md');
         writeFileSync(filePath, '---\ntrigger: -\ndescription: broken\n---\n\n# New Rule\n', 'utf-8');
 
         process.chdir(tempCwd);
-        await expect(executeCommand('convention', 'create', {
-          cwd: tempCwd,
-          file: ['.agentteams/rules/new-rule.md'],
-        })).rejects.toThrow(/Failed to parse frontmatter YAML for \.agentteams\/rules\/new-rule\.md:/);
+        await expect(
+          executeCommand('convention', 'create', {
+            cwd: tempCwd,
+            file: ['.agentteams/rules/new-rule.md'],
+          }),
+        ).rejects.toThrow(/Failed to parse frontmatter YAML for \.agentteams\/rules\/new-rule\.md:/);
         expect(axiosPostSpy).not.toHaveBeenCalled();
       } finally {
         process.chdir(originalCwd);
@@ -1846,9 +1819,9 @@ describe('CLI Integration Tests', () => {
               apiUrl: API_URL,
             },
             null,
-            2
+            2,
           ) + '\n',
-          'utf-8'
+          'utf-8',
         );
 
         writeFileSync(join(conventionDir, 'stale.md'), '# stale', 'utf-8');
@@ -1881,10 +1854,9 @@ describe('CLI Integration Tests', () => {
         model: 'claude-opus-4-6',
       });
 
-      expect(axiosGetSpy).toHaveBeenCalledWith(
-        `${API_URL}/api/projects/${PROJECT_ID}/completion-reports`,
-        { headers: authHeaders() }
-      );
+      expect(axiosGetSpy).toHaveBeenCalledWith(`${API_URL}/api/projects/${PROJECT_ID}/completion-reports`, {
+        headers: authHeaders(),
+      });
       expect(axiosPostSpy).toHaveBeenCalledWith(
         `${API_URL}/api/projects/${PROJECT_ID}/completion-reports`,
         expect.objectContaining({
@@ -1892,7 +1864,7 @@ describe('CLI Integration Tests', () => {
           content: '# Report',
           status: 'COMPLETED',
         }),
-        { headers: authHeaders() }
+        { headers: authHeaders() },
       );
       rmSync(reportDir, { recursive: true, force: true });
     });
@@ -1917,7 +1889,7 @@ describe('CLI Integration Tests', () => {
           title: 'File report',
           content: '## Summary\n- done',
         }),
-        { headers: authHeaders() }
+        { headers: authHeaders() },
       );
 
       rmSync(reportDir, { recursive: true, force: true });
@@ -1950,10 +1922,10 @@ describe('CLI Integration Tests', () => {
           type: 'BUG_FIX',
         });
 
-        expect(axiosGetSpy).toHaveBeenCalledWith(
-          `${API_URL}/api/projects/${PROJECT_ID}/code-reviews`,
-          { headers: authHeaders(), params: { status: 'COMPLETED', page: 2, pageSize: 5 } }
-        );
+        expect(axiosGetSpy).toHaveBeenCalledWith(`${API_URL}/api/projects/${PROJECT_ID}/code-reviews`, {
+          headers: authHeaders(),
+          params: { status: 'COMPLETED', page: 2, pageSize: 5 },
+        });
         expect(axiosPostSpy).toHaveBeenCalledWith(
           `${API_URL}/api/projects/${PROJECT_ID}/code-reviews`,
           expect.objectContaining({
@@ -1965,7 +1937,7 @@ describe('CLI Integration Tests', () => {
             runnerType: 'CODEX',
             model: 'gpt-5-codex',
           }),
-          { headers: authHeaders() }
+          { headers: authHeaders() },
         );
         expect(axiosPostSpy).toHaveBeenCalledWith(
           `${API_URL}/api/projects/${PROJECT_ID}/code-reviews/review-1/plans`,
@@ -1975,7 +1947,7 @@ describe('CLI Integration Tests', () => {
             priority: 'HIGH',
             type: 'BUG_FIX',
           }),
-          { headers: authHeaders() }
+          { headers: authHeaders() },
         );
       } finally {
         rmSync(reviewDir, { recursive: true, force: true });
@@ -1985,9 +1957,9 @@ describe('CLI Integration Tests', () => {
     it('code-review create: should require runner snapshot and include it in request body', async () => {
       axiosPostSpy.mockResolvedValue({ data: { data: { id: 'review-1' } } } as any);
 
-      await expect(
-        executeCommand('code-review', 'create', { title: 'Missing runner snapshot' })
-      ).rejects.toThrow('--runner-type and --model are required for code-review create');
+      await expect(executeCommand('code-review', 'create', { title: 'Missing runner snapshot' })).rejects.toThrow(
+        '--runner-type and --model are required for code-review create',
+      );
 
       await executeCommand('code-review', 'create', {
         title: 'Review cli snapshot',
@@ -2003,7 +1975,7 @@ describe('CLI Integration Tests', () => {
           runnerType: 'CLAUDE_CODE',
           model: 'claude-opus-4-6',
         }),
-        { headers: authHeaders() }
+        { headers: authHeaders() },
       );
     });
 
@@ -2048,11 +2020,10 @@ describe('CLI Integration Tests', () => {
           pullRequestId: '42',
           qualityScore: 95,
         }),
-        { headers: authHeaders() }
+        { headers: authHeaders() },
       );
       rmSync(reportDir, { recursive: true, force: true });
     });
-
 
     it('report update: should include metric fields in update body', async () => {
       axiosPutSpy.mockResolvedValue({ data: { data: { id: 'r3' } } } as any);
@@ -2085,7 +2056,7 @@ describe('CLI Integration Tests', () => {
           pullRequestId: '77',
           qualityScore: 80,
         }),
-        { headers: authHeaders() }
+        { headers: authHeaders() },
       );
     });
 
@@ -2099,18 +2070,15 @@ describe('CLI Integration Tests', () => {
         pageSize: '10',
       });
 
-      expect(axiosGetSpy).toHaveBeenCalledWith(
-        `${API_URL}/api/projects/${PROJECT_ID}/completion-reports`,
-        {
-          headers: authHeaders(),
-          params: {
-            planId: 'plan-1',
-            status: 'COMPLETED',
-            page: 2,
-            pageSize: 10,
-          },
-        }
-      );
+      expect(axiosGetSpy).toHaveBeenCalledWith(`${API_URL}/api/projects/${PROJECT_ID}/completion-reports`, {
+        headers: authHeaders(),
+        params: {
+          planId: 'plan-1',
+          status: 'COMPLETED',
+          page: 2,
+          pageSize: 10,
+        },
+      });
     });
 
     it('report delete: should call project-scoped endpoint without json content-type', async () => {
@@ -2118,10 +2086,9 @@ describe('CLI Integration Tests', () => {
 
       await executeCommand('report', 'delete', { id: 'report-1' });
 
-      expect(axiosDeleteSpy).toHaveBeenCalledWith(
-        `${API_URL}/api/projects/${PROJECT_ID}/completion-reports/report-1`,
-        { headers: deleteHeaders() }
-      );
+      expect(axiosDeleteSpy).toHaveBeenCalledWith(`${API_URL}/api/projects/${PROJECT_ID}/completion-reports/report-1`, {
+        headers: deleteHeaders(),
+      });
     });
 
     it('postmortem command: should remain project-scoped post mortem path', async () => {
@@ -2135,10 +2102,9 @@ describe('CLI Integration Tests', () => {
         actionItems: 'item1,item2',
       });
 
-      expect(axiosGetSpy).toHaveBeenCalledWith(
-        `${API_URL}/api/projects/${PROJECT_ID}/post-mortems`,
-        { headers: authHeaders() }
-      );
+      expect(axiosGetSpy).toHaveBeenCalledWith(`${API_URL}/api/projects/${PROJECT_ID}/post-mortems`, {
+        headers: authHeaders(),
+      });
       expect(axiosPostSpy).toHaveBeenCalledWith(
         `${API_URL}/api/projects/${PROJECT_ID}/post-mortems`,
         expect.objectContaining({
@@ -2146,10 +2112,9 @@ describe('CLI Integration Tests', () => {
           content: 'Content',
           actionItems: ['item1', 'item2'],
         }),
-        { headers: authHeaders() }
+        { headers: authHeaders() },
       );
     });
-
 
     it('postmortem list: should pass query filters and pagination', async () => {
       axiosGetSpy.mockResolvedValue({ data: { data: [] } } as any);
@@ -2161,18 +2126,15 @@ describe('CLI Integration Tests', () => {
         pageSize: '5',
       });
 
-      expect(axiosGetSpy).toHaveBeenCalledWith(
-        `${API_URL}/api/projects/${PROJECT_ID}/post-mortems`,
-        {
-          headers: authHeaders(),
-          params: {
-            planId: 'plan-1',
-            status: 'RESOLVED',
-            page: 4,
-            pageSize: 5,
-          },
-        }
-      );
+      expect(axiosGetSpy).toHaveBeenCalledWith(`${API_URL}/api/projects/${PROJECT_ID}/post-mortems`, {
+        headers: authHeaders(),
+        params: {
+          planId: 'plan-1',
+          status: 'RESOLVED',
+          page: 4,
+          pageSize: 5,
+        },
+      });
     });
 
     it('postmortem delete: should call project-scoped endpoint without json content-type', async () => {
@@ -2180,10 +2142,9 @@ describe('CLI Integration Tests', () => {
 
       await executeCommand('postmortem', 'delete', { id: 'pm-1' });
 
-      expect(axiosDeleteSpy).toHaveBeenCalledWith(
-        `${API_URL}/api/projects/${PROJECT_ID}/post-mortems/pm-1`,
-        { headers: deleteHeaders() }
-      );
+      expect(axiosDeleteSpy).toHaveBeenCalledWith(`${API_URL}/api/projects/${PROJECT_ID}/post-mortems/pm-1`, {
+        headers: deleteHeaders(),
+      });
     });
 
     it('agent-config get/delete: should use project-scoped endpoints and delete headers', async () => {
@@ -2193,14 +2154,12 @@ describe('CLI Integration Tests', () => {
       await executeCommand('agent-config', 'get', { id: 'ac-1' });
       await executeCommand('agent-config', 'delete', { id: 'ac-1' });
 
-      expect(axiosGetSpy).toHaveBeenCalledWith(
-        `${API_URL}/api/projects/${PROJECT_ID}/agent-configs/ac-1`,
-        { headers: authHeaders() }
-      );
-      expect(axiosDeleteSpy).toHaveBeenCalledWith(
-        `${API_URL}/api/projects/${PROJECT_ID}/agent-configs/ac-1`,
-        { headers: deleteHeaders() }
-      );
+      expect(axiosGetSpy).toHaveBeenCalledWith(`${API_URL}/api/projects/${PROJECT_ID}/agent-configs/ac-1`, {
+        headers: authHeaders(),
+      });
+      expect(axiosDeleteSpy).toHaveBeenCalledWith(`${API_URL}/api/projects/${PROJECT_ID}/agent-configs/ac-1`, {
+        headers: deleteHeaders(),
+      });
     });
 
     it('config whoami: should display current API key info', async () => {
@@ -2213,69 +2172,70 @@ describe('CLI Integration Tests', () => {
           teamId: 'team_1',
           agentName: 'test-agent',
           hasApiKey: true,
-        })
+        }),
       );
     });
 
     it('should validate required options for updated contracts', async () => {
       await expect(
-        executeCommand('plan', 'create', { title: 'no desc', complexity: 'STANDARD', runnerType: 'CLAUDE_CODE', model: 'claude-opus-4-6' })
+        executeCommand('plan', 'create', {
+          title: 'no desc',
+          complexity: 'STANDARD',
+          runnerType: 'CLAUDE_CODE',
+          model: 'claude-opus-4-6',
+        }),
       ).rejects.toThrow('--content, --file, or --template is required for plan create');
-      await expect(
-        executeCommand('comment', 'create', { planId: 'plan-1', content: 'x' })
-      ).rejects.toThrow('--type is required for comment create');
-      await expect(
-        executeCommand('dependency', 'create', { planId: 'plan-1' })
-      ).rejects.toThrow('--blocking-plan-id is required for dependency create');
+      await expect(executeCommand('comment', 'create', { planId: 'plan-1', content: 'x' })).rejects.toThrow(
+        '--type is required for comment create',
+      );
+      await expect(executeCommand('dependency', 'create', { planId: 'plan-1' })).rejects.toThrow(
+        '--blocking-plan-id is required for dependency create',
+      );
       await expect(executeCommand('convention', 'append', {})).rejects.toThrow(
-        'Unknown convention action: append. Use list, show, download, status, create, update, or delete.'
+        'Unknown convention action: append. Use list, show, download, status, create, update, or delete.',
       );
-      await expect(executeCommand('sync', 'list', {})).rejects.toThrow(
-        'Unknown sync action: list. Use download.'
-      );
+      await expect(executeCommand('sync', 'list', {})).rejects.toThrow('Unknown sync action: list. Use download.');
     });
 
     it('CLI definitions: should include new options and remove legacy options', () => {
       const cliIndex = readFileSync(join(process.cwd(), 'src/index.ts'), 'utf-8');
 
-      expect(cliIndex).toContain("--task <text>");
-      expect(cliIndex).toContain("--type <type>");
-      expect(cliIndex).toContain("--blocking-plan-id <id>");
-      expect(cliIndex).toContain("--commit-hash <hash>");
-      expect(cliIndex).toContain("--branch-name <name>");
-      expect(cliIndex).toContain("--files-modified <n>");
-      expect(cliIndex).toContain("--lines-added <n>");
-      expect(cliIndex).toContain("--lines-deleted <n>");
-      expect(cliIndex).toContain("--duration-seconds <n>");
-      expect(cliIndex).toContain("--commit-start <hash>");
-      expect(cliIndex).toContain("--commit-end <hash>");
-      expect(cliIndex).toContain("--pull-request-id <id>");
-      expect(cliIndex).toContain("--quality-score <n>");
-      expect(cliIndex).toContain("--no-git");
+      expect(cliIndex).toContain('--task <text>');
+      expect(cliIndex).toContain('--type <type>');
+      expect(cliIndex).toContain('--blocking-plan-id <id>');
+      expect(cliIndex).toContain('--commit-hash <hash>');
+      expect(cliIndex).toContain('--branch-name <name>');
+      expect(cliIndex).toContain('--files-modified <n>');
+      expect(cliIndex).toContain('--lines-added <n>');
+      expect(cliIndex).toContain('--lines-deleted <n>');
+      expect(cliIndex).toContain('--duration-seconds <n>');
+      expect(cliIndex).toContain('--commit-start <hash>');
+      expect(cliIndex).toContain('--commit-end <hash>');
+      expect(cliIndex).toContain('--pull-request-id <id>');
+      expect(cliIndex).toContain('--quality-score <n>');
+      expect(cliIndex).toContain('--no-git');
       expect(cliIndex).toContain(".command('sync')");
       expect(cliIndex).toContain(".command('postmortem')");
-      expect(cliIndex).toContain("--search <text>");
-      expect(cliIndex).toContain("--assigned-to <id>");
-      expect(cliIndex).toContain("--page <number>");
-      expect(cliIndex).toContain("--page-size <number>");
-      expect(cliIndex).toContain("Action to perform (list, get, show, create");
-      expect(cliIndex).toContain("--template <name>");
-      expect(cliIndex).toContain("--include-deps");
-      expect(cliIndex).not.toContain("Action to perform (download)");
+      expect(cliIndex).toContain('--search <text>');
+      expect(cliIndex).toContain('--assigned-to <id>');
+      expect(cliIndex).toContain('--page <number>');
+      expect(cliIndex).toContain('--page-size <number>');
+      expect(cliIndex).toContain('Action to perform (list, get, show, create');
+      expect(cliIndex).toContain('--template <name>');
+      expect(cliIndex).toContain('--include-deps');
+      expect(cliIndex).not.toContain('Action to perform (download)');
 
-      expect(cliIndex).toContain("--metadata <json>");
-      expect(cliIndex).toContain("--complexity <level>");
-      expect(cliIndex).toContain("--complexity-reason <text>");
-      expect(cliIndex).not.toContain("--allow-missing-html-preview");
-      expect(cliIndex).not.toContain("--author-id <id>");
-      expect(cliIndex).not.toContain("--depends-on <id>");
-      expect(cliIndex).toContain("BACKLOG, TODO, ASSIGNED, IN_PROGRESS, BLOCKED, DONE, CANCELLED");
+      expect(cliIndex).toContain('--metadata <json>');
+      expect(cliIndex).toContain('--complexity <level>');
+      expect(cliIndex).toContain('--complexity-reason <text>');
+      expect(cliIndex).not.toContain('--allow-missing-html-preview');
+      expect(cliIndex).not.toContain('--author-id <id>');
+      expect(cliIndex).not.toContain('--depends-on <id>');
+      expect(cliIndex).toContain('BACKLOG, TODO, ASSIGNED, IN_PROGRESS, BLOCKED, DONE, CANCELLED');
     });
 
     it('should throw for unknown resource command', async () => {
-      await expect(executeCommand('unknown', 'list', {})).rejects.toThrow(
-        'Unknown resource: unknown'
-      );
+      await expect(executeCommand('unknown', 'list', {})).rejects.toThrow('Unknown resource: unknown');
     });
 
     it('document: should map visibility, archive filters, and tag limit to document APIs', async () => {
@@ -2343,25 +2303,22 @@ describe('CLI Integration Tests', () => {
             tags: ['a'],
             visibility: 'PRIVATE',
           },
-          { headers: authHeaders() }
+          { headers: authHeaders() },
         );
         expect(axiosPutSpy).toHaveBeenCalledWith(
           `${API_URL}/api/projects/${PROJECT_ID}/documents/doc-1`,
           { title: 'Updated', visibility: 'PROJECT' },
-          { headers: authHeaders() }
+          { headers: authHeaders() },
         );
-        expect(axiosGetSpy).toHaveBeenCalledWith(
-          `${API_URL}/api/projects/${PROJECT_ID}/documents`,
-          {
-            headers: authHeaders(),
-            params: {
-              visibility: 'PRIVATE',
-              archived: 'ARCHIVED',
-              page: 2,
-              pageSize: 10,
-            },
-          }
-        );
+        expect(axiosGetSpy).toHaveBeenCalledWith(`${API_URL}/api/projects/${PROJECT_ID}/documents`, {
+          headers: authHeaders(),
+          params: {
+            visibility: 'PRIVATE',
+            archived: 'ARCHIVED',
+            page: 2,
+            pageSize: 10,
+          },
+        });
         expect(listResult).toEqual({
           data: [
             expect.objectContaining({
@@ -2374,7 +2331,7 @@ describe('CLI Integration Tests', () => {
           executeCommand('document', 'create', {
             file: filePath,
             tags: Array.from({ length: 21 }, (_, index) => `tag${index}`).join(','),
-          })
+          }),
         ).rejects.toThrow('Documents can have up to 20 tags');
       } finally {
         rmSync(tempDir, { recursive: true, force: true });
@@ -2427,29 +2384,29 @@ describe('CLI Integration Tests', () => {
         1,
         `${API_URL}/api/projects/${PROJECT_ID}/documents/doc-1/archive`,
         {},
-        { headers: authHeaders() }
+        { headers: authHeaders() },
       );
       expect(axiosPostSpy).toHaveBeenNthCalledWith(
         2,
         `${API_URL}/api/projects/${PROJECT_ID}/documents/doc-1/unarchive`,
         {},
-        { headers: authHeaders() }
+        { headers: authHeaders() },
       );
       expect(axiosGetSpy).toHaveBeenNthCalledWith(
         1,
         `${API_URL}/api/projects/${PROJECT_ID}/documents/doc-1/revisions`,
-        { headers: authHeaders(), params: { pageSize: 5 } }
+        { headers: authHeaders(), params: { pageSize: 5 } },
       );
       expect(axiosGetSpy).toHaveBeenNthCalledWith(
         2,
         `${API_URL}/api/projects/${PROJECT_ID}/documents/doc-1/revisions/rev-1`,
-        { headers: authHeaders() }
+        { headers: authHeaders() },
       );
       expect(axiosPostSpy).toHaveBeenNthCalledWith(
         3,
         `${API_URL}/api/projects/${PROJECT_ID}/documents/doc-1/revisions/rev-1/restore`,
         {},
-        { headers: authHeaders() }
+        { headers: authHeaders() },
       );
       expect(revisions).toEqual({
         data: [
@@ -2518,23 +2475,23 @@ describe('CLI Integration Tests', () => {
         commentId: 'comment-2',
       });
 
-      expect(axiosGetSpy).toHaveBeenCalledWith(
-        `${API_URL}/api/projects/${PROJECT_ID}/documents/doc-1/comments`,
-        { headers: authHeaders(), params: { page: 1, order: 'asc' } }
-      );
+      expect(axiosGetSpy).toHaveBeenCalledWith(`${API_URL}/api/projects/${PROJECT_ID}/documents/doc-1/comments`, {
+        headers: authHeaders(),
+        params: { page: 1, order: 'asc' },
+      });
       expect(axiosPostSpy).toHaveBeenCalledWith(
         `${API_URL}/api/projects/${PROJECT_ID}/documents/doc-1/comments`,
         { content: 'created' },
-        { headers: authHeaders() }
+        { headers: authHeaders() },
       );
       expect(axiosPutSpy).toHaveBeenCalledWith(
         `${API_URL}/api/projects/${PROJECT_ID}/documents/doc-1/comments/comment-2`,
         { content: 'updated' },
-        { headers: authHeaders() }
+        { headers: authHeaders() },
       );
       expect(axiosDeleteSpy).toHaveBeenCalledWith(
         `${API_URL}/api/projects/${PROJECT_ID}/documents/doc-1/comments/comment-2`,
-        { headers: deleteHeaders() }
+        { headers: deleteHeaders() },
       );
       expect(comments).toEqual({
         data: [
@@ -2558,7 +2515,15 @@ describe('CLI Integration Tests', () => {
         axiosGetSpy.mockResolvedValueOnce({
           data: {
             data: [
-              { entityType: 'PLAN', id: 'p1', title: 'Test Plan', snippet: 'match', rank: 1, contentTokenCount: 100, createdAt: '2026-01-01T00:00:00Z' },
+              {
+                entityType: 'PLAN',
+                id: 'p1',
+                title: 'Test Plan',
+                snippet: 'match',
+                rank: 1,
+                contentTokenCount: 100,
+                createdAt: '2026-01-01T00:00:00Z',
+              },
             ],
             meta: { total: 1, truncatedByTokenBudget: false },
           },
@@ -2567,7 +2532,7 @@ describe('CLI Integration Tests', () => {
         const result = await executeCommand('search', '', { query: 'test' });
         expect(axiosGetSpy).toHaveBeenCalledWith(
           expect.stringContaining(`/api/projects/${PROJECT_ID}/search?q=test`),
-          expect.objectContaining({ headers: authHeaders() })
+          expect.objectContaining({ headers: authHeaders() }),
         );
         expect((result as any).data).toHaveLength(1);
         expect((result as any).data[0].entityType).toBe('PLAN');
@@ -2589,9 +2554,9 @@ describe('CLI Integration Tests', () => {
       });
 
       it('should throw for invalid types', async () => {
-        await expect(
-          executeCommand('search', '', { query: 'test', types: 'INVALID' })
-        ).rejects.toThrow('Invalid type(s): INVALID');
+        await expect(executeCommand('search', '', { query: 'test', types: 'INVALID' })).rejects.toThrow(
+          'Invalid type(s): INVALID',
+        );
       });
 
       it('should pass limit and maxTokens', async () => {

@@ -35,7 +35,7 @@ function findProjectRoot(): string | null {
 async function runFreshnessCheckSilent(
   apiUrl: string,
   projectId: string,
-  headers: Record<string, string>
+  headers: Record<string, string>,
 ): Promise<void> {
   const projectRoot = findProjectRoot();
   if (!projectRoot) return;
@@ -55,7 +55,9 @@ async function runFreshnessCheckSilent(
   }
 }
 
-function formatQuotaExceededMessage(coAction: NonNullable<Awaited<ReturnType<typeof getMemberQuota>>["coAction"]>): string {
+function formatQuotaExceededMessage(
+  coAction: NonNullable<Awaited<ReturnType<typeof getMemberQuota>>['coAction']>,
+): string {
   if (coAction.daily.used >= coAction.daily.limit) {
     return `Daily limit reached: ${coAction.daily.used}/${coAction.daily.limit} used. Resets tomorrow (UTC).`;
   }
@@ -63,12 +65,7 @@ function formatQuotaExceededMessage(coAction: NonNullable<Awaited<ReturnType<typ
   return `Monthly limit reached: ${coAction.monthly.used}/${coAction.monthly.limit} used. Resets next month (UTC).`;
 }
 
-export async function executeCoActionCommand(
-  apiUrl: string,
-  headers: any,
-  action: string,
-  options: any
-): Promise<any> {
+export async function executeCoActionCommand(apiUrl: string, headers: any, action: string, options: any): Promise<any> {
   if (!options.projectId || typeof options.projectId !== 'string') {
     throw new Error('--project-id is required (or configure AGENTTEAMS_PROJECT_ID / .agentteams/config.json)');
   }
@@ -150,7 +147,7 @@ export async function executeCoActionCommand(
         'Creating co-action takeaway...',
         async () => {
           const data = await createCoActionTakeaway(apiUrl, options.projectId, headers, options.id, body);
-          if (options.file) deleteIfTempFile(options.file);
+          if (options.file) deleteIfTempFile(options.file, { keep: options.keepTemp });
           return data;
         },
         'Co-action takeaway created',
@@ -176,8 +173,15 @@ export async function executeCoActionCommand(
       return withSpinner(
         'Updating co-action takeaway...',
         async () => {
-          const data = await updateCoActionTakeaway(apiUrl, options.projectId, headers, options.id, options.takeawayId, body);
-          if (options.file) deleteIfTempFile(options.file);
+          const data = await updateCoActionTakeaway(
+            apiUrl,
+            options.projectId,
+            headers,
+            options.id,
+            options.takeawayId,
+            body,
+          );
+          if (options.file) deleteIfTempFile(options.file, { keep: options.keepTemp });
           return data;
         },
         'Co-action takeaway updated',
@@ -241,15 +245,18 @@ export async function executeCoActionCommand(
           'Creating co-action...',
           async () => {
             const data = await createCoAction(apiUrl, options.projectId, headers, body);
-            if (options.file) deleteIfTempFile(options.file);
+            if (options.file) deleteIfTempFile(options.file, { keep: options.keepTemp });
             const id = (data as any)?.data?.id ?? options.id;
-            if (id) process.stderr.write(`Tip: Add a takeaway to capture key insights or knowledge for the next reader — agentteams coaction takeaway-create --id ${id}\n`);
+            if (id)
+              process.stderr.write(
+                `Tip: Add a takeaway to capture key insights or knowledge for the next reader — agentteams coaction takeaway-create --id ${id}\n`,
+              );
             return data;
           },
           'Co-action created',
         );
       } catch (error) {
-        if (options.file) deleteIfTempFile(options.file);
+        if (options.file) deleteIfTempFile(options.file, { keep: options.keepTemp });
 
         if (
           isAxiosError(error) &&
@@ -288,8 +295,11 @@ export async function executeCoActionCommand(
       }
 
       const updateResult = await updateCoAction(apiUrl, options.projectId, headers, options.id, body);
-      if (options.file) deleteIfTempFile(options.file);
-      if (options.id) process.stderr.write(`Tip: Add a takeaway to capture key insights or knowledge for the next reader — agentteams coaction takeaway-create --id ${options.id}\n`);
+      if (options.file) deleteIfTempFile(options.file, { keep: options.keepTemp });
+      if (options.id)
+        process.stderr.write(
+          `Tip: Add a takeaway to capture key insights or knowledge for the next reader — agentteams coaction takeaway-create --id ${options.id}\n`,
+        );
       return updateResult;
     }
     case 'delete': {
@@ -340,7 +350,12 @@ export async function executeCoActionCommand(
           const linkedPlans = (coAction.linkedPlans ?? []) as Array<{ id: string; title: string }>;
           const linkedCRs = (coAction.linkedCompletionReports ?? []) as Array<{ id: string; title: string }>;
           const linkedPMs = (coAction.linkedPostMortems ?? []) as Array<{ id: string; title: string }>;
-          const takeaways = (coAction.linkedTakeaways ?? []) as Array<{ id: string; content: string; createdByName?: string; createdAt: string }>;
+          const takeaways = (coAction.linkedTakeaways ?? []) as Array<{
+            id: string;
+            content: string;
+            createdByName?: string;
+            createdAt: string;
+          }>;
 
           const frontmatterLines = [
             '---',
@@ -377,9 +392,14 @@ export async function executeCoActionCommand(
           frontmatterLines.push('---');
           const frontmatter = frontmatterLines.join('\n');
 
-          const takeawaysSection = takeaways.length > 0
-            ? '\n## Takeaways\n\n' + takeaways.map((t, i) => `${i + 1}. ${t.content} _(${t.createdByName ?? '-'}, ${t.createdAt})_`).join('\n') + '\n'
-            : '';
+          const takeawaysSection =
+            takeaways.length > 0
+              ? '\n## Takeaways\n\n' +
+                takeaways
+                  .map((t, i) => `${i + 1}. ${t.content} _(${t.createdByName ?? '-'}, ${t.createdAt})_`)
+                  .join('\n') +
+                '\n'
+              : '';
 
           const content = coAction.content ?? '';
           writeFileSync(filePath, `${frontmatter}\n${takeawaysSection}\n${content}`, 'utf-8');
@@ -431,9 +451,7 @@ export async function executeCoActionCommand(
       );
 
       return {
-        message: deletedFiles.length > 0
-          ? `Deleted ${deletedFiles.length} file(s).`
-          : 'No matching files found.',
+        message: deletedFiles.length > 0 ? `Deleted ${deletedFiles.length} file(s).` : 'No matching files found.',
         deletedFiles,
       };
     }
@@ -459,21 +477,31 @@ export async function executeCoActionCommand(
     }
     case 'link-completion-report': {
       if (!options.id) throw new Error('--id is required for coaction link-completion-report');
-      if (!options.completionReportId) throw new Error('--completion-report-id is required for coaction link-completion-report');
+      if (!options.completionReportId)
+        throw new Error('--completion-report-id is required for coaction link-completion-report');
 
       return withSpinner(
         'Linking completion report...',
-        () => linkCompletionReportToCoAction(apiUrl, options.projectId, headers, options.id, options.completionReportId),
+        () =>
+          linkCompletionReportToCoAction(apiUrl, options.projectId, headers, options.id, options.completionReportId),
         'Completion report linked',
       );
     }
     case 'unlink-completion-report': {
       if (!options.id) throw new Error('--id is required for coaction unlink-completion-report');
-      if (!options.completionReportId) throw new Error('--completion-report-id is required for coaction unlink-completion-report');
+      if (!options.completionReportId)
+        throw new Error('--completion-report-id is required for coaction unlink-completion-report');
 
       return withSpinner(
         'Unlinking completion report...',
-        () => unlinkCompletionReportFromCoAction(apiUrl, options.projectId, headers, options.id, options.completionReportId),
+        () =>
+          unlinkCompletionReportFromCoAction(
+            apiUrl,
+            options.projectId,
+            headers,
+            options.id,
+            options.completionReportId,
+          ),
         'Completion report unlinked',
       );
     }

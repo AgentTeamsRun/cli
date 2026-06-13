@@ -3,11 +3,7 @@ import chalk from 'chalk';
 
 const isInteractive = process.stderr.isTTY === true;
 
-export async function withSpinner<T>(
-  text: string,
-  fn: () => Promise<T>,
-  successText?: string,
-): Promise<T> {
+export async function withSpinner<T>(text: string, fn: () => Promise<T>, successText?: string): Promise<T> {
   if (!isInteractive) return fn();
 
   const spinner = ora({ text, stream: process.stderr }).start();

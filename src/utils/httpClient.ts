@@ -1,10 +1,10 @@
-import { createRequire } from "node:module";
-import axios from "axios";
-import type { AxiosError, AxiosResponse, InternalAxiosRequestConfig } from "axios";
-import { writeCache } from "./updateCheck.js";
+import { createRequire } from 'node:module';
+import axios from 'axios';
+import type { AxiosError, AxiosResponse, InternalAxiosRequestConfig } from 'axios';
+import { writeCache } from './updateCheck.js';
 
 const require = createRequire(import.meta.url);
-const pkg = require("../../package.json") as { version: string };
+const pkg = require('../../package.json') as { version: string };
 
 const MAX_RETRIES = 3;
 const BASE_DELAY_MS = 1_000;
@@ -13,11 +13,10 @@ interface RetryConfig extends InternalAxiosRequestConfig {
   _retryCount?: number;
 }
 
-const sleep = (ms: number): Promise<void> =>
-  new Promise((resolve) => setTimeout(resolve, ms));
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 const getRetryDelay = (error: AxiosError, attempt: number): number => {
-  const retryAfterHeader = error.response?.headers?.["retry-after"];
+  const retryAfterHeader = error.response?.headers?.['retry-after'];
   if (retryAfterHeader) {
     const seconds = Number(retryAfterHeader);
     if (!Number.isNaN(seconds) && seconds > 0) {
@@ -33,11 +32,11 @@ const getRetryDelay = (error: AxiosError, attempt: number): number => {
   return BASE_DELAY_MS * 2 ** attempt;
 };
 
-axios.defaults.headers.common["X-CLI-Version"] = pkg.version;
+axios.defaults.headers.common['X-CLI-Version'] = pkg.version;
 
 axios.interceptors.response.use(
   (response: AxiosResponse) => {
-    const latestVersion = response.headers["x-cli-latest-version"] as string | undefined;
+    const latestVersion = response.headers['x-cli-latest-version'] as string | undefined;
     if (latestVersion) {
       writeCache({ lastCheck: Date.now(), latestVersion });
     }
@@ -61,7 +60,7 @@ axios.interceptors.response.use(
 
     await sleep(delay);
     return axios.request(config);
-  }
+  },
 );
 
 export default axios;

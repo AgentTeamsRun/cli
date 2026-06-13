@@ -4,9 +4,10 @@ export function normalizeDependencies(raw: unknown): { blocking: any[]; dependen
   }
 
   const root = raw as Record<string, unknown>;
-  const data = (root.data && typeof root.data === 'object' && !Array.isArray(root.data))
-    ? (root.data as Record<string, unknown>)
-    : root;
+  const data =
+    root.data && typeof root.data === 'object' && !Array.isArray(root.data)
+      ? (root.data as Record<string, unknown>)
+      : root;
 
   const blocking = Array.isArray(data.blocking) ? data.blocking : [];
   const dependents = Array.isArray(data.dependents) ? data.dependents : [];
@@ -16,7 +17,7 @@ export function normalizeDependencies(raw: unknown): { blocking: any[]; dependen
 
 export function mergePlanWithDependencies(
   rawPlanResponse: unknown,
-  dependencies: { blocking: any[]; dependents: any[] }
+  dependencies: { blocking: any[]; dependents: any[] },
 ): { data: Record<string, unknown> } {
   const fallback: Record<string, unknown> = {
     dependencies,

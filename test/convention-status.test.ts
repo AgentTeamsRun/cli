@@ -6,9 +6,9 @@ import { buildStatusSummary, conventionStatus } from '../src/commands/convention
 
 describe('buildStatusSummary', () => {
   it('reports up to date when there are no changes', () => {
-    expect(
-      buildStatusSummary({ platformGuidesChanged: false, conventionChanges: [] })
-    ).toBe('✓ Conventions up to date');
+    expect(buildStatusSummary({ platformGuidesChanged: false, conventionChanges: [] })).toBe(
+      '✓ Conventions up to date',
+    );
   });
 
   it('summarizes platform-guide drift and per-type counts when stale', () => {

@@ -9,7 +9,7 @@ describe('outputPolicy', () => {
         action: 'create',
         format: 'json',
         formatExplicit: false,
-      })
+      }),
     ).toBe(true);
   });
 
@@ -20,7 +20,7 @@ describe('outputPolicy', () => {
         action: 'list',
         format: 'json',
         formatExplicit: false,
-      })
+      }),
     ).toBe(false);
   });
 
@@ -31,7 +31,7 @@ describe('outputPolicy', () => {
         action: 'update',
         format: 'json',
         formatExplicit: true,
-      })
+      }),
     ).toBe(false);
   });
 
@@ -43,7 +43,7 @@ describe('outputPolicy', () => {
         format: 'json',
         formatExplicit: false,
         verbose: true,
-      })
+      }),
     ).toBe(false);
   });
 
@@ -55,7 +55,7 @@ describe('outputPolicy', () => {
         format: 'json',
         formatExplicit: true,
         outputFile: './tmp/out.json',
-      })
+      }),
     ).toBe(true);
   });
 
@@ -67,7 +67,7 @@ describe('outputPolicy', () => {
           title: 'CLI output fix',
         },
       },
-      { resource: 'plan', action: 'create' }
+      { resource: 'plan', action: 'create' },
     );
 
     expect(lines).toEqual([
@@ -85,7 +85,7 @@ describe('outputPolicy', () => {
           title: 'CLI output fix',
         },
       },
-      { resource: 'plan', action: 'create' }
+      { resource: 'plan', action: 'create' },
     );
 
     expect(lines.some((line) => line.includes('plan upload-html'))).toBe(false);
@@ -98,7 +98,7 @@ describe('outputPolicy', () => {
         action: 'update',
         format: 'json',
         formatExplicit: false,
-      })
+      }),
     ).toBe(true);
 
     expect(
@@ -107,7 +107,7 @@ describe('outputPolicy', () => {
         action: 'update',
         format: 'json',
         formatExplicit: false,
-      })
+      }),
     ).toBe(true);
 
     expect(
@@ -116,7 +116,7 @@ describe('outputPolicy', () => {
         action: 'update',
         format: 'json',
         formatExplicit: false,
-      })
+      }),
     ).toBe(true);
   });
 
@@ -129,7 +129,7 @@ describe('outputPolicy', () => {
           webUrl: 'https://agentteams.example/plans/plan-123',
         },
       },
-      { resource: 'plan', action: 'create' }
+      { resource: 'plan', action: 'create' },
     );
 
     expect(lines).toEqual([
@@ -146,7 +146,7 @@ describe('outputPolicy', () => {
         message: 'Plan downloaded',
         filePath: '.agentteams/cli/active-plan/a.md',
       },
-      { resource: 'plan', action: 'download' }
+      { resource: 'plan', action: 'download' },
     );
 
     expect(lines[0]).toBe('Plan downloaded');
@@ -160,7 +160,7 @@ describe('outputPolicy', () => {
           title: 'Started plan',
         },
       },
-      { resource: 'plan', action: 'start' }
+      { resource: 'plan', action: 'start' },
     );
 
     expect(lines.some((line) => line.startsWith('Next:'))).toBe(false);
@@ -175,7 +175,7 @@ describe('outputPolicy', () => {
           completionReport: null,
         },
       },
-      { resource: 'plan', action: 'finish' }
+      { resource: 'plan', action: 'finish' },
     );
 
     expect(lines).toContain('Next: agentteams report create --plan-id plan-789');
@@ -190,7 +190,7 @@ describe('outputPolicy', () => {
           completionReport: { id: 'report-001', title: 'Work done' },
         },
       },
-      { resource: 'plan', action: 'finish' }
+      { resource: 'plan', action: 'finish' },
     );
 
     expect(lines.some((line) => line.startsWith('Next:'))).toBe(false);
@@ -204,7 +204,7 @@ describe('outputPolicy', () => {
           title: 'CLI output fix',
         },
       },
-      { resource: 'plan', action: 'update' }
+      { resource: 'plan', action: 'update' },
     );
 
     expect(lines.some((line) => line.startsWith('Next:'))).toBe(false);
@@ -218,7 +218,7 @@ describe('outputPolicy', () => {
         action: 'comment-create',
         format: 'json',
         formatExplicit: false,
-      })
+      }),
     ).toBe(true);
   });
 });

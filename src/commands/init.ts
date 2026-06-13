@@ -13,9 +13,9 @@ import type { Config } from '../types/index.js';
 const AUTH_BASE_URL = process.env.AGENTTEAMS_WEB_URL || 'https://agentteams.run';
 
 const AGENT_ENTRY_POINT_FILES = [
-  { value: 'CLAUDE.md',                    label: 'CLAUDE.md',                    hint: 'Claude Code' },
-  { value: 'AGENTS.md',                    label: 'AGENTS.md',                    hint: 'OpenCode / Codex' },
-  { value: 'GEMINI.md',                    label: 'GEMINI.md',                    hint: 'Antigravity' },
+  { value: 'CLAUDE.md', label: 'CLAUDE.md', hint: 'Claude Code' },
+  { value: 'AGENTS.md', label: 'AGENTS.md', hint: 'OpenCode / Codex' },
+  { value: 'GEMINI.md', label: 'GEMINI.md', hint: 'Antigravity' },
   { value: '.cursor/rules/agentteams.mdc', label: '.cursor/rules/agentteams.mdc', hint: 'Cursor' },
 ] as const;
 const CONFIG_DIR = '.agentteams';
@@ -176,9 +176,7 @@ async function fetchConventionTemplate(authResult: {
   apiUrl: string;
   configId: string;
 }): Promise<string> {
-  const apiUrl = authResult.apiUrl.endsWith('/')
-    ? authResult.apiUrl.slice(0, -1)
-    : authResult.apiUrl;
+  const apiUrl = authResult.apiUrl.endsWith('/') ? authResult.apiUrl.slice(0, -1) : authResult.apiUrl;
 
   const response = await httpClient.get(
     `${apiUrl}/api/projects/${authResult.projectId}/agent-configs/${authResult.configId}/convention`,
@@ -187,7 +185,7 @@ async function fetchConventionTemplate(authResult: {
         'X-API-Key': authResult.apiKey,
         'Content-Type': 'application/json',
       },
-    }
+    },
   );
 
   const content = response.data?.data?.content;
@@ -315,9 +313,7 @@ export async function executeInitCommand(options?: InitOptions): Promise<InitRes
   try {
     authContext = startLocalAuthServer();
   } catch (error) {
-    throw new Error(
-      `Failed to start local OAuth server: ${error instanceof Error ? error.message : String(error)}`
-    );
+    throw new Error(`Failed to start local OAuth server: ${error instanceof Error ? error.message : String(error)}`);
   }
 
   let authPathEnc: string | undefined;
@@ -360,22 +356,24 @@ export async function executeInitCommand(options?: InitOptions): Promise<InitRes
         });
       }
 
-      authContext.waitForCallback().then((result) => {
-        process.removeListener('SIGINT', onSigint);
-        if (process.stdin.isTTY) {
-          process.stdin.setRawMode(false);
-          process.stdin.pause();
-          process.stdin.removeAllListeners('data');
-        }
-        resolve(result);
-      }).catch(reject);
+      authContext
+        .waitForCallback()
+        .then((result) => {
+          process.removeListener('SIGINT', onSigint);
+          if (process.stdin.isTTY) {
+            process.stdin.setRawMode(false);
+            process.stdin.pause();
+            process.stdin.removeAllListeners('data');
+          }
+          resolve(result);
+        })
+        .catch(reject);
     });
 
     authSpinner?.succeed();
     const config = toConfig(authResult);
-    const conventionContent = await withSpinner(
-      'Fetching convention template...',
-      () => fetchConventionTemplate(authResult),
+    const conventionContent = await withSpinner('Fetching convention template...', () =>
+      fetchConventionTemplate(authResult),
     );
 
     saveConfig(configPath, config);
@@ -389,9 +387,7 @@ export async function executeInitCommand(options?: InitOptions): Promise<InitRes
     const agentFiles = generateAgentEntryPointFiles(cwd, selectedFiles);
 
     const seedPlanId = authResult.seedPlanId ?? null;
-    const seedPlanWebUrl = seedPlanId
-      ? `${AUTH_BASE_URL.replace(/\/+$/, '')}/go?type=plan&id=${seedPlanId}`
-      : null;
+    const seedPlanWebUrl = seedPlanId ? `${AUTH_BASE_URL.replace(/\/+$/, '')}/go?type=plan&id=${seedPlanId}` : null;
 
     return {
       success: true,
@@ -409,8 +405,6 @@ export async function executeInitCommand(options?: InitOptions): Promise<InitRes
     authSpinner?.fail();
     cleanup();
 
-    throw new Error(
-      `Initialization failed: ${error instanceof Error ? error.message : String(error)}`
-    );
+    throw new Error(`Initialization failed: ${error instanceof Error ? error.message : String(error)}`);
   }
 }

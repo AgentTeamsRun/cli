@@ -6,7 +6,7 @@ export async function executeCommentCommand(
   projectId: string,
   headers: any,
   action: string,
-  options: any
+  options: any,
 ): Promise<any> {
   switch (action) {
     case 'list': {

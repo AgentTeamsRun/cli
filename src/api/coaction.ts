@@ -5,23 +5,16 @@ export async function listCoActions(
   apiUrl: string,
   projectId: string,
   headers: any,
-  params?: Record<string, string | number>
+  params?: Record<string, string | number>,
 ): Promise<any> {
   const baseUrl = `${apiUrl}/api/projects/${projectId}/co-actions`;
-  const requestConfig = params && Object.keys(params).length > 0
-    ? { headers, params }
-    : { headers };
+  const requestConfig = params && Object.keys(params).length > 0 ? { headers, params } : { headers };
 
   const response = await httpClient.get(baseUrl, requestConfig);
   return response.data;
 }
 
-export async function getCoAction(
-  apiUrl: string,
-  projectId: string,
-  headers: any,
-  id: string
-): Promise<any> {
+export async function getCoAction(apiUrl: string, projectId: string, headers: any, id: string): Promise<any> {
   const baseUrl = `${apiUrl}/api/projects/${projectId}/co-actions`;
   const response = await httpClient.get(`${baseUrl}/${id}`, { headers });
   return response.data;
@@ -31,7 +24,7 @@ export async function createCoAction(
   apiUrl: string,
   projectId: string,
   headers: any,
-  body: Record<string, unknown>
+  body: Record<string, unknown>,
 ): Promise<any> {
   const baseUrl = `${apiUrl}/api/projects/${projectId}/co-actions`;
   const response = await httpClient.post(baseUrl, body, { headers });
@@ -43,19 +36,14 @@ export async function updateCoAction(
   projectId: string,
   headers: any,
   id: string,
-  body: Record<string, unknown>
+  body: Record<string, unknown>,
 ): Promise<any> {
   const baseUrl = `${apiUrl}/api/projects/${projectId}/co-actions`;
   const response = await httpClient.put(`${baseUrl}/${id}`, body, { headers });
   return response.data;
 }
 
-export async function deleteCoAction(
-  apiUrl: string,
-  projectId: string,
-  headers: any,
-  id: string
-): Promise<any> {
+export async function deleteCoAction(apiUrl: string, projectId: string, headers: any, id: string): Promise<any> {
   const baseUrl = `${apiUrl}/api/projects/${projectId}/co-actions`;
   const response = await httpClient.delete(`${baseUrl}/${id}`, {
     headers: withoutJsonContentType(headers),
@@ -68,12 +56,10 @@ export async function listCoActionTakeaways(
   projectId: string,
   headers: any,
   coActionId: string,
-  params?: Record<string, string | number>
+  params?: Record<string, string | number>,
 ): Promise<any> {
   const baseUrl = `${apiUrl}/api/projects/${projectId}/co-actions/${coActionId}/takeaways`;
-  const requestConfig = params && Object.keys(params).length > 0
-    ? { headers, params }
-    : { headers };
+  const requestConfig = params && Object.keys(params).length > 0 ? { headers, params } : { headers };
 
   const response = await httpClient.get(baseUrl, requestConfig);
   return response.data;
@@ -84,7 +70,7 @@ export async function createCoActionTakeaway(
   projectId: string,
   headers: any,
   coActionId: string,
-  body: Record<string, unknown>
+  body: Record<string, unknown>,
 ): Promise<any> {
   const baseUrl = `${apiUrl}/api/projects/${projectId}/co-actions/${coActionId}/takeaways`;
   const response = await httpClient.post(baseUrl, body, { headers });
@@ -97,7 +83,7 @@ export async function updateCoActionTakeaway(
   headers: any,
   coActionId: string,
   takeawayId: string,
-  body: Record<string, unknown>
+  body: Record<string, unknown>,
 ): Promise<any> {
   const baseUrl = `${apiUrl}/api/projects/${projectId}/co-actions/${coActionId}/takeaways`;
   const response = await httpClient.put(`${baseUrl}/${takeawayId}`, body, { headers });
@@ -109,7 +95,7 @@ export async function deleteCoActionTakeaway(
   projectId: string,
   headers: any,
   coActionId: string,
-  takeawayId: string
+  takeawayId: string,
 ): Promise<any> {
   const baseUrl = `${apiUrl}/api/projects/${projectId}/co-actions/${coActionId}/takeaways`;
   const response = await httpClient.delete(`${baseUrl}/${takeawayId}`, {
@@ -123,12 +109,10 @@ export async function listCoActionHistories(
   projectId: string,
   headers: any,
   coActionId: string,
-  params?: Record<string, string | number>
+  params?: Record<string, string | number>,
 ): Promise<any> {
   const baseUrl = `${apiUrl}/api/projects/${projectId}/co-actions/${coActionId}/histories`;
-  const requestConfig = params && Object.keys(params).length > 0
-    ? { headers, params }
-    : { headers };
+  const requestConfig = params && Object.keys(params).length > 0 ? { headers, params } : { headers };
 
   const response = await httpClient.get(baseUrl, requestConfig);
   return response.data;
@@ -139,7 +123,7 @@ export async function linkPlanToCoAction(
   projectId: string,
   headers: any,
   coActionId: string,
-  planId: string
+  planId: string,
 ): Promise<any> {
   const baseUrl = `${apiUrl}/api/projects/${projectId}/co-actions`;
   const response = await httpClient.post(`${baseUrl}/${coActionId}/plans/${planId}`, {}, { headers });
@@ -151,7 +135,7 @@ export async function unlinkPlanFromCoAction(
   projectId: string,
   headers: any,
   coActionId: string,
-  planId: string
+  planId: string,
 ): Promise<any> {
   const baseUrl = `${apiUrl}/api/projects/${projectId}/co-actions`;
   const response = await httpClient.delete(`${baseUrl}/${coActionId}/plans/${planId}`, {
@@ -165,10 +149,14 @@ export async function linkCompletionReportToCoAction(
   projectId: string,
   headers: any,
   coActionId: string,
-  completionReportId: string
+  completionReportId: string,
 ): Promise<any> {
   const baseUrl = `${apiUrl}/api/projects/${projectId}/co-actions`;
-  const response = await httpClient.post(`${baseUrl}/${coActionId}/completion-reports/${completionReportId}`, {}, { headers });
+  const response = await httpClient.post(
+    `${baseUrl}/${coActionId}/completion-reports/${completionReportId}`,
+    {},
+    { headers },
+  );
   return response.data;
 }
 
@@ -177,7 +165,7 @@ export async function unlinkCompletionReportFromCoAction(
   projectId: string,
   headers: any,
   coActionId: string,
-  completionReportId: string
+  completionReportId: string,
 ): Promise<any> {
   const baseUrl = `${apiUrl}/api/projects/${projectId}/co-actions`;
   const response = await httpClient.delete(`${baseUrl}/${coActionId}/completion-reports/${completionReportId}`, {
@@ -191,7 +179,7 @@ export async function linkPostMortemToCoAction(
   projectId: string,
   headers: any,
   coActionId: string,
-  postMortemId: string
+  postMortemId: string,
 ): Promise<any> {
   const baseUrl = `${apiUrl}/api/projects/${projectId}/co-actions`;
   const response = await httpClient.post(`${baseUrl}/${coActionId}/post-mortems/${postMortemId}`, {}, { headers });
@@ -203,7 +191,7 @@ export async function unlinkPostMortemFromCoAction(
   projectId: string,
   headers: any,
   coActionId: string,
-  postMortemId: string
+  postMortemId: string,
 ): Promise<any> {
   const baseUrl = `${apiUrl}/api/projects/${projectId}/co-actions`;
   const response = await httpClient.delete(`${baseUrl}/${coActionId}/post-mortems/${postMortemId}`, {

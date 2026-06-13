@@ -1,9 +1,6 @@
 import { agentConfigDelete, agentConfigGet, agentConfigList } from './agentConfig.js';
 
-export async function executeAgentConfigCommand(
-  action: string,
-  options: any
-): Promise<any> {
+export async function executeAgentConfigCommand(action: string, options: any): Promise<any> {
   switch (action) {
     case 'list':
       return agentConfigList();

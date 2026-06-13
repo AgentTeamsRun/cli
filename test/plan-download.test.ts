@@ -2,37 +2,29 @@ import { describe, it, expect } from '@jest/globals';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { buildFreshnessNoticeLines, buildUniquePlanRunbookFileName, readPlanHtmlUploadInput } from '../src/commands/plan.js';
-
+import {
+  buildFreshnessNoticeLines,
+  buildUniquePlanRunbookFileName,
+  readPlanHtmlUploadInput,
+} from '../src/commands/plan.js';
 
 describe('buildFreshnessNoticeLines', () => {
   it('includes platform guide change and convention changes', () => {
     const lines = buildFreshnessNoticeLines({
       platformGuidesChanged: true,
-      conventionChanges: [
-        { id: 'c1', type: 'updated', title: 'conventions' },
-      ],
+      conventionChanges: [{ id: 'c1', type: 'updated', title: 'conventions' }],
     });
 
-    expect(lines).toEqual([
-      '⚠ Updated conventions found:',
-      '  - platform guides (shared)',
-      '  - updated: conventions',
-    ]);
+    expect(lines).toEqual(['⚠ Updated conventions found:', '  - platform guides (shared)', '  - updated: conventions']);
   });
 
   it('prints only changed conventions when platform guides are unchanged', () => {
     const lines = buildFreshnessNoticeLines({
       platformGuidesChanged: false,
-      conventionChanges: [
-        { id: 'c2', type: 'new', fileName: 'testing.md' },
-      ],
+      conventionChanges: [{ id: 'c2', type: 'new', fileName: 'testing.md' }],
     });
 
-    expect(lines).toEqual([
-      '⚠ Updated conventions found:',
-      '  - new: testing.md',
-    ]);
+    expect(lines).toEqual(['⚠ Updated conventions found:', '  - new: testing.md']);
   });
 });
 
@@ -88,7 +80,9 @@ describe('readPlanHtmlUploadInput', () => {
 
   it('rejects ambiguous or empty upload input', () => {
     expect(() => readPlanHtmlUploadInput({})).toThrow('--file or --stdin is required');
-    expect(() => readPlanHtmlUploadInput({ file: 'summary.html', stdin: true })).toThrow('Use either --file or --stdin');
+    expect(() => readPlanHtmlUploadInput({ file: 'summary.html', stdin: true })).toThrow(
+      'Use either --file or --stdin',
+    );
 
     const dir = mkdtempSync(join(tmpdir(), 'agentteams-plan-html-'));
     const file = join(dir, 'empty.html');

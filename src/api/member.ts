@@ -17,8 +17,8 @@ export type MemberQuotaResponse = {
 
 export async function getMemberQuota(
   apiUrl: string,
-  headers: Record<string, string>
-): Promise<MemberQuotaResponse["data"]> {
+  headers: Record<string, string>,
+): Promise<MemberQuotaResponse['data']> {
   const response = await httpClient.get(`${apiUrl}/api/members/quota`, { headers });
   return response.data.data;
 }

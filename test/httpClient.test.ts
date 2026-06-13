@@ -44,12 +44,14 @@ describe('httpClient', () => {
     };
 
     const writeCache = jest.fn();
-    const setTimeoutSpy = jest.spyOn(global, 'setTimeout').mockImplementation((fn: Parameters<typeof setTimeout>[0]) => {
-      if (typeof fn === 'function') {
-        fn();
-      }
-      return 0 as any;
-    });
+    const setTimeoutSpy = jest
+      .spyOn(global, 'setTimeout')
+      .mockImplementation((fn: Parameters<typeof setTimeout>[0]) => {
+        if (typeof fn === 'function') {
+          fn();
+        }
+        return 0 as any;
+      });
 
     (jest as any).unstable_mockModule('axios', () => ({
       default: axiosMock,
@@ -134,7 +136,7 @@ describe('httpClient', () => {
     const config = { headers: {} } as RetryConfig;
 
     const result = await loaded.responseHandlers[0]?.onRejected(
-      makeAxiosError(429, { 'retry-after': '5' }, undefined, config)
+      makeAxiosError(429, { 'retry-after': '5' }, undefined, config),
     );
 
     expect(loaded.setTimeoutSpy).toHaveBeenCalledWith(expect.any(Function), 5000);
@@ -151,10 +153,10 @@ describe('httpClient', () => {
     loaded.axiosMock.request.mockResolvedValue({ data: { ok: true } });
 
     await loaded.responseHandlers[0]?.onRejected(
-      makeAxiosError(429, {}, { retryAfter: 7 }, { headers: {} } as RetryConfig)
+      makeAxiosError(429, {}, { retryAfter: 7 }, { headers: {} } as RetryConfig),
     );
     await loaded.responseHandlers[0]?.onRejected(
-      makeAxiosError(429, {}, undefined, { headers: {}, _retryCount: 2 } as RetryConfig)
+      makeAxiosError(429, {}, undefined, { headers: {}, _retryCount: 2 } as RetryConfig),
     );
 
     expect(loaded.setTimeoutSpy).toHaveBeenNthCalledWith(1, expect.any(Function), 7000);
@@ -169,13 +171,13 @@ describe('httpClient', () => {
 
     await expect(
       loaded.responseHandlers[0]?.onRejected(
-        makeAxiosError(429, {}, undefined, { headers: {}, _retryCount: 3 } as RetryConfig)
-      )
+        makeAxiosError(429, {}, undefined, { headers: {}, _retryCount: 3 } as RetryConfig),
+      ),
     ).rejects.toMatchObject({ response: { status: 429 } });
 
-    await expect(
-      loaded.responseHandlers[0]?.onRejected(makeAxiosError(500))
-    ).rejects.toMatchObject({ response: { status: 500 } });
+    await expect(loaded.responseHandlers[0]?.onRejected(makeAxiosError(500))).rejects.toMatchObject({
+      response: { status: 500 },
+    });
 
     expect(loaded.axiosMock.request).not.toHaveBeenCalled();
   });

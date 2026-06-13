@@ -67,7 +67,9 @@ export function printInitResult(result: unknown, format: InitOutputFormat): void
     console.log(chalk.cyan(`       Start plan ${seedPlanDisplayId} and create conventions for this project.`));
   } else {
     console.log('  2. Set up conventions for your project by saying to your AI agent:');
-    console.log(chalk.cyan('       Read .agentteams/platform/convention-setup-guide.md and create conventions for this project.'));
+    console.log(
+      chalk.cyan('       Read .agentteams/platform/convention-setup-guide.md and create conventions for this project.'),
+    );
   }
 
   console.log('  3. Or try other commands:');

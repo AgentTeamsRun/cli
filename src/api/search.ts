@@ -4,7 +4,7 @@ export async function searchEntities(
   apiUrl: string,
   projectId: string,
   headers: any,
-  params: Record<string, string | number | string[]>
+  params: Record<string, string | number | string[]>,
 ): Promise<any> {
   const baseUrl = `${apiUrl}/api/projects/${projectId}/search`;
 

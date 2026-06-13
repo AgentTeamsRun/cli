@@ -432,13 +432,13 @@ The API may include an optional machine-readable `errorCode` in error responses:
 
 The CLI prioritizes `errorCode` when present and falls back to message/status-based handling for older API responses.
 
-| Error | Meaning | Resolution |
-|---|---|---|
-| `401 Unauthorized` | Invalid API key | Check `apiKey` or `AGENTTEAMS_API_KEY` |
-| `403 Forbidden` | No access to project | Verify `projectId` |
-| `404 Not Found` | Resource does not exist | Verify ID or create the resource |
-| Network error | Cannot reach server | Check `apiUrl` and server status |
-| Missing config | Config file/env vars not found | Run `agentteams init` |
+| Error              | Meaning                        | Resolution                             |
+| ------------------ | ------------------------------ | -------------------------------------- |
+| `401 Unauthorized` | Invalid API key                | Check `apiKey` or `AGENTTEAMS_API_KEY` |
+| `403 Forbidden`    | No access to project           | Verify `projectId`                     |
+| `404 Not Found`    | Resource does not exist        | Verify ID or create the resource       |
+| Network error      | Cannot reach server            | Check `apiUrl` and server status       |
+| Missing config     | Config file/env vars not found | Run `agentteams init`                  |
 
 ## License
 

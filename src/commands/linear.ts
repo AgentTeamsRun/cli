@@ -1,11 +1,12 @@
-import { createLinearComment, createLinearIssue, getLinearIssue, listLinearComments, updateLinearIssue } from '../api/linear.js';
+import {
+  createLinearComment,
+  createLinearIssue,
+  getLinearIssue,
+  listLinearComments,
+  updateLinearIssue,
+} from '../api/linear.js';
 
-export async function executeLinearCommand(
-  apiUrl: string,
-  headers: any,
-  action: string,
-  options: any
-): Promise<any> {
+export async function executeLinearCommand(apiUrl: string, headers: any, action: string, options: any): Promise<any> {
   switch (action) {
     case 'issue-get': {
       if (!options.issueId) {
@@ -19,7 +20,15 @@ export async function executeLinearCommand(
         throw new Error('--title is required for linear issue create');
       }
 
-      return createLinearIssue(apiUrl, headers, options.title, options.description, options.state, options.teamId, options.parentId);
+      return createLinearIssue(
+        apiUrl,
+        headers,
+        options.title,
+        options.description,
+        options.state,
+        options.teamId,
+        options.parentId,
+      );
     }
     case 'issue-update': {
       if (!options.issueId) {

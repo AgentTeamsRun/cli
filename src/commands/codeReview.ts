@@ -17,7 +17,10 @@ import { withSpinner } from '../utils/spinner.js';
 
 const parseCsv = (value: unknown): string[] => {
   if (typeof value !== 'string') return [];
-  return value.split(',').map((item) => item.trim()).filter(Boolean);
+  return value
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
 };
 
 const readOptionalFile = (file: unknown): string | undefined => {
@@ -62,11 +65,7 @@ const parseFindingsFile = (file: unknown): Array<Record<string, unknown>> | unde
   return parsed as Array<Record<string, unknown>>;
 };
 
-const addOptionalStringField = (
-  body: Record<string, unknown>,
-  field: string,
-  value: unknown
-): void => {
+const addOptionalStringField = (body: Record<string, unknown>, field: string, value: unknown): void => {
   const parsed = toNonEmptyString(value);
   if (parsed) {
     body[field] = parsed;
@@ -78,7 +77,7 @@ export async function executeCodeReviewCommand(
   projectId: string,
   headers: any,
   action: string,
-  options: any
+  options: any,
 ): Promise<any> {
   switch (action) {
     case 'list': {
@@ -117,7 +116,7 @@ export async function executeCodeReviewCommand(
 
       const body: Record<string, unknown> = {
         title,
-        targetType
+        targetType,
       };
       if (options.repositoryId) body.repositoryId = options.repositoryId;
       if (options.targetRef) body.targetRef = options.targetRef;
@@ -184,14 +183,15 @@ export async function executeCodeReviewCommand(
 
       return withSpinner(
         'Creating plan from selected findings...',
-        () => createPlanFromCodeReview(apiUrl, projectId, headers, options.id, {
-          title,
-          findingIds,
-          priority: options.priority,
-          type: options.type,
-          runnerType: options.runnerType,
-          model: options.model,
-        }),
+        () =>
+          createPlanFromCodeReview(apiUrl, projectId, headers, options.id, {
+            title,
+            findingIds,
+            priority: options.priority,
+            type: options.type,
+            runnerType: options.runnerType,
+            model: options.model,
+          }),
         'Plan created',
       );
     }

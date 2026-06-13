@@ -83,7 +83,7 @@ function findAvailablePortSync(): number {
   }
 
   throw new Error(
-    `No available OAuth callback port found in ${OAUTH_PORT_MIN}-${OAUTH_PORT_MAX} and requested AGENTTEAMS_OAUTH_PORT.`
+    `No available OAuth callback port found in ${OAUTH_PORT_MIN}-${OAUTH_PORT_MAX} and requested AGENTTEAMS_OAUTH_PORT.`,
   );
 }
 
@@ -94,15 +94,11 @@ function isAuthResult(value: unknown): value is AuthResult {
 
   const candidate = value as Record<string, unknown>;
   const seedPlanIdValid =
-    candidate.seedPlanId === undefined ||
-    candidate.seedPlanId === null ||
-    typeof candidate.seedPlanId === 'string';
+    candidate.seedPlanId === undefined || candidate.seedPlanId === null || typeof candidate.seedPlanId === 'string';
 
   // repositoryId는 선택값이다. 미선택 인증 시 웹이 빈 문자열 또는 누락으로 보내므로
   // string(빈 문자열 포함) 또는 undefined를 모두 허용한다.
-  const repositoryIdValid =
-    candidate.repositoryId === undefined ||
-    typeof candidate.repositoryId === 'string';
+  const repositoryIdValid = candidate.repositoryId === undefined || typeof candidate.repositoryId === 'string';
 
   return (
     typeof candidate.teamId === 'string' &&
@@ -249,7 +245,7 @@ export function startLocalAuthServer(): AuthServerResult {
       }
 
       sendJson(response, 200, { success: true }, request);
-      
+
       setTimeout(() => {
         resolveAuth(payload);
       }, 100);
@@ -263,8 +259,8 @@ export function startLocalAuthServer(): AuthServerResult {
       new Error(
         error.code === 'EADDRINUSE'
           ? `OAuth callback port ${port} is already in use.`
-          : `OAuth callback server failed: ${error.message}`
-      )
+          : `OAuth callback server failed: ${error.message}`,
+      ),
     );
   });
 

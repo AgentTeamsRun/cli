@@ -22,7 +22,14 @@ describe('formatter', () => {
   });
 
   it('formats arrays and wrapped data payloads as JSON', () => {
-    expect(JSON.parse(formatOutput([{ id: 'p1', title: 'One' }, { id: 'p2', title: 'Two' }]))).toEqual([
+    expect(
+      JSON.parse(
+        formatOutput([
+          { id: 'p1', title: 'One' },
+          { id: 'p2', title: 'Two' },
+        ]),
+      ),
+    ).toEqual([
       { id: 'p1', title: 'One' },
       { id: 'p2', title: 'Two' },
     ]);

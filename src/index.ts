@@ -25,7 +25,9 @@ function normalizeFormat(format: unknown): OutputFormat {
 function normalizeInteractiveFormat(format: unknown): InitOutputFormat {
   if (format === undefined || format === null || format === '') return 'human';
   if (format === 'json') return 'json';
-  throw new Error(`Unsupported output format: ${String(format)}. Use json or omit --format for the human-readable view.`);
+  throw new Error(
+    `Unsupported output format: ${String(format)}. Use json or omit --format for the human-readable view.`,
+  );
 }
 
 function writeOutputFile(outputFile: string, content: string): { resolvedPath: string; bytes: number } {
@@ -45,8 +47,7 @@ function printCommandResult(params: {
   action?: string;
   formatExplicit?: boolean;
 }): void {
-  const outputText =
-    typeof params.result === 'string' ? params.result : formatOutput(params.result);
+  const outputText = typeof params.result === 'string' ? params.result : formatOutput(params.result);
 
   const summaryLines = createSummaryLines(params.result, {
     resource: params.resource,
@@ -66,14 +67,16 @@ function printCommandResult(params: {
     return;
   }
 
-  if (shouldPrintSummary({
-    resource: params.resource,
-    action: params.action,
-    format: params.format,
-    formatExplicit: params.formatExplicit,
-    outputFile: params.outputFile,
-    verbose: params.verbose,
-  })) {
+  if (
+    shouldPrintSummary({
+      resource: params.resource,
+      action: params.action,
+      format: params.format,
+      formatExplicit: params.formatExplicit,
+      outputFile: params.outputFile,
+      verbose: params.verbose,
+    })
+  ) {
     for (const line of summaryLines) {
       console.log(line);
     }
@@ -85,10 +88,7 @@ function printCommandResult(params: {
 
 const CONVENTION_HINT = `\nFor workflow rules and reporting guidelines, see: .agentteams/convention.md`;
 
-program
-  .name('agentteams')
-  .description('CLI tool for AgentTeams API')
-  .version(pkg.version);
+program.name('agentteams').description('CLI tool for AgentTeams API').version(pkg.version);
 
 program
   .command('init')
@@ -143,22 +143,40 @@ program
 program
   .command('plan')
   .description('Manage plans')
-  .argument('<action>', 'Action to perform (list, get, show, create, update, delete, assign, download, cleanup, start, finish, quick, status, set-status, upload-html, link-issue, unlink-issue, list-issues)')
+  .argument(
+    '<action>',
+    'Action to perform (list, get, show, create, update, delete, assign, download, cleanup, start, finish, quick, status, set-status, upload-html, link-issue, unlink-issue, list-issues)',
+  )
   .option('--id <id>', 'Plan ID')
   .option('--title <title>', 'Plan title')
   .option('--search <text>', 'Plan title/ID search keyword (list only)')
   .option('--content <content>', 'Plan content (plain text or Tiptap JSON)')
   .option('--interpret-escapes', 'Interpret \\n sequences in --content as newlines (create/update only)', false)
   .option('--file <path>', 'Read plan content from a local file (create/update/upload-html)')
+  .option(
+    '--keep-temp',
+    'Keep the uploaded file under .agentteams/cli/temp/ instead of deleting it after upload',
+    false,
+  )
   .option('--stdin', 'Read plan HTML summary from stdin (upload-html only)', false)
-  .option('--html-file <path>', 'Read the plan HTML preview from a local file (required for create and body/title/type/priority updates)')
-  .option('--html-stdin', 'Read the plan HTML preview from stdin (create/update; mutually exclusive with --html-file)', false)
+  .option(
+    '--html-file <path>',
+    'Read the plan HTML preview from a local file (required for create and body/title/type/priority updates)',
+  )
+  .option(
+    '--html-stdin',
+    'Read the plan HTML preview from stdin (create/update; mutually exclusive with --html-file)',
+    false,
+  )
   .option('--source-label <label>', 'Optional source label for uploaded plan HTML summary')
   .option('--template <name>', 'Plan content template (refactor-minimal, quick-minimal, create only)')
   .option('--status <status>', 'Plan status (BACKLOG, TODO, ASSIGNED, IN_PROGRESS, BLOCKED, DONE, CANCELLED)')
   .option('--type <type>', 'Plan type (FEATURE, BUG_FIX, ISSUE, REFACTOR, CHORE)')
   .option('--complexity <level>', 'Plan complexity (MINIMAL, STANDARD, FULL; required for create)')
-  .option('--complexity-reason <text>', 'Reason for changing complexity (update only; recorded as a MODIFICATION comment)')
+  .option(
+    '--complexity-reason <text>',
+    'Reason for changing complexity (update only; recorded as a MODIFICATION comment)',
+  )
   .option('--priority <priority>', 'Plan priority (LOW, MEDIUM, HIGH)')
   .option('--assigned-to <id>', 'Assigned agent config ID (list filter)')
   .option('--task <text>', 'Task summary for plan start/finish')
@@ -177,7 +195,10 @@ program
   .option('--commit-start <hash>', 'Commit range start hash (plan finish, manual only)')
   .option('--commit-end <hash>', 'Commit range end hash (plan finish, manual only)')
   .option('--pull-request-id <id>', 'Pull request ID (plan finish, manual only)')
-  .option('--runner-type <type>', 'Runner type snapshot: CLAUDE_CODE, CODEX, ANTIGRAVITY, AMP, OPENCODE (plan start/finish)')
+  .option(
+    '--runner-type <type>',
+    'Runner type snapshot: CLAUDE_CODE, CODEX, ANTIGRAVITY, AMP, OPENCODE (plan start/finish)',
+  )
   .option('--model <model>', 'Model ID snapshot (plan start/finish)')
   .option('--fast', 'Request fast mode for the selected model when supported', false)
   .option('--no-git', 'Disable git metrics auto-collection (plan finish)')
@@ -357,6 +378,11 @@ program
   .option('--plan-id <id>', 'Plan ID (optional)')
   .option('--title <title>', 'Report title')
   .option('--file <path>', 'Read report content from a local file (create/update)')
+  .option(
+    '--keep-temp',
+    'Keep the uploaded file under .agentteams/cli/temp/ instead of deleting it after upload',
+    false,
+  )
   .option('--status <status>', 'Report status (COMPLETED, FAILED, PARTIAL)')
   .option('--commit-hash <hash>', 'Git commit hash (manual override)')
   .option('--branch-name <name>', 'Git branch name (manual override)')
@@ -368,7 +394,10 @@ program
   .option('--commit-end <hash>', 'Commit range end hash (manual only)')
   .option('--pull-request-id <id>', 'Pull request ID (manual only)')
   .option('--quality-score <n>', 'Quality score 0-100')
-  .option('--runner-type <type>', 'Runner type snapshot: CLAUDE_CODE, CODEX, ANTIGRAVITY, AMP, OPENCODE (required for create)')
+  .option(
+    '--runner-type <type>',
+    'Runner type snapshot: CLAUDE_CODE, CODEX, ANTIGRAVITY, AMP, OPENCODE (required for create)',
+  )
   .option('--model <model>', 'Model ID snapshot (required for create)')
   .option('--no-git', 'Disable git metrics auto-collection')
   .option('--page <number>', 'Page number (list only)')
@@ -386,7 +415,6 @@ program
   .addHelpText('after', CONVENTION_HINT)
   .action(async (action, options) => {
     try {
-
       const normalizedFormat = normalizeFormat(options.format);
       const result = await executeCommand('report', action, {
         id: options.id,
@@ -436,11 +464,17 @@ program
 program
   .command('code-review')
   .description('Manage independent code reviews')
-  .argument('<action>', 'Action to perform (list, get, show, create, update, create-plan, submit-result, cancel, delete, dismiss, undismiss)')
+  .argument(
+    '<action>',
+    'Action to perform (list, get, show, create, update, create-plan, submit-result, cancel, delete, dismiss, undismiss)',
+  )
   .option('--id <id>', 'Code review ID')
   .option('--finding-id <id>', 'Finding ID for dismiss/undismiss')
   .option('--title <title>', 'Code review or generated plan title')
-  .option('--target-type <type>', 'Review target type (BRANCH_DIFF, GITHUB_PR, GITLAB_MR, LOCAL_DIFF, UPLOADED_DIFF, COMMIT_RANGE)')
+  .option(
+    '--target-type <type>',
+    'Review target type (BRANCH_DIFF, GITHUB_PR, GITLAB_MR, LOCAL_DIFF, UPLOADED_DIFF, COMMIT_RANGE)',
+  )
   .option('--target-ref <ref>', 'Target reference such as branch, PR URL, MR URL, or commit range')
   .option('--repository-id <id>', 'Repository ID')
   .option('--source-plan-id <id>', 'Source plan ID')
@@ -541,6 +575,11 @@ program
   .option('--title <title>', 'Post mortem title')
   .option('--content <content>', 'Post mortem markdown content (short text; use --file for long content)')
   .option('--file <path>', 'Read postmortem content from a local file (create/update)')
+  .option(
+    '--keep-temp',
+    'Keep the uploaded file under .agentteams/cli/temp/ instead of deleting it after upload',
+    false,
+  )
   .option('--action-items <csv>', 'Action items (comma-separated)')
   .option('--status <status>', 'Post mortem status (OPEN, IN_PROGRESS, RESOLVED)')
   .option('--page <number>', 'Page number (list only)')
@@ -596,7 +635,10 @@ program
 program
   .command('coaction')
   .description('Manage co-actions (session context dumps)')
-  .argument('<action>', 'Action to perform (list, get, create, update, delete, download, cleanup, takeaway-list, takeaway-create, takeaway-update, takeaway-delete, history, link-plan, unlink-plan, link-completion-report, unlink-completion-report, link-post-mortem, unlink-post-mortem)')
+  .argument(
+    '<action>',
+    'Action to perform (list, get, create, update, delete, download, cleanup, takeaway-list, takeaway-create, takeaway-update, takeaway-delete, history, link-plan, unlink-plan, link-completion-report, unlink-completion-report, link-post-mortem, unlink-post-mortem)',
+  )
   .option('--id <id>', 'Co-action ID')
   .option('--takeaway-id <id>', 'Co-action takeaway ID (for takeaway-update/takeaway-delete)')
   .option('--plan-id <id>', 'Plan ID (for link-plan/unlink-plan)')
@@ -605,6 +647,11 @@ program
   .option('--title <title>', 'Co-action title')
   .option('--content <content>', 'Co-action content (short text; use --file for long content)')
   .option('--file <path>', 'Read co-action content from a local file (create/update)')
+  .option(
+    '--keep-temp',
+    'Keep the uploaded file under .agentteams/cli/temp/ instead of deleting it after upload',
+    false,
+  )
   .option('--status <status>', 'Co-action status (OPEN, CLOSED)')
   .option('--visibility <visibility>', 'Co-action visibility (PRIVATE, PROJECT)')
   .option('--page <number>', 'Page number (list only)')
@@ -714,7 +761,7 @@ program
     '-f, --file <path>',
     'Target convention markdown file (repeatable; create requires a file under .agentteams/<category>/)',
     (value, previous: string[] = []) => previous.concat([value]),
-    [] as string[]
+    [] as string[],
   )
   .option('--apply', 'Apply changes to server (default: dry-run)', false)
   .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
@@ -745,7 +792,7 @@ program
   .description('Manage project documents')
   .argument(
     '<action>',
-    'Action to perform (create, update, download, list, delete, archive, unarchive, revisions, revision-get, revision-restore, comment-list, comment-create, comment-update, comment-delete)'
+    'Action to perform (create, update, download, list, delete, archive, unarchive, revisions, revision-get, revision-restore, comment-list, comment-create, comment-update, comment-delete)',
   )
   .option('--id <id>', 'Document ID')
   .option('--title <title>', 'Document title')
@@ -873,9 +920,14 @@ program
 
 program
   .command('search')
-  .description('Search across all entity types (plans, co-actions, reports, post-mortems, conventions, code reviews, documents)')
+  .description(
+    'Search across all entity types (plans, co-actions, reports, post-mortems, conventions, code reviews, documents)',
+  )
   .option('--query <text>', 'Search query (required)')
-  .option('--types <types>', 'Comma-separated entity types to filter (PLAN, CO_ACTION, COMPLETION_REPORT, POST_MORTEM, CONVENTION, CODE_REVIEW, DOCUMENT)')
+  .option(
+    '--types <types>',
+    'Comma-separated entity types to filter (PLAN, CO_ACTION, COMPLETION_REPORT, POST_MORTEM, CONVENTION, CODE_REVIEW, DOCUMENT)',
+  )
   .option('--limit <n>', 'Max results (1-100, default: 20)')
   .option('--max-tokens <n>', 'Token budget for response')
   .option('--api-url <url>', 'Override API URL (optional)')

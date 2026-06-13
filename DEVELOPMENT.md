@@ -33,6 +33,7 @@ export AGENTTEAMS_API_KEY="dev-test-key"  # Optional for testing
 ```
 
 Or create `cli/.env`:
+
 ```env
 AGENTTEAMS_API_URL=http://localhost:3001
 AGENTTEAMS_WEB_URL=http://localhost:3000
@@ -134,6 +135,7 @@ cli/
 ### Adding a New Command
 
 1. Create command file in `src/commands/`:
+
    ```typescript
    // src/commands/myCommand.ts
    export async function myCommand(config: Config) {
@@ -155,6 +157,7 @@ cli/
 ### Debugging API Calls
 
 Enable verbose logging:
+
 ```bash
 # Add console.log in src/commands/index.ts or use a debugger
 node --inspect dist/index.js status list
@@ -163,6 +166,7 @@ node --inspect dist/index.js status list
 ### Testing OAuth Flow
 
 OAuth `init` command requires:
+
 - Local API server running at `http://localhost:3001`
 - Available port for OAuth callback (default: 7777)
 
@@ -187,6 +191,7 @@ agentteams --version  # Should show current version from package.json
 ### "Cannot connect to server"
 
 Check if local API is running:
+
 ```bash
 curl http://localhost:3001/api/health
 # Expected: {"status":"ok"}
@@ -195,11 +200,13 @@ curl http://localhost:3001/api/health
 ### "Config not found"
 
 The CLI looks for config in this order:
+
 1. `.agentteams/config.json` (current dir or parent dirs)
 2. `~/.agentteams/config.json` (global)
 3. Environment variables
 
 For development, use environment variables:
+
 ```bash
 export AGENTTEAMS_API_URL=http://localhost:3001
 export AGENTTEAMS_API_KEY=test-key
@@ -208,6 +215,7 @@ export AGENTTEAMS_API_KEY=test-key
 ### TypeScript errors after changes
 
 Rebuild:
+
 ```bash
 npm run build
 ```
