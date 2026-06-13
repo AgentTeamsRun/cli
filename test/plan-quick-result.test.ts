@@ -30,4 +30,14 @@ describe('buildQuickPlanResult', () => {
     // next 힌트는 status 유무와 무관하게 항상 제공한다.
     expect(result.next).toBe('agentteams report create --plan-id plan-1');
   });
+
+  it('surfaces completion report information and sets reportCreated to true when completionReport is returned', () => {
+    const result = buildQuickPlanResult('plan-1', createResult, {
+      data: { id: 'plan-1', status: 'DONE', completionReport: { id: 'r-1', webUrl: 'http://report-url' } },
+    });
+    expect(result.reportCreated).toBe(true);
+    expect(result.reportId).toBe('r-1');
+    expect(result.reportWebUrl).toBe('http://report-url');
+    expect('next' in result).toBe(false);
+  });
 });
