@@ -16,7 +16,7 @@ export interface GitMetrics {
 type ExecFileSyncFn = (
   file: string,
   args: readonly string[],
-  options: { encoding: 'utf8'; stdio: ['ignore', 'pipe', 'ignore']; windowsHide?: boolean }
+  options: { encoding: 'utf8'; stdio: ['ignore', 'pipe', 'ignore']; windowsHide?: boolean },
 ) => string;
 
 export function collectGitMetrics(
@@ -26,9 +26,7 @@ export function collectGitMetrics(
   const commitHash = runGit(execFileSyncImpl, ['rev-parse', 'HEAD']);
   const branchRaw = runGit(execFileSyncImpl, ['branch', '--show-current']);
 
-  const diffRef = options?.startCommit
-    ? `${options.startCommit}..HEAD`
-    : 'HEAD~1';
+  const diffRef = options?.startCommit ? `${options.startCommit}..HEAD` : 'HEAD~1';
   const shortStat = runGit(execFileSyncImpl, ['diff', '--shortstat', diffRef]);
 
   const parsed = parseShortStat(shortStat);

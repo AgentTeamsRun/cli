@@ -43,10 +43,7 @@ async function fetchLatestVersion(): Promise<string | null> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
 
-    const response = await fetch(
-      `https://registry.npmjs.org/${PACKAGE_NAME}/latest`,
-      { signal: controller.signal }
-    );
+    const response = await fetch(`https://registry.npmjs.org/${PACKAGE_NAME}/latest`, { signal: controller.signal });
     clearTimeout(timeout);
 
     if (!response.ok) return null;
@@ -106,9 +103,17 @@ export function formatUpdateMessage(current: string, latest: string): string {
   return [
     '',
     chalk.yellow('╭─────────────────────────────────────────────────────────────╮'),
-    chalk.yellow('│') + chalk.bold.yellow(' ACTION REQUIRED: CLI update available') + chalk.yellow('                    │'),
-    chalk.yellow('│') + `  ${current} → ${chalk.green(latest)}` + ' '.repeat(Math.max(0, 48 - current.length - latest.length)) + chalk.yellow('│'),
-    chalk.yellow('│') + chalk.cyan(`  Run: npm install -g ${PACKAGE_NAME}`) + ' '.repeat(Math.max(0, 22 - PACKAGE_NAME.length + 25)) + chalk.yellow('│'),
+    chalk.yellow('│') +
+      chalk.bold.yellow(' ACTION REQUIRED: CLI update available') +
+      chalk.yellow('                    │'),
+    chalk.yellow('│') +
+      `  ${current} → ${chalk.green(latest)}` +
+      ' '.repeat(Math.max(0, 48 - current.length - latest.length)) +
+      chalk.yellow('│'),
+    chalk.yellow('│') +
+      chalk.cyan(`  Run: npm install -g ${PACKAGE_NAME}`) +
+      ' '.repeat(Math.max(0, 22 - PACKAGE_NAME.length + 25)) +
+      chalk.yellow('│'),
     chalk.yellow('│') + '  Update to get the latest conventions and features.' + ' '.repeat(8) + chalk.yellow('│'),
     chalk.yellow('╰─────────────────────────────────────────────────────────────╯'),
     '',

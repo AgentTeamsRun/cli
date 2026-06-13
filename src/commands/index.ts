@@ -34,9 +34,7 @@ function buildConfigOverrides(options: Record<string, unknown>): Partial<Config>
 function loadRequiredConfig(overrides?: Partial<Config>): Config {
   const config = loadConfig(overrides);
   if (!config) {
-    throw new Error(
-      "Configuration not found. Run 'agentteams init' first or set AGENTTEAMS_* environment variables."
-    );
+    throw new Error("Configuration not found. Run 'agentteams init' first or set AGENTTEAMS_* environment variables.");
   }
   return config;
 }
@@ -61,7 +59,7 @@ async function withApiErrorContext<T>(apiUrl: string, operation: () => Promise<T
 export async function executeCommand(
   resource: string,
   action: string,
-  options: Record<string, unknown>
+  options: Record<string, unknown>,
 ): Promise<unknown> {
   switch (resource) {
     case 'init':
@@ -71,20 +69,23 @@ export async function executeCommand(
     case 'sync':
       return executeSyncCommand(action, options);
     case 'plan':
-    case 'comment':
-      {
+    case 'comment': {
       const config = loadRequiredConfig();
       const { apiUrl, headers } = resolveApiContext(config);
 
       if (resource === 'plan') {
-        return withApiErrorContext(apiUrl, () => executePlanCommand(apiUrl, config.projectId, headers, action, {
-          ...options,
-          defaultCreatedBy: config.agentName,
-        }));
+        return withApiErrorContext(apiUrl, () =>
+          executePlanCommand(apiUrl, config.projectId, headers, action, {
+            ...options,
+            defaultCreatedBy: config.agentName,
+          }),
+        );
       }
 
       if (resource === 'comment') {
-        return withApiErrorContext(apiUrl, () => executeCommentCommand(apiUrl, config.projectId, headers, action, options));
+        return withApiErrorContext(apiUrl, () =>
+          executeCommentCommand(apiUrl, config.projectId, headers, action, options),
+        );
       }
 
       throw new Error(`Unknown resource: ${resource}`);
@@ -92,43 +93,53 @@ export async function executeCommand(
     case 'document': {
       const config = loadRequiredConfig(buildConfigOverrides(options));
       const { apiUrl, headers } = resolveApiContext(config);
-      return withApiErrorContext(apiUrl, () => executeDocumentCommand(apiUrl, config.projectId, headers, action, options));
+      return withApiErrorContext(apiUrl, () =>
+        executeDocumentCommand(apiUrl, config.projectId, headers, action, options),
+      );
     }
     case 'report': {
       const config = loadRequiredConfig(buildConfigOverrides(options));
       const { apiUrl, headers } = resolveApiContext(config);
 
-      return withApiErrorContext(apiUrl, () => executeReportCommand(apiUrl, headers, action, {
-        ...options,
-        projectId: config.projectId,
-        defaultCreatedBy: config.agentName,
-      }));
+      return withApiErrorContext(apiUrl, () =>
+        executeReportCommand(apiUrl, headers, action, {
+          ...options,
+          projectId: config.projectId,
+          defaultCreatedBy: config.agentName,
+        }),
+      );
     }
     case 'code-review': {
       const config = loadRequiredConfig(buildConfigOverrides(options));
       const { apiUrl, headers } = resolveApiContext(config);
-      return withApiErrorContext(apiUrl, () => executeCodeReviewCommand(apiUrl, config.projectId, headers, action, {
-        ...options,
-        projectId: config.projectId,
-      }));
+      return withApiErrorContext(apiUrl, () =>
+        executeCodeReviewCommand(apiUrl, config.projectId, headers, action, {
+          ...options,
+          projectId: config.projectId,
+        }),
+      );
     }
     case 'postmortem': {
       const config = loadRequiredConfig(buildConfigOverrides(options));
       const { apiUrl, headers } = resolveApiContext(config);
 
-      return withApiErrorContext(apiUrl, () => executePostMortemCommand(apiUrl, headers, action, {
-        ...options,
-        projectId: config.projectId,
-        defaultCreatedBy: config.agentName,
-      }));
+      return withApiErrorContext(apiUrl, () =>
+        executePostMortemCommand(apiUrl, headers, action, {
+          ...options,
+          projectId: config.projectId,
+          defaultCreatedBy: config.agentName,
+        }),
+      );
     }
     case 'coaction': {
       const config = loadRequiredConfig(buildConfigOverrides(options));
       const { apiUrl, headers } = resolveApiContext(config);
-      return withApiErrorContext(apiUrl, () => executeCoActionCommand(apiUrl, headers, action, {
-        ...options,
-        projectId: config.projectId,
-      }));
+      return withApiErrorContext(apiUrl, () =>
+        executeCoActionCommand(apiUrl, headers, action, {
+          ...options,
+          projectId: config.projectId,
+        }),
+      );
     }
     case 'dependency':
       return executeDependencyCommand(action, options);

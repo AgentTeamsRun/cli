@@ -5,34 +5,22 @@ export async function listPlans(
   apiUrl: string,
   projectId: string,
   headers: any,
-  params?: Record<string, string | number>
+  params?: Record<string, string | number>,
 ): Promise<any> {
   const baseUrl = `${apiUrl}/api/projects/${projectId}/plans`;
-  const requestConfig = params && Object.keys(params).length > 0
-    ? { headers, params }
-    : { headers };
+  const requestConfig = params && Object.keys(params).length > 0 ? { headers, params } : { headers };
 
   const response = await httpClient.get(baseUrl, requestConfig);
   return response.data;
 }
 
-export async function getPlan(
-  apiUrl: string,
-  projectId: string,
-  headers: any,
-  id: string
-): Promise<any> {
+export async function getPlan(apiUrl: string, projectId: string, headers: any, id: string): Promise<any> {
   const baseUrl = `${apiUrl}/api/projects/${projectId}/plans`;
   const response = await httpClient.get(`${baseUrl}/${id}`, { headers });
   return response.data;
 }
 
-export async function getPlanDependencies(
-  apiUrl: string,
-  projectId: string,
-  headers: any,
-  id: string
-): Promise<any> {
+export async function getPlanDependencies(apiUrl: string, projectId: string, headers: any, id: string): Promise<any> {
   const baseUrl = `${apiUrl}/api/projects/${projectId}/plans`;
   const response = await httpClient.get(`${baseUrl}/${id}/dependencies`, { headers });
   return response.data;
@@ -54,7 +42,7 @@ export async function createPlan(
     model?: string;
     fastMode?: boolean;
     kind?: string;
-  }
+  },
 ): Promise<any> {
   const baseUrl = `${apiUrl}/api/projects/${projectId}/plans`;
   const response = await httpClient.post(baseUrl, body, { headers });
@@ -66,7 +54,7 @@ export async function updatePlan(
   projectId: string,
   headers: any,
   id: string,
-  body: Record<string, unknown>
+  body: Record<string, unknown>,
 ): Promise<any> {
   const baseUrl = `${apiUrl}/api/projects/${projectId}/plans`;
   const response = await httpClient.put(`${baseUrl}/${id}`, body, { headers });
@@ -78,7 +66,7 @@ export async function assignPlan(
   projectId: string,
   headers: any,
   id: string,
-  assignedTo: string
+  assignedTo: string,
 ): Promise<any> {
   const baseUrl = `${apiUrl}/api/projects/${projectId}/plans`;
   const response = await httpClient.post(`${baseUrl}/${id}/assign`, { assignedTo }, { headers });
@@ -98,7 +86,7 @@ export async function startPlanLifecycle(
     runnerType?: string;
     model?: string;
     fastMode?: boolean;
-  }
+  },
 ): Promise<any> {
   const baseUrl = `${apiUrl}/api/projects/${projectId}/plans`;
   const response = await httpClient.post(`${baseUrl}/${id}/start`, body, { headers });
@@ -133,19 +121,14 @@ export async function finishPlanLifecycle(
       reviewRecommendation?: string;
       reviewReason?: string;
     };
-  }
+  },
 ): Promise<any> {
   const baseUrl = `${apiUrl}/api/projects/${projectId}/plans`;
   const response = await httpClient.post(`${baseUrl}/${id}/finish`, body, { headers });
   return response.data;
 }
 
-export async function deletePlan(
-  apiUrl: string,
-  projectId: string,
-  headers: any,
-  id: string
-): Promise<any> {
+export async function deletePlan(apiUrl: string, projectId: string, headers: any, id: string): Promise<any> {
   const baseUrl = `${apiUrl}/api/projects/${projectId}/plans`;
   const response = await httpClient.delete(`${baseUrl}/${id}`, {
     headers: withoutJsonContentType(headers),
@@ -153,12 +136,7 @@ export async function deletePlan(
   return response.data;
 }
 
-export async function getPlanStatus(
-  apiUrl: string,
-  projectId: string,
-  headers: any,
-  id: string
-): Promise<any> {
+export async function getPlanStatus(apiUrl: string, projectId: string, headers: any, id: string): Promise<any> {
   const baseUrl = `${apiUrl}/api/projects/${projectId}/plans`;
   const response = await httpClient.get(`${baseUrl}/${id}/status`, { headers });
   return response.data;
@@ -169,19 +147,14 @@ export async function patchPlanStatus(
   projectId: string,
   headers: any,
   id: string,
-  status: string
+  status: string,
 ): Promise<any> {
   const baseUrl = `${apiUrl}/api/projects/${projectId}/plans`;
   const response = await httpClient.patch(`${baseUrl}/${id}/status`, { status }, { headers });
   return response.data;
 }
 
-export async function listOriginIssues(
-  apiUrl: string,
-  projectId: string,
-  headers: any,
-  planId: string
-): Promise<any> {
+export async function listOriginIssues(apiUrl: string, projectId: string, headers: any, planId: string): Promise<any> {
   const baseUrl = `${apiUrl}/api/projects/${projectId}/plans`;
   const response = await httpClient.get(`${baseUrl}/${planId}/origin-issues`, { headers });
   return response.data;
@@ -198,7 +171,7 @@ export async function linkOriginIssue(
     externalUrl: string;
     externalTitle?: string;
     metadata?: Record<string, unknown>;
-  }
+  },
 ): Promise<any> {
   const baseUrl = `${apiUrl}/api/projects/${projectId}/plans`;
   const response = await httpClient.post(`${baseUrl}/${planId}/origin-issues`, body, { headers });
@@ -210,7 +183,7 @@ export async function unlinkOriginIssue(
   projectId: string,
   headers: any,
   planId: string,
-  issueId: string
+  issueId: string,
 ): Promise<any> {
   const baseUrl = `${apiUrl}/api/projects/${projectId}/plans`;
   const response = await httpClient.delete(`${baseUrl}/${planId}/origin-issues/${issueId}`, {
@@ -228,7 +201,7 @@ export async function uploadPlanHtml(
     html: string;
     curationType: 'AI_CURATED';
     sourceLabel?: string;
-  }
+  },
 ): Promise<any> {
   const baseUrl = `${apiUrl}/api/projects/${projectId}/plans`;
   const response = await httpClient.put(`${baseUrl}/${id}/visualization/html`, body, { headers });

@@ -43,7 +43,9 @@ export async function executeConventionCommand(action: string, options: any): Pr
       return conventionDelete({ cwd: options?.cwd, file: options.file, apply: options.apply });
     }
     default:
-      throw new Error('Unknown convention action: ' + action + '. Use list, show, download, status, create, update, or delete.');
+      throw new Error(
+        'Unknown convention action: ' + action + '. Use list, show, download, status, create, update, or delete.',
+      );
   }
 }
 

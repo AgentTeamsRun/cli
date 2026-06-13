@@ -62,9 +62,7 @@ export function toPositiveInteger(value: unknown): number | undefined {
 }
 
 export function interpretEscapes(content: string): string {
-  return content
-    .replace(/\\r\\n/g, '\r\n')
-    .replace(/\\n/g, '\n');
+  return content.replace(/\\r\\n/g, '\r\n').replace(/\\n/g, '\n');
 }
 
 export function stripFrontmatter(content: string): string {

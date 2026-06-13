@@ -6,10 +6,7 @@ const getBaseUrl = (apiUrl: string, projectId: string) => {
   return `${normalizedApiUrl}/api/projects/${projectId}/documents`;
 };
 
-const withParams = (
-  headers: Record<string, string>,
-  params?: Record<string, string | number>
-) => {
+const withParams = (headers: Record<string, string>, params?: Record<string, string | number>) => {
   return params && Object.keys(params).length > 0 ? { headers, params } : { headers };
 };
 
@@ -17,7 +14,7 @@ export async function createDocument(
   apiUrl: string,
   projectId: string,
   headers: Record<string, string>,
-  body: Record<string, unknown>
+  body: Record<string, unknown>,
 ) {
   const response = await httpClient.post(getBaseUrl(apiUrl, projectId), body, { headers });
   return response.data;
@@ -28,7 +25,7 @@ export async function updateDocument(
   projectId: string,
   headers: Record<string, string>,
   documentId: string,
-  body: Record<string, unknown>
+  body: Record<string, unknown>,
 ) {
   const response = await httpClient.put(`${getBaseUrl(apiUrl, projectId)}/${documentId}`, body, { headers });
   return response.data;
@@ -38,7 +35,7 @@ export async function getDocument(
   apiUrl: string,
   projectId: string,
   headers: Record<string, string>,
-  documentId: string
+  documentId: string,
 ) {
   const response = await httpClient.get(`${getBaseUrl(apiUrl, projectId)}/${documentId}`, { headers });
   return response.data;
@@ -48,7 +45,7 @@ export async function downloadDocumentBody(
   apiUrl: string,
   projectId: string,
   headers: Record<string, string>,
-  documentId: string
+  documentId: string,
 ) {
   const response = await httpClient.get(`${getBaseUrl(apiUrl, projectId)}/${documentId}/download`, { headers });
   return response.data as string;
@@ -58,7 +55,7 @@ export async function listDocuments(
   apiUrl: string,
   projectId: string,
   headers: Record<string, string>,
-  params?: Record<string, string | number>
+  params?: Record<string, string | number>,
 ) {
   const response = await httpClient.get(getBaseUrl(apiUrl, projectId), withParams(headers, params));
   return response.data;
@@ -68,10 +65,10 @@ export async function deleteDocument(
   apiUrl: string,
   projectId: string,
   headers: Record<string, string>,
-  documentId: string
+  documentId: string,
 ) {
   const response = await httpClient.delete(`${getBaseUrl(apiUrl, projectId)}/${documentId}`, {
-    headers: withoutJsonContentType(headers)
+    headers: withoutJsonContentType(headers),
   });
   return response.data;
 }
@@ -80,7 +77,7 @@ export async function archiveDocument(
   apiUrl: string,
   projectId: string,
   headers: Record<string, string>,
-  documentId: string
+  documentId: string,
 ) {
   const response = await httpClient.post(`${getBaseUrl(apiUrl, projectId)}/${documentId}/archive`, {}, { headers });
   return response.data;
@@ -90,7 +87,7 @@ export async function unarchiveDocument(
   apiUrl: string,
   projectId: string,
   headers: Record<string, string>,
-  documentId: string
+  documentId: string,
 ) {
   const response = await httpClient.post(`${getBaseUrl(apiUrl, projectId)}/${documentId}/unarchive`, {}, { headers });
   return response.data;
@@ -101,11 +98,11 @@ export async function listDocumentRevisions(
   projectId: string,
   headers: Record<string, string>,
   documentId: string,
-  params?: Record<string, string | number>
+  params?: Record<string, string | number>,
 ) {
   const response = await httpClient.get(
     `${getBaseUrl(apiUrl, projectId)}/${documentId}/revisions`,
-    withParams(headers, params)
+    withParams(headers, params),
   );
   return response.data;
 }
@@ -115,9 +112,11 @@ export async function getDocumentRevision(
   projectId: string,
   headers: Record<string, string>,
   documentId: string,
-  revisionId: string
+  revisionId: string,
 ) {
-  const response = await httpClient.get(`${getBaseUrl(apiUrl, projectId)}/${documentId}/revisions/${revisionId}`, { headers });
+  const response = await httpClient.get(`${getBaseUrl(apiUrl, projectId)}/${documentId}/revisions/${revisionId}`, {
+    headers,
+  });
   return response.data;
 }
 
@@ -126,12 +125,12 @@ export async function restoreDocumentRevision(
   projectId: string,
   headers: Record<string, string>,
   documentId: string,
-  revisionId: string
+  revisionId: string,
 ) {
   const response = await httpClient.post(
     `${getBaseUrl(apiUrl, projectId)}/${documentId}/revisions/${revisionId}/restore`,
     {},
-    { headers }
+    { headers },
   );
   return response.data;
 }
@@ -141,11 +140,11 @@ export async function listDocumentComments(
   projectId: string,
   headers: Record<string, string>,
   documentId: string,
-  params?: Record<string, string | number>
+  params?: Record<string, string | number>,
 ) {
   const response = await httpClient.get(
     `${getBaseUrl(apiUrl, projectId)}/${documentId}/comments`,
-    withParams(headers, params)
+    withParams(headers, params),
   );
   return response.data;
 }
@@ -155,7 +154,7 @@ export async function createDocumentComment(
   projectId: string,
   headers: Record<string, string>,
   documentId: string,
-  body: { content: string }
+  body: { content: string },
 ) {
   const response = await httpClient.post(`${getBaseUrl(apiUrl, projectId)}/${documentId}/comments`, body, { headers });
   return response.data;
@@ -167,13 +166,11 @@ export async function updateDocumentComment(
   headers: Record<string, string>,
   documentId: string,
   commentId: string,
-  body: { content: string }
+  body: { content: string },
 ) {
-  const response = await httpClient.put(
-    `${getBaseUrl(apiUrl, projectId)}/${documentId}/comments/${commentId}`,
-    body,
-    { headers }
-  );
+  const response = await httpClient.put(`${getBaseUrl(apiUrl, projectId)}/${documentId}/comments/${commentId}`, body, {
+    headers,
+  });
   return response.data;
 }
 
@@ -182,10 +179,10 @@ export async function deleteDocumentComment(
   projectId: string,
   headers: Record<string, string>,
   documentId: string,
-  commentId: string
+  commentId: string,
 ) {
   const response = await httpClient.delete(`${getBaseUrl(apiUrl, projectId)}/${documentId}/comments/${commentId}`, {
-    headers: withoutJsonContentType(headers)
+    headers: withoutJsonContentType(headers),
   });
   return response.data;
 }

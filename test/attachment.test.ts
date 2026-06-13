@@ -28,17 +28,14 @@ describe('attachment command', () => {
 
     const result = await executeAttachmentCommand(apiUrl, headers, 'list', { triggerId: 'trig-1' });
 
-    expect(axiosGetSpy).toHaveBeenCalledWith(
-      'http://localhost:3001/api/daemon-triggers/trig-1/attachments',
-      { headers }
-    );
+    expect(axiosGetSpy).toHaveBeenCalledWith('http://localhost:3001/api/daemon-triggers/trig-1/attachments', {
+      headers,
+    });
     expect(result).toEqual({ data: [], meta: { total: 0 } });
   });
 
   it('list rejects when --trigger-id is missing', async () => {
-    await expect(
-      executeAttachmentCommand(apiUrl, headers, 'list', {})
-    ).rejects.toThrow('--trigger-id is required');
+    await expect(executeAttachmentCommand(apiUrl, headers, 'list', {})).rejects.toThrow('--trigger-id is required');
   });
 
   it('create uploads the file to R2 and registers it against a code review', async () => {
@@ -61,13 +58,11 @@ describe('attachment command', () => {
       1,
       'http://localhost:3001/api/attachments/draft-upload-url',
       { fileName: 'evidence.txt', contentType: 'text/plain', size: 12 },
-      { headers }
+      { headers },
     );
-    expect(putSpy).toHaveBeenCalledWith(
-      'https://r2.example/put?sig=1',
-      expect.any(Buffer),
-      { headers: { 'Content-Type': 'text/plain' } }
-    );
+    expect(putSpy).toHaveBeenCalledWith('https://r2.example/put?sig=1', expect.any(Buffer), {
+      headers: { 'Content-Type': 'text/plain' },
+    });
     expect(postSpy).toHaveBeenNthCalledWith(
       2,
       'http://localhost:3001/api/attachments',
@@ -77,53 +72,49 @@ describe('attachment command', () => {
         key: 'drafts/member-1/abc-evidence.txt',
         originalName: 'evidence.txt',
       },
-      { headers }
+      { headers },
     );
     expect(result).toEqual({ data: { id: 'att-1', codeReviewId: 'rev-1' } });
   });
 
   it('create requires exactly one target id', async () => {
     const filePath = writeTempFile('evidence.txt', 'hello');
-    await expect(
-      executeAttachmentCommand(apiUrl, headers, 'create', { file: filePath })
-    ).rejects.toThrow(/Exactly one of/);
+    await expect(executeAttachmentCommand(apiUrl, headers, 'create', { file: filePath })).rejects.toThrow(
+      /Exactly one of/,
+    );
     await expect(
       executeAttachmentCommand(apiUrl, headers, 'create', {
         file: filePath,
         codeReviewId: 'rev-1',
         completionReportId: 'rpt-1',
-      })
+      }),
     ).rejects.toThrow(/only one/i);
   });
 
   it('create requires --file', async () => {
-    await expect(
-      executeAttachmentCommand(apiUrl, headers, 'create', { codeReviewId: 'rev-1' })
-    ).rejects.toThrow('--file is required');
+    await expect(executeAttachmentCommand(apiUrl, headers, 'create', { codeReviewId: 'rev-1' })).rejects.toThrow(
+      '--file is required',
+    );
   });
 
   it('create rejects unsupported file types', async () => {
     const filePath = writeTempFile('evidence.exe', 'binary');
     await expect(
-      executeAttachmentCommand(apiUrl, headers, 'create', { file: filePath, codeReviewId: 'rev-1' })
+      executeAttachmentCommand(apiUrl, headers, 'create', { file: filePath, codeReviewId: 'rev-1' }),
     ).rejects.toThrow(/Unsupported attachment type/);
   });
 
   it('upload is not supported (the CLI must not call removed API routes)', async () => {
     await expect(
-      executeAttachmentCommand(apiUrl, headers, 'upload', { triggerId: 'trig-1', file: '/tmp/x.txt' })
+      executeAttachmentCommand(apiUrl, headers, 'upload', { triggerId: 'trig-1', file: '/tmp/x.txt' }),
     ).rejects.toThrow(/not supported/i);
   });
 
   it('delete is not supported (the CLI must not call removed API routes)', async () => {
-    await expect(
-      executeAttachmentCommand(apiUrl, headers, 'delete', { id: 'a-1' })
-    ).rejects.toThrow(/not supported/i);
+    await expect(executeAttachmentCommand(apiUrl, headers, 'delete', { id: 'a-1' })).rejects.toThrow(/not supported/i);
   });
 
   it('rejects unknown actions', async () => {
-    await expect(
-      executeAttachmentCommand(apiUrl, headers, 'rename', {})
-    ).rejects.toThrow(/Unknown attachment action/);
+    await expect(executeAttachmentCommand(apiUrl, headers, 'rename', {})).rejects.toThrow(/Unknown attachment action/);
   });
 });

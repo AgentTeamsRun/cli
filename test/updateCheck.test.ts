@@ -34,9 +34,7 @@ describe('updateCheck', () => {
       return;
     }
 
-    const existsSync = jest.fn()
-      .mockReturnValueOnce(false)
-      .mockReturnValueOnce(true);
+    const existsSync = jest.fn().mockReturnValueOnce(false).mockReturnValueOnce(true);
     const readFileSync = jest.fn(() => '{invalid');
 
     (jest as any).unstable_mockModule('node:fs', () => ({
@@ -73,9 +71,7 @@ describe('updateCheck', () => {
 
     const mkdirSync = jest.fn();
     const writeFileSync = jest.fn();
-    const existsSync = jest.fn((target: string) =>
-      !target.replace(/\\/g, '/').endsWith('/.agentteams')
-    );
+    const existsSync = jest.fn((target: string) => !target.replace(/\\/g, '/').endsWith('/.agentteams'));
 
     (jest as any).unstable_mockModule('node:fs', () => ({
       __esModule: true,
@@ -106,7 +102,7 @@ describe('updateCheck', () => {
     expect(writeFileSync).toHaveBeenCalledWith(
       join('/mock-home', '.agentteams', 'update-check.json'),
       JSON.stringify({ lastCheck: 123, latestVersion: '0.2.0' }),
-      'utf-8'
+      'utf-8',
     );
   });
 });

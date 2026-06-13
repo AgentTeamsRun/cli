@@ -36,7 +36,9 @@ describe('plan finish review recommendation mapping', () => {
 
   it('maps a valid recommendation and reason into the finish body', async () => {
     await finish({ reviewRecommendation: 'REQUIRED', reviewReason: 'auth 미들웨어 변경' });
-    const body = axiosPostSpy.mock.calls[0][1] as { completionReport: { reviewRecommendation?: string; reviewReason?: string } };
+    const body = axiosPostSpy.mock.calls[0][1] as {
+      completionReport: { reviewRecommendation?: string; reviewReason?: string };
+    };
     expect(body.completionReport.reviewRecommendation).toBe('REQUIRED');
     expect(body.completionReport.reviewReason).toBe('auth 미들웨어 변경');
   });

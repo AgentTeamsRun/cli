@@ -4,16 +4,17 @@ import { createReport, deleteReport, getReport, listReports, updateReport } from
 import { collectGitMetrics } from '../utils/git.js';
 import { findProjectConfig } from '../utils/config.js';
 
-import { deleteIfTempFile, pruneStaleCacheFiles, toNonEmptyString, toNonNegativeInteger, toPositiveInteger, toSafeFileName } from '../utils/parsers.js';
+import {
+  deleteIfTempFile,
+  pruneStaleCacheFiles,
+  toNonEmptyString,
+  toNonNegativeInteger,
+  toPositiveInteger,
+  toSafeFileName,
+} from '../utils/parsers.js';
 import { printFileInfo, withSpinner } from '../utils/spinner.js';
 
-
-export async function executeReportCommand(
-  apiUrl: string,
-  headers: any,
-  action: string,
-  options: any
-): Promise<any> {
+export async function executeReportCommand(apiUrl: string, headers: any, action: string, options: any): Promise<any> {
   if (!options.projectId || typeof options.projectId !== 'string') {
     throw new Error('--project-id is required (or configure AGENTTEAMS_PROJECT_ID / .agentteams/config.json)');
   }
@@ -103,7 +104,9 @@ export async function executeReportCommand(
       if (qualityScore !== undefined) body.qualityScore = qualityScore;
 
       if (body.planId && durationSeconds === undefined) {
-        process.stderr.write('[info] durationSeconds is omitted; server will auto-calculate from linked plan timing when available.\n');
+        process.stderr.write(
+          '[info] durationSeconds is omitted; server will auto-calculate from linked plan timing when available.\n',
+        );
       }
 
       return withSpinner(
@@ -205,7 +208,9 @@ export async function executeReportCommand(
             report.webUrl ? `webUrl: ${report.webUrl}` : null,
             `downloadedAt: ${new Date().toISOString()}`,
             '---',
-          ].filter(Boolean).join('\n');
+          ]
+            .filter(Boolean)
+            .join('\n');
 
           const content = report.content ?? '';
           writeFileSync(filePath, `${frontmatter}\n\n${content}`, 'utf-8');

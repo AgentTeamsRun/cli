@@ -33,7 +33,7 @@ describe('Environment and Config Loading', () => {
         teamId: 'team_from_env',
         projectId: 'project_from_env',
         agentName: 'agent_from_env',
-      })
+      }),
     );
   });
 
@@ -53,7 +53,7 @@ describe('Environment and Config Loading', () => {
         teamId: 'team_1',
         projectId: 'project_1',
         agentName: 'agent-a',
-      })
+      }),
     );
   });
 });

@@ -19,9 +19,7 @@ const summaryDefaultActions: Record<string, Set<string>> = {
 
 const nextActionHints: Record<string, Record<string, string[]>> = {
   plan: {
-    create: [
-      'Next: agentteams plan start --id <id>',
-    ],
+    create: ['Next: agentteams plan start --id <id>'],
     finish: ['Next: agentteams report create --plan-id <id>'],
   },
 };
@@ -44,7 +42,10 @@ export function shouldPrintSummary(context: OutputPolicyContext): boolean {
   return actions.has(context.action);
 }
 
-export function createSummaryLines(result: unknown, context: Pick<OutputPolicyContext, 'resource' | 'action'>): string[] {
+export function createSummaryLines(
+  result: unknown,
+  context: Pick<OutputPolicyContext, 'resource' | 'action'>,
+): string[] {
   const lines: string[] = [];
 
   const message = extractString(result, 'message');
@@ -91,7 +92,7 @@ export function createSummaryLines(result: unknown, context: Pick<OutputPolicyCo
 function resolveNextActionHints(
   id: string | undefined,
   result: unknown,
-  context: Pick<OutputPolicyContext, 'resource' | 'action'>
+  context: Pick<OutputPolicyContext, 'resource' | 'action'>,
 ): string[] {
   if (!context.resource || !context.action) return [];
 

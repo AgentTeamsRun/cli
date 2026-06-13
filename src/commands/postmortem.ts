@@ -9,14 +9,20 @@ import {
 } from '../api/postmortem.js';
 import { findProjectConfig } from '../utils/config.js';
 
-import { deleteIfTempFile, pruneStaleCacheFiles, splitCsv, toPositiveInteger, toSafeFileName } from '../utils/parsers.js';
+import {
+  deleteIfTempFile,
+  pruneStaleCacheFiles,
+  splitCsv,
+  toPositiveInteger,
+  toSafeFileName,
+} from '../utils/parsers.js';
 import { printFileInfo, withSpinner } from '../utils/spinner.js';
 
 export async function executePostMortemCommand(
   apiUrl: string,
   headers: any,
   action: string,
-  options: any
+  options: any,
 ): Promise<any> {
   if (!options.projectId || typeof options.projectId !== 'string') {
     throw new Error('--project-id is required (or configure AGENTTEAMS_PROJECT_ID / .agentteams/config.json)');
@@ -155,7 +161,9 @@ export async function executePostMortemCommand(
             pm.webUrl ? `webUrl: ${pm.webUrl}` : null,
             `downloadedAt: ${new Date().toISOString()}`,
             '---',
-          ].filter(Boolean).join('\n');
+          ]
+            .filter(Boolean)
+            .join('\n');
 
           const content = pm.content ?? '';
           writeFileSync(filePath, `${frontmatter}\n\n${content}`, 'utf-8');

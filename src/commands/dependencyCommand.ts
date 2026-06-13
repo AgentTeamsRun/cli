@@ -1,9 +1,6 @@
 import { dependencyCreate, dependencyDelete, dependencyList } from './dependency.js';
 
-export async function executeDependencyCommand(
-  action: string,
-  options: any
-): Promise<any> {
+export async function executeDependencyCommand(action: string, options: any): Promise<any> {
   switch (action) {
     case 'list': {
       if (!options.planId) throw new Error('--plan-id is required for dependency list');

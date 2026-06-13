@@ -5,9 +5,7 @@ import { withoutJsonContentType } from '../utils/httpHeaders.js';
 function getConfigOrThrow() {
   const config = loadConfig();
   if (!config) {
-    throw new Error(
-      'Configuration not found. Run "agentteams init" first or set AGENTTEAMS_* environment variables.'
-    );
+    throw new Error('Configuration not found. Run "agentteams init" first or set AGENTTEAMS_* environment variables.');
   }
   return config;
 }
@@ -26,30 +24,27 @@ function getApiBaseUrl(apiUrl: string): string {
 export async function agentConfigList(): Promise<any> {
   const config = getConfigOrThrow();
   const apiBaseUrl = getApiBaseUrl(config.apiUrl);
-  const response = await httpClient.get(
-    `${apiBaseUrl}/api/projects/${config.projectId}/agent-configs`,
-    { headers: getHeaders(config.apiKey) }
-  );
+  const response = await httpClient.get(`${apiBaseUrl}/api/projects/${config.projectId}/agent-configs`, {
+    headers: getHeaders(config.apiKey),
+  });
   return response.data;
 }
 
 export async function agentConfigGet(id: string): Promise<any> {
   const config = getConfigOrThrow();
   const apiBaseUrl = getApiBaseUrl(config.apiUrl);
-  const response = await httpClient.get(
-    `${apiBaseUrl}/api/projects/${config.projectId}/agent-configs/${id}`,
-    { headers: getHeaders(config.apiKey) }
-  );
+  const response = await httpClient.get(`${apiBaseUrl}/api/projects/${config.projectId}/agent-configs/${id}`, {
+    headers: getHeaders(config.apiKey),
+  });
   return response.data;
 }
 
 export async function agentConfigDelete(id: string): Promise<any> {
   const config = getConfigOrThrow();
   const apiBaseUrl = getApiBaseUrl(config.apiUrl);
-  const response = await httpClient.delete(
-    `${apiBaseUrl}/api/projects/${config.projectId}/agent-configs/${id}`,
-    { headers: withoutJsonContentType(getHeaders(config.apiKey)) }
-  );
+  const response = await httpClient.delete(`${apiBaseUrl}/api/projects/${config.projectId}/agent-configs/${id}`, {
+    headers: withoutJsonContentType(getHeaders(config.apiKey)),
+  });
   if (response.status === 204) {
     return { message: `Agent config ${id} deleted successfully.` };
   }
