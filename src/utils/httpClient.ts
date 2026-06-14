@@ -1,6 +1,7 @@
 import { createRequire } from 'node:module';
 import axios from 'axios';
 import type { AxiosError, AxiosResponse, InternalAxiosRequestConfig } from 'axios';
+import { getCommandContext } from './commandContext.js';
 import { writeCache } from './updateCheck.js';
 
 const require = createRequire(import.meta.url);
@@ -33,6 +34,23 @@ const getRetryDelay = (error: AxiosError, attempt: number): number => {
 };
 
 axios.defaults.headers.common['X-CLI-Version'] = pkg.version;
+
+const setRequestHeader = (config: InternalAxiosRequestConfig, name: string, value: string): void => {
+  const headers = config.headers;
+  if (typeof headers.set === 'function') {
+    headers.set(name, value);
+    return;
+  }
+
+  (headers as unknown as Record<string, string>)[name] = value;
+};
+
+axios.interceptors.request.use((config: InternalAxiosRequestConfig) => {
+  setRequestHeader(config, 'X-AgentTeams-Client', 'cli');
+  setRequestHeader(config, 'X-AgentTeams-Command', getCommandContext());
+  setRequestHeader(config, 'X-AgentTeams-Version', pkg.version);
+  return config;
+});
 
 axios.interceptors.response.use(
   (response: AxiosResponse) => {

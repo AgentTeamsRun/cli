@@ -10,6 +10,9 @@ type StoredResponseHandler = {
   onFulfilled: (response: AxiosResponse) => AxiosResponse;
   onRejected: (error: AxiosError) => Promise<unknown>;
 };
+type StoredRequestHandler = {
+  onFulfilled: (config: InternalAxiosRequestConfig) => InternalAxiosRequestConfig;
+};
 
 describe('httpClient', () => {
   beforeEach(() => {
@@ -26,10 +29,19 @@ describe('httpClient', () => {
     }
 
     const responseHandlers: StoredResponseHandler[] = [];
+    const requestHandlers: StoredRequestHandler[] = [];
 
     const axiosMock = {
       defaults: { headers: { common: {} as Record<string, string> } },
       interceptors: {
+        request: {
+          use: jest.fn((onFulfilled: unknown) => {
+            requestHandlers.push({
+              onFulfilled: onFulfilled as StoredRequestHandler['onFulfilled'],
+            });
+            return 0;
+          }),
+        },
         response: {
           use: jest.fn((onFulfilled: unknown, onRejected: unknown) => {
             responseHandlers.push({
@@ -64,9 +76,11 @@ describe('httpClient', () => {
     return {
       httpClient: imported.default,
       axiosMock,
+      requestHandlers,
       responseHandlers,
       writeCache,
       setTimeoutSpy,
+      commandContext: await import('../src/utils/commandContext.js'),
     };
   }
 
@@ -100,6 +114,26 @@ describe('httpClient', () => {
 
     expect(loaded.httpClient).toBe(loaded.axiosMock);
     expect(loaded.axiosMock.defaults.headers.common['X-CLI-Version']).toBe(pkg.version);
+  });
+
+  it('injects low-cardinality AgentTeams client headers with the current command context', async () => {
+    const loaded = await loadModule();
+    if (!loaded) {
+      return;
+    }
+
+    const config = { headers: {} } as InternalAxiosRequestConfig;
+    let intercepted: InternalAxiosRequestConfig | undefined;
+
+    await loaded.commandContext.withCommandContext('plan:start', async () => {
+      intercepted = loaded.requestHandlers[0]?.onFulfilled(config);
+    });
+
+    expect(intercepted?.headers).toMatchObject({
+      'X-AgentTeams-Client': 'cli',
+      'X-AgentTeams-Command': 'plan:start',
+      'X-AgentTeams-Version': pkg.version,
+    });
   });
 
   it('writes update cache from X-CLI-Latest-Version response headers', async () => {

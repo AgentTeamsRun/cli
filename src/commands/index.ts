@@ -15,6 +15,7 @@ import { executeSearchCommand } from './search.js';
 import { executeLinearCommand } from './linear.js';
 import { executeAttachmentCommand } from './attachment.js';
 import { loadConfig } from '../utils/config.js';
+import { normalizeCommandContext, withCommandContext } from '../utils/commandContext.js';
 import { attachErrorContext } from '../utils/errors.js';
 import type { Config } from '../types/index.js';
 
@@ -57,6 +58,16 @@ async function withApiErrorContext<T>(apiUrl: string, operation: () => Promise<T
 }
 
 export async function executeCommand(
+  resource: string,
+  action: string,
+  options: Record<string, unknown>,
+): Promise<unknown> {
+  return withCommandContext(normalizeCommandContext(resource, action), () =>
+    executeCommandWithContext(resource, action, options),
+  );
+}
+
+async function executeCommandWithContext(
   resource: string,
   action: string,
   options: Record<string, unknown>,
