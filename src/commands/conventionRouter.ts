@@ -7,8 +7,13 @@ import {
   conventionStatus,
   conventionUpdate,
 } from './convention.js';
+import { withCommandContext } from '../utils/commandContext.js';
 
 export async function executeConventionCommand(action: string, options: any): Promise<any> {
+  return withCommandContext(`convention:${action}`, () => executeConventionCommandWithContext(action, options));
+}
+
+async function executeConventionCommandWithContext(action: string, options: any): Promise<any> {
   switch (action) {
     case 'list':
       return conventionList();
@@ -50,6 +55,10 @@ export async function executeConventionCommand(action: string, options: any): Pr
 }
 
 export async function executeSyncCommand(action: string, options: any): Promise<any> {
+  return withCommandContext('sync', () => executeSyncCommandWithContext(action, options));
+}
+
+async function executeSyncCommandWithContext(action: string, options: any): Promise<any> {
   switch (action) {
     case 'download':
       return conventionDownload({ cwd: options?.cwd });

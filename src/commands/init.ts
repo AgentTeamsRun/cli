@@ -7,6 +7,7 @@ import open from 'open';
 import { startLocalAuthServer } from '../utils/authServer.js';
 import { saveConfig } from '../utils/config.js';
 import { createSpinner, withSpinner } from '../utils/spinner.js';
+import { withCommandContext } from '../utils/commandContext.js';
 import { conventionDownload } from './convention.js';
 import type { Config } from '../types/index.js';
 
@@ -302,6 +303,10 @@ alwaysApply: true
 }
 
 export async function executeInitCommand(options?: InitOptions): Promise<InitResult> {
+  return withCommandContext('init', () => executeInitCommandWithContext(options));
+}
+
+async function executeInitCommandWithContext(options?: InitOptions): Promise<InitResult> {
   const cwd = resolve(options?.cwd ?? process.cwd());
   const configPath = join(cwd, CONFIG_DIR, CONFIG_FILE);
   const conventionPath = join(cwd, CONFIG_DIR, CONVENTION_FILE);
