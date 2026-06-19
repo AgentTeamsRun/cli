@@ -792,12 +792,16 @@ program
   .description('Manage project documents')
   .argument(
     '<action>',
-    'Action to perform (create, update, download, list, delete, archive, unarchive, revisions, revision-get, revision-restore, comment-list, comment-create, comment-update, comment-delete)',
+    'Action to perform (create, update, download, list, tags, delete, archive, unarchive, revisions, revision-get, revision-restore, comment-list, comment-create, comment-update, comment-delete)',
   )
   .option('--id <id>', 'Document ID')
   .option('--title <title>', 'Document title')
   .option('--file <path>', 'Read markdown body from a local file')
-  .option('--tags <tags>', 'Comma-separated free-form tags (max 20)')
+  .option('--tags <tags>', 'Comma-separated tags. List: filter. Create/update: sent as suggestions (not confirmed).')
+  .option(
+    '--suggested-tags <tags>',
+    'Comma-separated AI-suggested tags (auto-promoted when they match existing tags, else await user review)',
+  )
   .option('--visibility <visibility>', 'Document visibility (PROJECT or PRIVATE)')
   .option('--archived <state>', 'Archive filter for list (ACTIVE, ARCHIVED, ALL)')
   .option('--revision-id <id>', 'Document revision ID')

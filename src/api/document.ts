@@ -61,6 +61,16 @@ export async function listDocuments(
   return response.data;
 }
 
+export async function listDocumentTags(
+  apiUrl: string,
+  projectId: string,
+  headers: Record<string, string>,
+  params?: Record<string, string | number>,
+) {
+  const response = await httpClient.get(`${getBaseUrl(apiUrl, projectId)}/tags`, withParams(headers, params));
+  return response.data;
+}
+
 export async function deleteDocument(
   apiUrl: string,
   projectId: string,

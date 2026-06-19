@@ -12,6 +12,7 @@ import {
   getDocumentRevision,
   listDocumentComments,
   listDocumentRevisions,
+  listDocumentTags,
   listDocuments,
   restoreDocumentRevision,
   unarchiveDocument,
@@ -24,6 +25,7 @@ type DocumentCommandOptions = {
   title?: string;
   file?: string;
   tags?: string;
+  suggestedTags?: string;
   query?: string;
   visibility?: string;
   archived?: string;
@@ -185,10 +187,13 @@ export async function executeDocumentCommand(
     case 'create': {
       if (!options.file) throw new Error('--file is required for document create');
       const body = readMarkdownFile(options.file);
+      // 에이전트/러너는 확정 태그를 직접 설정하지 않는다. --tags·--suggested-tags 모두 추천(suggestedTags)으로 보낸다.
+      // (기존 프로젝트 태그와 일치하는 추천은 서버에서 자동 승격되고, 신규는 사용자 큐레이션 대상이 된다.)
+      const createSuggestedTags = normalizeTags([options.suggestedTags, options.tags].filter(Boolean).join(','));
       const response = await createDocument(apiUrl, projectId, headers, {
         title: options.title ?? titleFromFile(options.file),
         body,
-        tags: normalizeTags(options.tags),
+        ...(createSuggestedTags.length > 0 ? { suggestedTags: createSuggestedTags } : {}),
         ...(options.visibility ? { visibility: normalizeVisibility(options.visibility) } : {}),
       });
       return withMessage(response as Record<string, unknown>, 'Document created');
@@ -199,10 +204,15 @@ export async function executeDocumentCommand(
       const payload: Record<string, unknown> = {};
       if (options.title) payload.title = options.title;
       if (options.file) payload.body = readMarkdownFile(options.file);
-      if (options.tags !== undefined) payload.tags = normalizeTags(options.tags);
+      // create와 동일: --tags/--suggested-tags는 확정 태그가 아니라 추천으로 보낸다(에이전트는 확정 태그 직접 설정 불가).
+      if (options.tags !== undefined || options.suggestedTags !== undefined) {
+        payload.suggestedTags = normalizeTags([options.suggestedTags, options.tags].filter(Boolean).join(','));
+      }
       if (options.visibility !== undefined) payload.visibility = normalizeVisibility(options.visibility);
       if (Object.keys(payload).length === 0) {
-        throw new Error('At least one of --title, --file, --tags, or --visibility is required for document update');
+        throw new Error(
+          'At least one of --title, --file, --tags, --suggested-tags, or --visibility is required for document update',
+        );
       }
 
       const response = await updateDocument(apiUrl, projectId, headers, options.id, payload);
@@ -239,6 +249,16 @@ export async function executeDocumentCommand(
       const response = await listDocuments(apiUrl, projectId, headers, params);
       const documents = (response as { data: DocumentRecord[] }).data;
       return documents.length === 0 ? withMessage(response as Record<string, unknown>, 'No documents found') : response;
+    }
+
+    case 'tags': {
+      // 프로젝트의 기존 확정 태그 + 사용 수 집계. 문서 생성 시 reuse-first(기존 태그 재사용)에 활용.
+      const params: Record<string, string | number> = {};
+      if (options.visibility) params.visibility = normalizeVisibility(options.visibility) ?? '';
+      if (options.archived) params.archived = normalizeArchived(options.archived) ?? '';
+      const response = await listDocumentTags(apiUrl, projectId, headers, params);
+      const tags = (response as { data: unknown[] }).data;
+      return tags.length === 0 ? withMessage(response as Record<string, unknown>, 'No tags found') : response;
     }
 
     case 'delete': {

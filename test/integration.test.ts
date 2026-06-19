@@ -2295,12 +2295,13 @@ describe('CLI Integration Tests', () => {
           pageSize: 10,
         });
 
+        // CLI는 확정 태그를 직접 설정하지 않는다 — --tags는 추천(suggestedTags)으로 전달된다.
         expect(axiosPostSpy).toHaveBeenCalledWith(
           `${API_URL}/api/projects/${PROJECT_ID}/documents`,
           {
             title: 'doc',
             body: '# Document body\n',
-            tags: ['a'],
+            suggestedTags: ['a'],
             visibility: 'PRIVATE',
           },
           { headers: authHeaders() },
