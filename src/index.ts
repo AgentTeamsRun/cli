@@ -170,7 +170,10 @@ program
   )
   .option('--source-label <label>', 'Optional source label for uploaded plan HTML summary')
   .option('--template <name>', 'Plan content template (refactor-minimal, quick-minimal, create only)')
-  .option('--status <status>', 'Plan status (BACKLOG, TODO, ASSIGNED, IN_PROGRESS, BLOCKED, DONE, CANCELLED)')
+  .option(
+    '--status <status>',
+    'Plan status for list/update/set-status; ignored by create because new plans start as BACKLOG',
+  )
   .option('--type <type>', 'Plan type (FEATURE, BUG_FIX, ISSUE, REFACTOR, CHORE)')
   .option('--complexity <level>', 'Plan complexity (MINIMAL, STANDARD, FULL; required for create)')
   .option(

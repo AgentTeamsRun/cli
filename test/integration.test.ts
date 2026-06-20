@@ -575,6 +575,35 @@ describe('CLI Integration Tests', () => {
       );
     });
 
+    it('plan create: should always send BACKLOG status even when --status is provided', async () => {
+      axiosPostSpy.mockResolvedValue({ data: { data: { id: 't1' } } } as any);
+      axiosPutSpy.mockResolvedValue({ data: { data: { id: 't1' } } } as any);
+      const stderrSpy = jest.spyOn(process.stderr, 'write').mockReturnValue(true);
+
+      await executeCommand('plan', 'create', {
+        title: 'Plan 1',
+        content: 'content',
+        status: 'TODO',
+        complexity: 'STANDARD',
+        runnerType: 'CLAUDE_CODE',
+        model: 'claude-opus-4-6',
+        htmlFile: sharedHtmlPath,
+      });
+
+      expect(axiosPostSpy).toHaveBeenCalledWith(
+        `${API_URL}/api/projects/${PROJECT_ID}/plans`,
+        expect.objectContaining({
+          title: 'Plan 1',
+          content: 'content',
+          status: 'BACKLOG',
+        }),
+        { headers: authHeaders() },
+      );
+      expect(stderrSpy).toHaveBeenCalledWith(
+        '[warn] plan create: --status TODO is ignored. Plans are always created as BACKLOG.\n',
+      );
+    });
+
     it('plan create: should interpret \\\\n sequences when interpretEscapes is enabled', async () => {
       axiosPostSpy.mockResolvedValue({ data: { data: { id: 't1' } } } as any);
       axiosPutSpy.mockResolvedValue({ data: { data: { id: 't1' } } } as any);
@@ -2307,7 +2336,9 @@ describe('CLI Integration Tests', () => {
       expect(cliIndex).not.toContain('--allow-missing-html-preview');
       expect(cliIndex).not.toContain('--author-id <id>');
       expect(cliIndex).not.toContain('--depends-on <id>');
-      expect(cliIndex).toContain('BACKLOG, TODO, ASSIGNED, IN_PROGRESS, BLOCKED, DONE, CANCELLED');
+      expect(cliIndex).toContain(
+        'Plan status for list/update/set-status; ignored by create because new plans start as BACKLOG',
+      );
     });
 
     it('should throw for unknown resource command', async () => {
