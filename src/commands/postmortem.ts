@@ -8,11 +8,13 @@ import {
   updatePostMortem,
 } from '../api/postmortem.js';
 import { findProjectConfig } from '../utils/config.js';
+import { getGitRemoteOriginUrl } from '../utils/git.js';
 
 import {
   deleteIfTempFile,
   pruneStaleCacheFiles,
   splitCsv,
+  toNonEmptyString,
   toPositiveInteger,
   toSafeFileName,
 } from '../utils/parsers.js';
@@ -66,10 +68,12 @@ export async function executePostMortemCommand(
       }
       if (!options.content) throw new Error('--content or --file is required for postmortem create');
       if (options.actionItems === undefined) throw new Error('--action-items is required for postmortem create');
+      const repositoryRemoteUrl =
+        toNonEmptyString(options.repositoryRemoteUrl) ?? (options.git === false ? undefined : getGitRemoteOriginUrl());
 
       const body: Record<string, unknown> = {
         planId: options.planId,
-        repositoryId: options.repositoryId ?? options.defaultRepositoryId,
+        ...(repositoryRemoteUrl ? { repositoryRemoteUrl } : {}),
         title: options.title,
         content: options.content,
         actionItems: splitCsv(options.actionItems),

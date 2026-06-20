@@ -5,6 +5,8 @@ import type { Config } from '../types/index.js';
 
 const CONFIG_DIR = '.agentteams';
 const CONFIG_FILE = 'config.json';
+export const DEFAULT_API_URL = 'https://api.agentteams.run';
+export type PersistedConfig = Pick<Config, 'teamId' | 'projectId' | 'apiKey'> & Partial<Pick<Config, 'apiUrl'>>;
 
 function readConfigFile(filePath: string): Partial<Config> | null {
   try {
@@ -25,7 +27,6 @@ function readConfigFile(filePath: string): Partial<Config> | null {
  *   AGENTTEAMS_API_URL    → apiUrl
  *   AGENTTEAMS_TEAM_ID    → teamId
  *   AGENTTEAMS_PROJECT_ID → projectId
- *   AGENTTEAMS_AGENT_NAME → agentName
  */
 function loadEnvConfig(): Partial<Config> {
   const env: Partial<Config> = {};
@@ -34,7 +35,6 @@ function loadEnvConfig(): Partial<Config> {
   if (process.env.AGENTTEAMS_API_URL) env.apiUrl = process.env.AGENTTEAMS_API_URL;
   if (process.env.AGENTTEAMS_TEAM_ID) env.teamId = process.env.AGENTTEAMS_TEAM_ID;
   if (process.env.AGENTTEAMS_PROJECT_ID) env.projectId = process.env.AGENTTEAMS_PROJECT_ID;
-  if (process.env.AGENTTEAMS_AGENT_NAME) env.agentName = process.env.AGENTTEAMS_AGENT_NAME;
 
   return env;
 }
@@ -83,13 +83,14 @@ export function loadConfig(options?: Partial<Config>): Config | null {
   const cliOptions = options ?? {};
 
   const merged = {
+    apiUrl: DEFAULT_API_URL,
     ...globalConfig,
     ...projectConfig,
     ...envConfig,
     ...cliOptions,
   };
 
-  const requiredFields: (keyof Config)[] = ['teamId', 'projectId', 'agentName', 'apiKey', 'apiUrl'];
+  const requiredFields: (keyof Config)[] = ['teamId', 'projectId', 'apiKey'];
 
   const hasAllFields = requiredFields.every((field) => typeof merged[field] === 'string' && merged[field].length > 0);
 
@@ -106,7 +107,7 @@ export function loadConfig(options?: Partial<Config>): Config | null {
  * @param config - Configuration object to persist
  * @throws Error if write fails
  */
-export function saveConfig(configPath: string, config: Config): void {
+export function saveConfig(configPath: string, config: PersistedConfig): void {
   const dir = dirname(configPath);
 
   if (!existsSync(dir)) {

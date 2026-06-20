@@ -36,7 +36,7 @@ export async function createPlan(
     type?: string;
     complexity: string;
     priority: string;
-    repositoryId?: string;
+    repositoryRemoteUrl?: string;
     status: 'BACKLOG';
     runnerType?: string;
     model?: string;
@@ -104,7 +104,7 @@ export async function finishPlanLifecycle(
     model?: string;
     fastMode?: boolean;
     completionReport?: {
-      repositoryId?: string;
+      repositoryRemoteUrl?: string;
       title: string;
       content: string;
       commitHash?: string;

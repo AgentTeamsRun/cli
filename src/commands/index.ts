@@ -19,7 +19,7 @@ import { normalizeCommandContext, withCommandContext } from '../utils/commandCon
 import { attachErrorContext } from '../utils/errors.js';
 import type { Config } from '../types/index.js';
 
-const CONFIG_OVERRIDE_KEYS = ['apiKey', 'apiUrl', 'teamId', 'projectId', 'agentName'] as const;
+const CONFIG_OVERRIDE_KEYS = ['apiKey', 'apiUrl', 'teamId', 'projectId'] as const;
 
 function buildConfigOverrides(options: Record<string, unknown>): Partial<Config> {
   const overrides: Record<string, string> = {};
@@ -86,10 +86,7 @@ async function executeCommandWithContext(
 
       if (resource === 'plan') {
         return withApiErrorContext(apiUrl, () =>
-          executePlanCommand(apiUrl, config.projectId, headers, action, {
-            ...options,
-            defaultCreatedBy: config.agentName,
-          }),
+          executePlanCommand(apiUrl, config.projectId, headers, action, options),
         );
       }
 
@@ -116,7 +113,6 @@ async function executeCommandWithContext(
         executeReportCommand(apiUrl, headers, action, {
           ...options,
           projectId: config.projectId,
-          defaultCreatedBy: config.agentName,
         }),
       );
     }
@@ -138,7 +134,6 @@ async function executeCommandWithContext(
         executePostMortemCommand(apiUrl, headers, action, {
           ...options,
           projectId: config.projectId,
-          defaultCreatedBy: config.agentName,
         }),
       );
     }

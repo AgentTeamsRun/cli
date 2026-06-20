@@ -49,7 +49,7 @@ description:
 
 1. 로컬 OAuth 콜백 서버를 실행합니다.
 2. 브라우저에서 authorize 페이지를 엽니다(SSH 환경에서는 URL을 출력).
-3. `apiUrl`, `apiKey`, `teamId`, `projectId`, `agentName`을 수신하고 로컬에 저장합니다.
+3. `apiKey`, `teamId`, `projectId`를 수신하고 로컬에 저장합니다. 기본값과 다른 `apiUrl`이면 함께 저장합니다.
 4. 컨벤션 템플릿을 `.agentteams/convention.md`로 저장합니다.
 5. 컨벤션/플랫폼 가이드를 `.agentteams/*`로 다운로드합니다.
 
@@ -87,7 +87,6 @@ sequenceDiagram
 - `AGENTTEAMS_API_URL`
 - `AGENTTEAMS_TEAM_ID`
 - `AGENTTEAMS_PROJECT_ID`
-- `AGENTTEAMS_AGENT_NAME`
 
 ### 기본 요청 헤더
 
@@ -393,7 +392,6 @@ export AGENTTEAMS_API_URL="https://..."
 export AGENTTEAMS_API_KEY="key_..."
 export AGENTTEAMS_TEAM_ID="..."
 export AGENTTEAMS_PROJECT_ID="..."
-export AGENTTEAMS_AGENT_NAME="..."
 
 agentteams plan list --page 1 --page-size 20
 ```
