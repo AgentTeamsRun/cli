@@ -13,6 +13,11 @@ describe('buildQuickPlanResult', () => {
     expect(result.planId).toBe('plan-1');
   });
 
+  it('surfaces the final plan status from lifecycle envelope responses', () => {
+    const result = buildQuickPlanResult('plan-1', createResult, { data: { plan: { id: 'plan-1', status: 'DONE' } } });
+    expect(result.status).toBe('DONE');
+  });
+
   it('points the next step to report create (not plan finish)', () => {
     const result = buildQuickPlanResult('plan-1', createResult, finishResult);
     expect(result.next).toBe('agentteams report create --plan-id plan-1');
