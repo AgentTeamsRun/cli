@@ -12,6 +12,7 @@ import {
   undismissCodeReviewFinding,
   updateCodeReview,
 } from '../api/codeReview.js';
+import { getGitRemoteOriginUrl } from '../utils/git.js';
 import { toNonEmptyString, toPositiveInteger } from '../utils/parsers.js';
 import { withSpinner } from '../utils/spinner.js';
 
@@ -113,12 +114,14 @@ export async function executeCodeReviewCommand(
       const diffSummary = toNonEmptyString(options.diffSummary) ?? readOptionalFile(options.diffFile);
       const testSummary = toNonEmptyString(options.testSummary) ?? readOptionalFile(options.testFile);
       const findings = parseFindingsFile(options.findingsFile);
+      const repositoryRemoteUrl =
+        toNonEmptyString(options.repositoryRemoteUrl) ?? (options.git === false ? undefined : getGitRemoteOriginUrl());
 
       const body: Record<string, unknown> = {
         title,
         targetType,
+        ...(repositoryRemoteUrl ? { repositoryRemoteUrl } : {}),
       };
-      if (options.repositoryId) body.repositoryId = options.repositoryId;
       if (options.targetRef) body.targetRef = options.targetRef;
       if (options.sourcePlanId) body.sourcePlanId = options.sourcePlanId;
       if (options.sourceCompletionReportId) body.sourceCompletionReportId = options.sourceCompletionReportId;

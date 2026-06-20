@@ -16,13 +16,10 @@ export interface Config {
   teamId: string;
   /** Project ID from AgentTeams */
   projectId: string;
-  /** Agent name (e.g., "claude-main", "opencode-agent") */
-  agentName: string;
   /** API Key for authentication (stored securely) */
   apiKey: string;
   /** API URL (e.g., "http://localhost:3001") */
   apiUrl: string;
-  repositoryId?: string;
 }
 
 // ============================================================

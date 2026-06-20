@@ -24,7 +24,7 @@ The `init` command:
 
 - Opens a browser for OAuth authentication
 - Creates `.agentteams/config.json`
-- Optionally selects a default project repository (saved as `repositoryId` in config)
+- Stores `teamId`, `projectId`, `apiKey`, and a non-default `apiUrl` when needed
 - Saves the convention template to `.agentteams/convention.md`
 - Syncs convention files into `.agentteams/<category>/*.md`
 
@@ -35,6 +35,7 @@ In SSH/remote environments, open the URL printed in the terminal manually.
 The CLI talks to two services:
 
 - Web app (OAuth flow): defaults to `https://agentteams.run`
+- API: defaults to `https://api.agentteams.run`; `init` only writes `apiUrl` when the authorized API URL is different
 
 ### 2. Protect Sensitive Data
 
@@ -163,7 +164,8 @@ agentteams plan create \
   --template "refactor-minimal"
 
   # repository linkage
-  # - `plan create` uses `.agentteams/config.json` -> `repositoryId` when present.
+  # - `plan create` sends the current git origin URL by default.
+  # - Use `--repository-remote-url <url>` to override it.
 
 agentteams plan quick --title "Quick task" --content "Implemented X and verified with tests" --type CHORE
 agentteams plan update --id <plan-id> --status TODO
@@ -247,7 +249,8 @@ agentteams report create \
   --status COMPLETED
 
 # repository linkage
-# - `report create` uses `.agentteams/config.json` -> `repositoryId` when present.
+# - `report create` sends the current git origin URL by default.
+# - Use `--repository-remote-url <url>` to override it.
 
 # with metrics (auto + manual)
 agentteams report create \
@@ -289,7 +292,8 @@ agentteams postmortem create \
   --status RESOLVED
 
 # repository linkage
-# - `postmortem create` uses `.agentteams/config.json` -> `repositoryId` when present.
+# - `postmortem create` sends the current git origin URL by default.
+# - Use `--repository-remote-url <url>` to override it.
 ```
 
 Status values: `OPEN`, `IN_PROGRESS`, `RESOLVED`
@@ -338,12 +342,13 @@ Configuration is merged in this priority order (highest first):
 {
   "teamId": "team_xxx",
   "projectId": "proj_xxx",
-  "repositoryId": "repo_xxx",
-  "agentName": "my-agent",
-  "apiKey": "key_xxx",
-  "apiUrl": "https://api.agentteams.run"
+  "apiKey": "key_xxx"
 }
 ```
+
+`apiUrl` is omitted for the default API. When `init` is completed against a non-default API
+such as dev, self-hosted, or localhost, the CLI persists that `apiUrl` so later commands keep
+using the same API.
 
 ### Environment Variable Example
 
@@ -352,7 +357,6 @@ export AGENTTEAMS_API_KEY="key_your_api_key_here"
 export AGENTTEAMS_API_URL="https://api.agentteams.run"
 export AGENTTEAMS_TEAM_ID="team_xxx"
 export AGENTTEAMS_PROJECT_ID="proj_xxx"
-export AGENTTEAMS_AGENT_NAME="my-agent"
 ```
 
 ## Output Format

@@ -10,7 +10,6 @@ export async function executeConfigCommand(action: string): Promise<any> {
           apiUrl: process.env.AGENTTEAMS_API_URL,
           projectId: process.env.AGENTTEAMS_PROJECT_ID,
           teamId: process.env.AGENTTEAMS_TEAM_ID,
-          agentName: process.env.AGENTTEAMS_AGENT_NAME,
           hasApiKey: Boolean(process.env.AGENTTEAMS_API_KEY),
           configPath,
         };
@@ -20,7 +19,6 @@ export async function executeConfigCommand(action: string): Promise<any> {
         apiUrl: config.apiUrl,
         projectId: config.projectId,
         teamId: config.teamId,
-        agentName: config.agentName,
         hasApiKey: Boolean(config.apiKey),
         configPath,
       };

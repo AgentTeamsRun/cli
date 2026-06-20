@@ -4,7 +4,7 @@ import { PLAN_COMPLEXITY_ORDER } from '../constants/planComplexity.js';
 import { checkConventionFreshness } from './convention.js';
 import { parseReportOptions } from '../utils/report.js';
 import { findProjectConfig } from '../utils/config.js';
-import { collectGitMetrics } from '../utils/git.js';
+import { collectGitMetrics, getGitRemoteOriginUrl } from '../utils/git.js';
 import { withSpinner, printFileInfo } from '../utils/spinner.js';
 import { mergePlanWithDependencies, normalizeDependencies } from '../utils/planFormat.js';
 import {
@@ -431,11 +431,7 @@ export async function executePlanCommand(
     }
     case 'start': {
       if (!options.id) throw new Error('--id is required for plan start');
-      const assignAgent = (options.agent as string | undefined) ?? (options.defaultCreatedBy as string | undefined);
-
-      if (!assignAgent) {
-        throw new Error('No agent available for assignment. Set AGENTTEAMS_AGENT_NAME or pass --agent.');
-      }
+      const assignAgent = options.agent as string | undefined;
 
       const startGitInfo = options.git === false ? {} : collectGitMetrics();
 
@@ -447,9 +443,10 @@ export async function executePlanCommand(
         runnerType?: string;
         model?: string;
         fastMode?: boolean;
-      } = {
-        assignedTo: assignAgent,
-      };
+      } = {};
+      if (assignAgent) {
+        body.assignedTo = assignAgent;
+      }
       if (options.task) {
         body.task = options.task;
       }
@@ -523,7 +520,13 @@ export async function executePlanCommand(
 
         const payload = parseReportOptions(options, { planStartCommit });
         if (payload) {
-          body.completionReport = payload;
+          const repositoryRemoteUrl =
+            toNonEmptyString(options.repositoryRemoteUrl) ??
+            (options.git === false ? undefined : getGitRemoteOriginUrl());
+          body.completionReport = {
+            ...payload,
+            ...(repositoryRemoteUrl ? { repositoryRemoteUrl } : {}),
+          };
         }
       }
 
@@ -596,6 +599,8 @@ export async function executePlanCommand(
       // a MINIMAL one should be short and single-scoped. This nudges authors toward the right tier
       // without rejecting the create.
       warnOnComplexityMismatch(createComplexity, content);
+      const repositoryRemoteUrl =
+        toNonEmptyString(options.repositoryRemoteUrl) ?? (options.git === false ? undefined : getGitRemoteOriginUrl());
 
       const createResult = await withSpinner(
         'Creating plan...',
@@ -606,7 +611,7 @@ export async function executePlanCommand(
             type: options.type,
             complexity: createComplexity,
             priority: options.priority ?? 'MEDIUM',
-            repositoryId: options.repositoryId ?? options.defaultRepositoryId,
+            ...(repositoryRemoteUrl ? { repositoryRemoteUrl } : {}),
             status: 'BACKLOG',
             runnerType: options.runnerType,
             model: options.model,
@@ -891,10 +896,7 @@ export async function executePlanCommand(
         throw new Error('--runner-type and --model are required for plan quick.');
       }
 
-      const assignAgent = (options.agent as string | undefined) ?? (options.defaultCreatedBy as string | undefined);
-      if (!assignAgent) {
-        throw new Error('No agent available for assignment. Set AGENTTEAMS_AGENT_NAME or pass --agent.');
-      }
+      const assignAgent = options.agent as string | undefined;
 
       // Resolve plan content: --content > --file > template fallback
       let planContent: string | undefined = undefined;
@@ -921,6 +923,8 @@ export async function executePlanCommand(
       }
 
       const priority = (options.priority as string | undefined) ?? 'LOW';
+      const repositoryRemoteUrl =
+        toNonEmptyString(options.repositoryRemoteUrl) ?? (options.git === false ? undefined : getGitRemoteOriginUrl());
 
       // Quick plans are one-shot, small-scope work, so they default to MINIMAL unless overridden.
       const quickComplexity = options.complexity ? String(options.complexity).toUpperCase() : 'MINIMAL';
@@ -940,7 +944,7 @@ export async function executePlanCommand(
             type: options.type,
             complexity: quickComplexity,
             priority,
-            repositoryId: options.repositoryId ?? options.defaultRepositoryId,
+            ...(repositoryRemoteUrl ? { repositoryRemoteUrl } : {}),
             status: 'BACKLOG',
             runnerType: options.runnerType,
             model: options.model,
@@ -961,7 +965,7 @@ export async function executePlanCommand(
         'Starting plan...',
         () =>
           startPlanLifecycle(apiUrl, projectId, headers, planId, {
-            assignedTo: assignAgent,
+            ...(assignAgent ? { assignedTo: assignAgent } : {}),
             runnerType: options.runnerType,
             model: options.model,
             fastMode: options.fast === true,
@@ -986,7 +990,13 @@ export async function executePlanCommand(
         // plan startCommit as the diff base would produce HEAD..HEAD and erase report metrics.
         const payload = parseReportOptions(options);
         if (payload) {
-          finishBody.completionReport = payload;
+          const repositoryRemoteUrl =
+            toNonEmptyString(options.repositoryRemoteUrl) ??
+            (options.git === false ? undefined : getGitRemoteOriginUrl());
+          finishBody.completionReport = {
+            ...payload,
+            ...(repositoryRemoteUrl ? { repositoryRemoteUrl } : {}),
+          };
         }
       }
 

@@ -5,7 +5,7 @@ import { multiselect, isCancel, cancel } from '@clack/prompts';
 import httpClient from '../utils/httpClient.js';
 import open from 'open';
 import { startLocalAuthServer } from '../utils/authServer.js';
-import { saveConfig } from '../utils/config.js';
+import { DEFAULT_API_URL, type PersistedConfig, saveConfig } from '../utils/config.js';
 import { createSpinner, withSpinner } from '../utils/spinner.js';
 import { withCommandContext } from '../utils/commandContext.js';
 import { conventionDownload } from './convention.js';
@@ -150,34 +150,38 @@ async function tryOpenBrowser(url: string): Promise<void> {
   }
 }
 
+function normalizeApiUrl(apiUrl: string): string {
+  return apiUrl.replace(/\/+$/, '');
+}
+
 function toConfig(authResult: {
   teamId: string;
   projectId: string;
-  repositoryId?: string;
   agentName: string;
   apiKey: string;
-  apiUrl: string;
-}): Config {
-  // 빈 문자열(미선택 인증)은 저장하지 않고 생략한다. 레포지토리는 서버가 인증된
-  // AgentConfig에서 resolve하므로 로컬 config의 repositoryId는 더 이상 기본값으로 쓰지 않는다.
-  const repositoryId = authResult.repositoryId?.trim() ? authResult.repositoryId : undefined;
-  return {
+  apiUrl?: string;
+}): PersistedConfig {
+  const config: PersistedConfig = {
     teamId: authResult.teamId,
     projectId: authResult.projectId,
-    agentName: authResult.agentName,
     apiKey: authResult.apiKey,
-    apiUrl: authResult.apiUrl,
-    ...(repositoryId ? { repositoryId } : {}),
   };
+
+  const apiUrl = authResult.apiUrl ? normalizeApiUrl(authResult.apiUrl) : undefined;
+  if (apiUrl && apiUrl !== DEFAULT_API_URL) {
+    config.apiUrl = apiUrl;
+  }
+
+  return config;
 }
 
 async function fetchConventionTemplate(authResult: {
   projectId: string;
   apiKey: string;
-  apiUrl: string;
+  apiUrl?: string;
   configId: string;
 }): Promise<string> {
-  const apiUrl = authResult.apiUrl.endsWith('/') ? authResult.apiUrl.slice(0, -1) : authResult.apiUrl;
+  const apiUrl = normalizeApiUrl(authResult.apiUrl || DEFAULT_API_URL);
 
   const response = await httpClient.get(
     `${apiUrl}/api/projects/${authResult.projectId}/agent-configs/${authResult.configId}/convention`,
@@ -377,13 +381,17 @@ async function executeInitCommandWithContext(options?: InitOptions): Promise<Ini
 
     authSpinner?.succeed();
     const config = toConfig(authResult);
+    const runtimeConfig: Config = {
+      ...config,
+      apiUrl: authResult.apiUrl || DEFAULT_API_URL,
+    };
     const conventionContent = await withSpinner('Fetching convention template...', () =>
       fetchConventionTemplate(authResult),
     );
 
     saveConfig(configPath, config);
     writeFileSync(conventionPath, conventionContent, 'utf-8');
-    await conventionDownload({ cwd, config });
+    await conventionDownload({ cwd, config: runtimeConfig });
     ensureGitignore(cwd);
     const selectedFiles = await promptAgentFileSelection();
     if (selectedFiles.includes('GEMINI.md')) {

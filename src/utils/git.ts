@@ -40,6 +40,12 @@ export function collectGitMetrics(
   };
 }
 
+export function getGitRemoteOriginUrl(
+  execFileSyncImpl: ExecFileSyncFn = childProcess.execFileSync,
+): string | undefined {
+  return runGit(execFileSyncImpl, ['remote', 'get-url', 'origin']);
+}
+
 function runGit(execFileSyncImpl: ExecFileSyncFn, args: string[]): string | undefined {
   try {
     const output = execFileSyncImpl('git', args, {

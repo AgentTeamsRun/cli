@@ -170,7 +170,10 @@ program
   )
   .option('--source-label <label>', 'Optional source label for uploaded plan HTML summary')
   .option('--template <name>', 'Plan content template (refactor-minimal, quick-minimal, create only)')
-  .option('--status <status>', 'Plan status (BACKLOG, TODO, ASSIGNED, IN_PROGRESS, BLOCKED, DONE, CANCELLED)')
+  .option(
+    '--status <status>',
+    'Plan status for list/update/set-status; ignored by create because new plans start as BACKLOG',
+  )
   .option('--type <type>', 'Plan type (FEATURE, BUG_FIX, ISSUE, REFACTOR, CHORE)')
   .option('--complexity <level>', 'Plan complexity (MINIMAL, STANDARD, FULL; required for create)')
   .option(
@@ -178,6 +181,10 @@ program
     'Reason for changing complexity (update only; recorded as a MODIFICATION comment)',
   )
   .option('--priority <priority>', 'Plan priority (LOW, MEDIUM, HIGH)')
+  .option(
+    '--repository-remote-url <url>',
+    'Repository remote origin URL (create/report attach; defaults to git origin)',
+  )
   .option('--assigned-to <id>', 'Assigned agent config ID (list filter)')
   .option('--task <text>', 'Task summary for plan start/finish')
   .option('--report-title <title>', 'Completion report title (plan finish)')
@@ -235,6 +242,7 @@ program
         complexity: options.complexity,
         complexityReason: options.complexityReason,
         priority: options.priority,
+        repositoryRemoteUrl: options.repositoryRemoteUrl,
         assignedTo: options.assignedTo,
         task: options.task,
         reportTitle: options.reportTitle,
@@ -335,7 +343,6 @@ program
   .option('--api-key <key>', 'Override API key (optional)')
   .option('--project-id <id>', 'Override project ID (optional)')
   .option('--team-id <id>', 'Override team ID (optional)')
-  .option('--agent-name <name>', 'Override agent name (optional)')
   .option('--format <format>', 'Output format (json)', 'json')
   .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
   .option('--verbose', 'Print full output to stdout (useful with --output-file)', false)
@@ -352,7 +359,6 @@ program
         apiKey: options.apiKey,
         projectId: options.projectId,
         teamId: options.teamId,
-        agentName: options.agentName,
       });
 
       printCommandResult({
@@ -394,6 +400,7 @@ program
   .option('--commit-end <hash>', 'Commit range end hash (manual only)')
   .option('--pull-request-id <id>', 'Pull request ID (manual only)')
   .option('--quality-score <n>', 'Quality score 0-100')
+  .option('--repository-remote-url <url>', 'Repository remote origin URL (create; defaults to git origin)')
   .option(
     '--runner-type <type>',
     'Runner type snapshot: CLAUDE_CODE, CODEX, ANTIGRAVITY, AMP, OPENCODE (required for create)',
@@ -408,7 +415,6 @@ program
   .option('--api-key <key>', 'Override API key (optional)')
   .option('--project-id <id>', 'Override project ID (optional)')
   .option('--team-id <id>', 'Override team ID (optional)')
-  .option('--agent-name <name>', 'Override agent name (optional)')
   .option('--format <format>', 'Output format (json)')
   .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
   .option('--verbose', 'Print full output to stdout (useful with --output-file)', false)
@@ -432,6 +438,7 @@ program
         commitEnd: options.commitEnd,
         pullRequestId: options.pullRequestId,
         qualityScore: options.qualityScore,
+        repositoryRemoteUrl: options.repositoryRemoteUrl,
         git: options.git,
         page: options.page,
         pageSize: options.pageSize,
@@ -441,7 +448,6 @@ program
         apiKey: options.apiKey,
         projectId: options.projectId,
         teamId: options.teamId,
-        agentName: options.agentName,
         runnerType: options.runnerType,
         model: options.model,
       });
@@ -476,7 +482,7 @@ program
     'Review target type (BRANCH_DIFF, GITHUB_PR, GITLAB_MR, LOCAL_DIFF, UPLOADED_DIFF, COMMIT_RANGE)',
   )
   .option('--target-ref <ref>', 'Target reference such as branch, PR URL, MR URL, or commit range')
-  .option('--repository-id <id>', 'Repository ID')
+  .option('--repository-remote-url <url>', 'Repository remote origin URL (create; defaults to git origin)')
   .option('--source-plan-id <id>', 'Source plan ID')
   .option('--source-completion-report-id <id>', 'Source completion report ID')
   .option('--source-commit-start <hash>', 'Source commit range start')
@@ -505,7 +511,6 @@ program
   .option('--api-key <key>', 'Override API key (optional)')
   .option('--project-id <id>', 'Override project ID (optional)')
   .option('--team-id <id>', 'Override team ID (optional)')
-  .option('--agent-name <name>', 'Override agent name (optional)')
   .option('--format <format>', 'Output format (json)')
   .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
   .option('--verbose', 'Print full output to stdout (useful with --output-file)', false)
@@ -519,7 +524,7 @@ program
         title: options.title,
         targetType: options.targetType,
         targetRef: options.targetRef,
-        repositoryId: options.repositoryId,
+        repositoryRemoteUrl: options.repositoryRemoteUrl,
         sourcePlanId: options.sourcePlanId,
         sourceCompletionReportId: options.sourceCompletionReportId,
         sourceCommitStart: options.sourceCommitStart,
@@ -548,7 +553,6 @@ program
         apiKey: options.apiKey,
         projectId: options.projectId,
         teamId: options.teamId,
-        agentName: options.agentName,
       });
 
       printCommandResult({
@@ -582,6 +586,7 @@ program
   )
   .option('--action-items <csv>', 'Action items (comma-separated)')
   .option('--status <status>', 'Post mortem status (OPEN, IN_PROGRESS, RESOLVED)')
+  .option('--repository-remote-url <url>', 'Repository remote origin URL (create; defaults to git origin)')
   .option('--page <number>', 'Page number (list only)')
   .option('--page-size <number>', 'Page size (list only)')
   .option('--search <text>', 'Title keyword search (list only)')
@@ -590,7 +595,6 @@ program
   .option('--api-key <key>', 'Override API key (optional)')
   .option('--project-id <id>', 'Override project ID (optional)')
   .option('--team-id <id>', 'Override team ID (optional)')
-  .option('--agent-name <name>', 'Override agent name (optional)')
   .option('--format <format>', 'Output format (json)')
   .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
   .option('--verbose', 'Print full output to stdout (useful with --output-file)', false)
@@ -606,6 +610,7 @@ program
         file: options.file,
         actionItems: options.actionItems,
         status: options.status,
+        repositoryRemoteUrl: options.repositoryRemoteUrl,
         page: options.page,
         pageSize: options.pageSize,
         search: options.search,
@@ -614,7 +619,6 @@ program
         apiKey: options.apiKey,
         projectId: options.projectId,
         teamId: options.teamId,
-        agentName: options.agentName,
       });
 
       printCommandResult({
@@ -662,7 +666,6 @@ program
   .option('--api-key <key>', 'Override API key (optional)')
   .option('--project-id <id>', 'Override project ID (optional)')
   .option('--team-id <id>', 'Override team ID (optional)')
-  .option('--agent-name <name>', 'Override agent name (optional)')
   .option('--format <format>', 'Output format (json)')
   .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
   .option('--verbose', 'Print full output to stdout (useful with --output-file)', false)
@@ -689,7 +692,6 @@ program
         apiKey: options.apiKey,
         projectId: options.projectId,
         teamId: options.teamId,
-        agentName: options.agentName,
       });
 
       printCommandResult({
@@ -718,7 +720,6 @@ program
   .option('--api-key <key>', 'Override API key (optional)')
   .option('--project-id <id>', 'Override project ID (optional)')
   .option('--team-id <id>', 'Override team ID (optional)')
-  .option('--agent-name <name>', 'Override agent name (optional)')
   .option('--format <format>', 'Output format (json)', 'json')
   .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
   .option('--verbose', 'Print full output to stdout (useful with --output-file)', false)
@@ -734,7 +735,6 @@ program
         apiKey: options.apiKey,
         projectId: options.projectId,
         teamId: options.teamId,
-        agentName: options.agentName,
       });
 
       printCommandResult({
@@ -792,12 +792,16 @@ program
   .description('Manage project documents')
   .argument(
     '<action>',
-    'Action to perform (create, update, download, list, delete, archive, unarchive, revisions, revision-get, revision-restore, comment-list, comment-create, comment-update, comment-delete)',
+    'Action to perform (create, update, download, list, tags, delete, archive, unarchive, revisions, revision-get, revision-restore, comment-list, comment-create, comment-update, comment-delete)',
   )
   .option('--id <id>', 'Document ID')
   .option('--title <title>', 'Document title')
   .option('--file <path>', 'Read markdown body from a local file')
-  .option('--tags <tags>', 'Comma-separated free-form tags (max 20)')
+  .option('--tags <tags>', 'Comma-separated tags. List: filter. Create/update: sent as suggestions (not confirmed).')
+  .option(
+    '--suggested-tags <tags>',
+    'Comma-separated AI-suggested tags (auto-promoted when they match existing tags, else await user review)',
+  )
   .option('--visibility <visibility>', 'Document visibility (PROJECT or PRIVATE)')
   .option('--archived <state>', 'Archive filter for list (ACTIVE, ARCHIVED, ALL)')
   .option('--revision-id <id>', 'Document revision ID')
@@ -812,7 +816,6 @@ program
   .option('--api-key <key>', 'Override API key (optional)')
   .option('--project-id <id>', 'Override project ID (optional)')
   .option('--team-id <id>', 'Override team ID (optional)')
-  .option('--agent-name <name>', 'Override agent name (optional)')
   .option('--format <format>', 'Output format (json)', 'json')
   .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
   .option('--verbose', 'Print full output to stdout (useful with --output-file)', false)
@@ -934,7 +937,6 @@ program
   .option('--api-key <key>', 'Override API key (optional)')
   .option('--project-id <id>', 'Override project ID (optional)')
   .option('--team-id <id>', 'Override team ID (optional)')
-  .option('--agent-name <name>', 'Override agent name (optional)')
   .option('--format <format>', 'Output format (json)', 'json')
   .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
   .option('--verbose', 'Print full output to stdout (useful with --output-file)', false)
@@ -951,7 +953,6 @@ program
         apiKey: options.apiKey,
         projectId: options.projectId,
         teamId: options.teamId,
-        agentName: options.agentName,
       });
 
       printCommandResult({
@@ -986,7 +987,6 @@ linearCommand
   .option('--api-url <url>', 'Override API URL (optional)')
   .option('--api-key <key>', 'Override API key (optional)')
   .option('--project-id <id>', 'Override project ID (optional)')
-  .option('--agent-name <name>', 'Override agent name (optional)')
   .option('--format <format>', 'Output format (json)', 'json')
   .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
   .option('--verbose', 'Print full output to stdout (useful with --output-file)', false)
@@ -1009,7 +1009,6 @@ linearCommand
         apiUrl: options.apiUrl,
         apiKey: options.apiKey,
         projectId: options.projectId,
-        agentName: options.agentName,
       });
 
       printCommandResult({
@@ -1037,7 +1036,6 @@ linearCommand
   .option('--api-key <key>', 'Override API key (optional)')
   .option('--project-id <id>', 'Override project ID (optional)')
   .option('--team-id <id>', 'Override team ID (optional)')
-  .option('--agent-name <name>', 'Override agent name (optional)')
   .option('--format <format>', 'Output format (json)', 'json')
   .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
   .option('--verbose', 'Print full output to stdout (useful with --output-file)', false)
@@ -1056,7 +1054,6 @@ linearCommand
         apiKey: options.apiKey,
         projectId: options.projectId,
         teamId: options.teamId,
-        agentName: options.agentName,
       });
 
       printCommandResult({

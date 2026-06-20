@@ -1,5 +1,5 @@
 import { describe, it, expect } from '@jest/globals';
-import { collectGitMetrics } from '../src/utils/git.js';
+import { collectGitMetrics, getGitRemoteOriginUrl } from '../src/utils/git.js';
 
 describe('Git Metrics Utility', () => {
   it('collects commit hash, branch, and shortstat metrics', () => {
@@ -92,5 +92,15 @@ describe('Git Metrics Utility', () => {
       linesAdded: 42,
       linesDeleted: 10,
     });
+  });
+
+  it('reads the origin remote url when available', () => {
+    const remoteUrl = getGitRemoteOriginUrl((cmd, args) => {
+      expect(cmd).toBe('git');
+      expect(args).toEqual(['remote', 'get-url', 'origin']);
+      return 'git@github.com:agentteams/agentteams.git\n';
+    });
+
+    expect(remoteUrl).toBe('git@github.com:agentteams/agentteams.git');
   });
 });

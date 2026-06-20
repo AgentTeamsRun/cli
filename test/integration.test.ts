@@ -64,7 +64,6 @@ describe('CLI Integration Tests', () => {
       AGENTTEAMS_API_URL: API_URL,
       AGENTTEAMS_TEAM_ID: 'team_1',
       AGENTTEAMS_PROJECT_ID: PROJECT_ID,
-      AGENTTEAMS_AGENT_NAME: 'test-agent',
     };
 
     axiosGetSpy = jest.spyOn(axios, 'get');
@@ -93,7 +92,6 @@ describe('CLI Integration Tests', () => {
       const callbackPayload = {
         teamId: 'team_1',
         projectId: PROJECT_ID,
-        repositoryId: 'repo-1',
         agentName: 'test-agent',
         apiKey: 'key_oauth_123',
         apiUrl: API_URL,
@@ -161,8 +159,6 @@ describe('CLI Integration Tests', () => {
       expect(savedConfig).toEqual({
         teamId: 'team_1',
         projectId: PROJECT_ID,
-        repositoryId: 'repo-1',
-        agentName: 'test-agent',
         apiKey: 'key_oauth_123',
         apiUrl: API_URL,
       });
@@ -187,6 +183,84 @@ describe('CLI Integration Tests', () => {
           'Content-Type': 'application/json',
         },
       });
+
+      rmSync(tempCwd, { recursive: true, force: true });
+    });
+
+    it('init start: should omit apiUrl from saved config when callback uses default API URL', async () => {
+      if (typeof (jest as any).unstable_mockModule !== 'function') {
+        return;
+      }
+
+      const defaultApiUrl = 'https://api.agentteams.run';
+      const tempCwd = mkdtempSync(join(tmpdir(), 'agentteams-init-default-api-'));
+      const closeSpy = jest.fn();
+      const callbackPayload = {
+        teamId: 'team_1',
+        projectId: PROJECT_ID,
+        agentName: 'test-agent',
+        apiKey: 'key_oauth_123',
+        apiUrl: `${defaultApiUrl}/`,
+        configId: '7',
+      };
+
+      axiosGetSpy
+        .mockResolvedValueOnce({ data: { data: { content: '# team convention\n- follow rules\n' } } } as any)
+        .mockResolvedValueOnce({ data: { data: [{ id: 'ag-1' }] } } as any)
+        .mockResolvedValueOnce({ data: { data: { content: '# team convention\n- follow rules\n' } } } as any)
+        .mockResolvedValueOnce({
+          data: {
+            data: [
+              { fileName: 'plan-guide.md', content: '# plan guide\n' },
+              { fileName: 'completion-report-guide.md', content: '# completion report guide\n' },
+              { fileName: 'post-mortem-guide.md', content: '# post mortem guide\n' },
+            ],
+          },
+        } as any)
+        .mockResolvedValueOnce({ data: { data: [] } } as any)
+        .mockResolvedValueOnce({ data: { data: { hash: 'platform-guides-hash-init-default-api' } } } as any);
+
+      const mockStartLocalAuthServer = jest.fn().mockReturnValue({
+        server: {
+          listening: true,
+          close: closeSpy,
+        } as any,
+        waitForCallback: async () => callbackPayload,
+        port: 7779,
+      });
+
+      if (typeof (jest as any).resetModules === 'function') {
+        (jest as any).resetModules();
+      }
+      (jest as any).unstable_mockModule('axios', () => ({
+        default: axios,
+        isAxiosError: axios.isAxiosError,
+      }));
+      (jest as any).unstable_mockModule('../src/utils/authServer.js', () => ({
+        startLocalAuthServer: mockStartLocalAuthServer,
+      }));
+      (jest as any).unstable_mockModule('open', () => ({
+        default: jest.fn().mockImplementation(async () => undefined),
+      }));
+
+      const { executeInitCommand } = await import('../src/commands/init.js');
+      const result = await executeInitCommand({ cwd: tempCwd });
+
+      const savedConfig = JSON.parse(readFileSync(result.configPath, 'utf-8'));
+      expect(savedConfig).toEqual({
+        teamId: 'team_1',
+        projectId: PROJECT_ID,
+        apiKey: 'key_oauth_123',
+      });
+      expect(axiosGetSpy).toHaveBeenCalledWith(
+        `${defaultApiUrl}/api/projects/${PROJECT_ID}/agent-configs/7/convention`,
+        {
+          headers: {
+            'X-API-Key': 'key_oauth_123',
+            'Content-Type': 'application/json',
+          },
+        },
+      );
 
       rmSync(tempCwd, { recursive: true, force: true });
     });
@@ -501,6 +575,35 @@ describe('CLI Integration Tests', () => {
       );
     });
 
+    it('plan create: should always send BACKLOG status even when --status is provided', async () => {
+      axiosPostSpy.mockResolvedValue({ data: { data: { id: 't1' } } } as any);
+      axiosPutSpy.mockResolvedValue({ data: { data: { id: 't1' } } } as any);
+      const stderrSpy = jest.spyOn(process.stderr, 'write').mockReturnValue(true);
+
+      await executeCommand('plan', 'create', {
+        title: 'Plan 1',
+        content: 'content',
+        status: 'TODO',
+        complexity: 'STANDARD',
+        runnerType: 'CLAUDE_CODE',
+        model: 'claude-opus-4-6',
+        htmlFile: sharedHtmlPath,
+      });
+
+      expect(axiosPostSpy).toHaveBeenCalledWith(
+        `${API_URL}/api/projects/${PROJECT_ID}/plans`,
+        expect.objectContaining({
+          title: 'Plan 1',
+          content: 'content',
+          status: 'BACKLOG',
+        }),
+        { headers: authHeaders() },
+      );
+      expect(stderrSpy).toHaveBeenCalledWith(
+        '[warn] plan create: --status TODO is ignored. Plans are always created as BACKLOG.\n',
+      );
+    });
+
     it('plan create: should interpret \\\\n sequences when interpretEscapes is enabled', async () => {
       axiosPostSpy.mockResolvedValue({ data: { data: { id: 't1' } } } as any);
       axiosPutSpy.mockResolvedValue({ data: { data: { id: 't1' } } } as any);
@@ -800,10 +903,11 @@ describe('CLI Integration Tests', () => {
 
       expect(axiosPostSpy).toHaveBeenCalledWith(
         `${API_URL}/api/projects/${PROJECT_ID}/plans/plan-1/start`,
-        expect.objectContaining({ assignedTo: 'test-agent' }),
+        expect.any(Object),
         { headers: authHeaders() },
       );
       const sentBody = axiosPostSpy.mock.calls[0][1] as Record<string, unknown>;
+      expect(sentBody).not.toHaveProperty('assignedTo');
       expect(sentBody).not.toHaveProperty('runnerType');
       expect(sentBody).not.toHaveProperty('model');
     });
@@ -815,9 +919,11 @@ describe('CLI Integration Tests', () => {
 
       expect(axiosPostSpy).toHaveBeenCalledWith(
         `${API_URL}/api/projects/${PROJECT_ID}/plans/plan-1/start`,
-        expect.objectContaining({ assignedTo: 'test-agent', task: 'Work started custom' }),
+        expect.objectContaining({ task: 'Work started custom' }),
         { headers: authHeaders() },
       );
+      const sentBody = axiosPostSpy.mock.calls[0][1] as Record<string, unknown>;
+      expect(sentBody).not.toHaveProperty('assignedTo');
     });
 
     it('plan start: should fail when lifecycle endpoint fails', async () => {
@@ -2170,7 +2276,6 @@ describe('CLI Integration Tests', () => {
           apiUrl: API_URL,
           projectId: PROJECT_ID,
           teamId: 'team_1',
-          agentName: 'test-agent',
           hasApiKey: true,
         }),
       );
@@ -2231,7 +2336,9 @@ describe('CLI Integration Tests', () => {
       expect(cliIndex).not.toContain('--allow-missing-html-preview');
       expect(cliIndex).not.toContain('--author-id <id>');
       expect(cliIndex).not.toContain('--depends-on <id>');
-      expect(cliIndex).toContain('BACKLOG, TODO, ASSIGNED, IN_PROGRESS, BLOCKED, DONE, CANCELLED');
+      expect(cliIndex).toContain(
+        'Plan status for list/update/set-status; ignored by create because new plans start as BACKLOG',
+      );
     });
 
     it('should throw for unknown resource command', async () => {
@@ -2295,12 +2402,13 @@ describe('CLI Integration Tests', () => {
           pageSize: 10,
         });
 
+        // CLI는 확정 태그를 직접 설정하지 않는다 — --tags는 추천(suggestedTags)으로 전달된다.
         expect(axiosPostSpy).toHaveBeenCalledWith(
           `${API_URL}/api/projects/${PROJECT_ID}/documents`,
           {
             title: 'doc',
             body: '# Document body\n',
-            tags: ['a'],
+            suggestedTags: ['a'],
             visibility: 'PRIVATE',
           },
           { headers: authHeaders() },

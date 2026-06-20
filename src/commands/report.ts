@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { join, resolve } from 'node:path';
 import { createReport, deleteReport, getReport, listReports, updateReport } from '../api/report.js';
 import { findProjectConfig } from '../utils/config.js';
+import { getGitRemoteOriginUrl } from '../utils/git.js';
 import { parseReportOptions } from '../utils/report.js';
 
 import {
@@ -54,10 +55,12 @@ export async function executeReportCommand(apiUrl: string, headers: any, action:
       if (!payload) {
         throw new Error('--file is required for report create.');
       }
+      const repositoryRemoteUrl =
+        toNonEmptyString(options.repositoryRemoteUrl) ?? (options.git === false ? undefined : getGitRemoteOriginUrl());
 
       const body: Record<string, unknown> = {
         planId: options.planId,
-        repositoryId: options.repositoryId ?? options.defaultRepositoryId,
+        ...(repositoryRemoteUrl ? { repositoryRemoteUrl } : {}),
         runnerType: options.runnerType,
         model: options.model,
         ...payload,
