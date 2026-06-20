@@ -49,6 +49,48 @@ export async function createPlan(
   return response.data;
 }
 
+export async function quickPlan(
+  apiUrl: string,
+  projectId: string,
+  headers: any,
+  body: {
+    title: string;
+    content: string;
+    type?: string;
+    complexity: string;
+    priority: string;
+    repositoryRemoteUrl?: string;
+    assignedTo?: string;
+    startCommit?: string;
+    startBranch?: string;
+    runnerType: string;
+    model: string;
+    fastMode?: boolean;
+    completionReport?: {
+      repositoryRemoteUrl?: string;
+      title: string;
+      content: string;
+      commitHash?: string;
+      commitStart?: string;
+      commitEnd?: string;
+      branchName?: string;
+      pullRequestId?: string;
+      durationSeconds?: number;
+      filesModified?: number;
+      linesAdded?: number;
+      linesDeleted?: number;
+      status?: string;
+      qualityScore?: number;
+      reviewRecommendation?: string;
+      reviewReason?: string;
+    };
+  },
+): Promise<any> {
+  const baseUrl = `${apiUrl}/api/projects/${projectId}/plans`;
+  const response = await httpClient.post(`${baseUrl}/quick`, body, { headers });
+  return response.data;
+}
+
 export async function updatePlan(
   apiUrl: string,
   projectId: string,

@@ -30,6 +30,7 @@ import {
   listOriginIssues,
   listPlans,
   patchPlanStatus,
+  quickPlan,
   startPlanLifecycle,
   unlinkOriginIssue,
   updatePlan,
@@ -298,7 +299,12 @@ function extractPlanStatus(result: unknown): string | undefined {
   const data = (result as Record<string, unknown>).data;
   if (!data || typeof data !== 'object') return undefined;
   const status = (data as Record<string, unknown>).status;
-  return typeof status === 'string' && status.length > 0 ? status : undefined;
+  if (typeof status === 'string' && status.length > 0) return status;
+
+  const plan = (data as Record<string, unknown>).plan;
+  if (!plan || typeof plan !== 'object') return undefined;
+  const planStatus = (plan as Record<string, unknown>).status;
+  return typeof planStatus === 'string' && planStatus.length > 0 ? planStatus : undefined;
 }
 
 // quick 플랜의 finish 응답에서 completionReport를 안전하게 꺼낸다.
@@ -895,6 +901,8 @@ export async function executePlanCommand(
       if (!options.runnerType || !options.model) {
         throw new Error('--runner-type and --model are required for plan quick.');
       }
+      const runnerType = String(options.runnerType);
+      const model = String(options.model);
 
       const assignAgent = options.agent as string | undefined;
 
@@ -934,55 +942,33 @@ export async function executePlanCommand(
         );
       }
 
-      // 1. Create plan
-      const createResult = await withSpinner(
-        'Creating quick plan...',
-        () =>
-          createPlan(apiUrl, projectId, headers, {
-            title: options.title,
-            content: planContent,
-            type: options.type,
-            complexity: quickComplexity,
-            priority,
-            ...(repositoryRemoteUrl ? { repositoryRemoteUrl } : {}),
-            status: 'BACKLOG',
-            runnerType: options.runnerType,
-            model: options.model,
-            fastMode: options.fast === true,
-            kind: 'QUICK',
-          }),
-        'Plan created',
-      );
-      if (hasQuickFile) deleteIfTempFile(options.file as string, { keep: options.keepTemp });
-
-      const planId: string = createResult?.data?.id;
-      if (!planId) {
-        throw new Error('Failed to create plan: no plan ID returned.');
-      }
-
-      // 2. Start plan
-      await withSpinner(
-        'Starting plan...',
-        () =>
-          startPlanLifecycle(apiUrl, projectId, headers, planId, {
-            ...(assignAgent ? { assignedTo: assignAgent } : {}),
-            runnerType: options.runnerType,
-            model: options.model,
-            fastMode: options.fast === true,
-          }),
-        'Plan started',
-      );
-
-      // 3. Finish plan (with completion report if provided)
+      // Finish the quick plan on the server in one request. This prevents a failed
+      // start/finish step from leaving a draft quick plan behind.
       const includeCompletionReport = typeof options.reportFile === 'string' && options.reportFile.trim().length > 0;
 
-      const finishBody: {
-        runnerType?: string;
-        model?: string;
+      const quickBody: {
+        title: string;
+        content: string;
+        type?: string;
+        complexity: string;
+        priority: string;
+        repositoryRemoteUrl?: string;
+        assignedTo?: string;
+        runnerType: string;
+        model: string;
+        fastMode?: boolean;
         completionReport?: any;
       } = {
-        runnerType: options.runnerType,
-        model: options.model,
+        title: options.title,
+        content: planContent,
+        type: options.type,
+        complexity: quickComplexity,
+        priority,
+        ...(repositoryRemoteUrl ? { repositoryRemoteUrl } : {}),
+        ...(assignAgent ? { assignedTo: assignAgent } : {}),
+        runnerType,
+        model,
+        fastMode: options.fast === true,
       };
 
       if (includeCompletionReport) {
@@ -993,21 +979,27 @@ export async function executePlanCommand(
           const repositoryRemoteUrl =
             toNonEmptyString(options.repositoryRemoteUrl) ??
             (options.git === false ? undefined : getGitRemoteOriginUrl());
-          finishBody.completionReport = {
+          quickBody.completionReport = {
             ...payload,
             ...(repositoryRemoteUrl ? { repositoryRemoteUrl } : {}),
           };
         }
       }
 
-      const finishResult = await withSpinner(
-        'Finishing plan...',
-        () => finishPlanLifecycle(apiUrl, projectId, headers, planId, finishBody),
-        'Plan finished',
+      const quickResult = await withSpinner(
+        'Completing quick plan...',
+        () => quickPlan(apiUrl, projectId, headers, quickBody),
+        'Quick plan completed',
       );
+      if (hasQuickFile) deleteIfTempFile(options.file as string, { keep: options.keepTemp });
       if (options.reportFile) deleteIfTempFile(options.reportFile, { keep: options.keepTemp });
 
-      return buildQuickPlanResult(planId, createResult, finishResult);
+      const planId: string = quickResult?.data?.id ?? quickResult?.data?.plan?.id;
+      if (!planId) {
+        throw new Error('Failed to complete quick plan: no plan ID returned.');
+      }
+
+      return buildQuickPlanResult(planId, quickResult, quickResult);
     }
     case 'link-issue': {
       const planId = toNonEmptyString(options.id);

@@ -15,20 +15,13 @@ describe('plan quick with completion report integration', () => {
   beforeEach(() => {
     jest.restoreAllMocks();
     axiosPostSpy = jest.spyOn(axios, 'post');
-    // createPlan, startPlanLifecycle, finishPlanLifecycle
     axiosPostSpy.mockImplementation((url: string) => {
-      if (url.endsWith('/plans')) {
-        return Promise.resolve({ data: { data: { id: 'plan-quick-1', status: 'BACKLOG' } } } as any);
-      }
-      if (url.includes('/start')) {
-        return Promise.resolve({ data: { data: { id: 'plan-quick-1', status: 'IN_PROGRESS' } } } as any);
-      }
-      if (url.includes('/finish')) {
+      if (url.endsWith('/plans/quick')) {
         return Promise.resolve({
           data: {
             data: {
               id: 'plan-quick-1',
-              status: 'DONE',
+              plan: { id: 'plan-quick-1', status: 'DONE' },
               completionReport: { id: 'report-quick-1', webUrl: 'http://quick-report-url' },
             },
           },
@@ -72,10 +65,12 @@ describe('plan quick with completion report integration', () => {
     expect(result.reportId).toBe('report-quick-1');
     expect(result.reportWebUrl).toBe('http://quick-report-url');
 
-    // 2. Verify finish API payload
-    const finishCall = axiosPostSpy.mock.calls.find((call) => call[0].includes('/finish'));
-    expect(finishCall).toBeDefined();
-    const finishBody = finishCall![1] as {
+    // 2. Verify quick API payload
+    expect(axiosPostSpy).toHaveBeenCalledTimes(1);
+    const quickCall = axiosPostSpy.mock.calls.find((call) => call[0].endsWith('/plans/quick'));
+    expect(quickCall).toBeDefined();
+    const quickBody = quickCall![1] as {
+      assignedTo?: string;
       completionReport?: {
         title: string;
         content: string;
@@ -83,11 +78,12 @@ describe('plan quick with completion report integration', () => {
         qualityScore?: number;
       };
     };
-    expect(finishBody.completionReport).toBeDefined();
-    expect(finishBody.completionReport!.title).toBe('Quick Report Title');
-    expect(finishBody.completionReport!.content).toContain('Did the work.');
-    expect(finishBody.completionReport!.status).toBe('COMPLETED');
-    expect(finishBody.completionReport!.qualityScore).toBe(95);
+    expect(quickBody.assignedTo).toBe('test-agent');
+    expect(quickBody.completionReport).toBeDefined();
+    expect(quickBody.completionReport!.title).toBe('Quick Report Title');
+    expect(quickBody.completionReport!.content).toContain('Did the work.');
+    expect(quickBody.completionReport!.status).toBe('COMPLETED');
+    expect(quickBody.completionReport!.qualityScore).toBe(95);
   });
 
   it('does not use the just-created quick plan startCommit as the report diff range', async () => {
@@ -105,13 +101,14 @@ describe('plan quick with completion report integration', () => {
 
     expect(axiosGetSpy).not.toHaveBeenCalled();
 
-    const finishCall = axiosPostSpy.mock.calls.find((call) => call[0].includes('/finish'));
-    expect(finishCall).toBeDefined();
-    const finishBody = finishCall![1] as {
+    expect(axiosPostSpy).toHaveBeenCalledTimes(1);
+    const quickCall = axiosPostSpy.mock.calls.find((call) => call[0].endsWith('/plans/quick'));
+    expect(quickCall).toBeDefined();
+    const quickBody = quickCall![1] as {
       completionReport?: {
         commitStart?: string;
       };
     };
-    expect(finishBody.completionReport?.commitStart).not.toBe('abcdef0123456789');
+    expect(quickBody.completionReport?.commitStart).not.toBe('abcdef0123456789');
   });
 });
