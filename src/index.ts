@@ -145,7 +145,7 @@ program
   .description('Manage plans')
   .argument(
     '<action>',
-    'Action to perform (list, get, show, create, update, delete, assign, download, cleanup, start, finish, quick, status, set-status, upload-html, link-issue, unlink-issue, list-issues)',
+    'Action to perform (list, get, show, create, update, delete, download, cleanup, start, finish, quick, status, set-status, upload-html, link-issue, unlink-issue, list-issues)',
   )
   .option('--id <id>', 'Plan ID')
   .option('--title <title>', 'Plan title')
@@ -211,7 +211,6 @@ program
   .option('--no-git', 'Disable git metrics auto-collection (plan finish)')
   .option('--page <number>', 'Page number (list only)')
   .option('--page-size <number>', 'Page size (list only)')
-  .option('--agent <agent>', 'Agent name or ID to assign')
   .option('--provider <provider>', 'External issue provider (GITHUB, GITLAB, LINEAR)')
   .option('--external-id <id>', 'External issue ID')
   .option('--external-url <url>', 'External issue URL')
@@ -263,7 +262,6 @@ program
         git: options.git,
         page: options.page,
         pageSize: options.pageSize,
-        agent: options.agent,
         provider: options.provider,
         externalId: options.externalId,
         externalUrl: options.externalUrl,

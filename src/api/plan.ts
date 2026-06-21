@@ -60,7 +60,6 @@ export async function quickPlan(
     complexity: string;
     priority: string;
     repositoryRemoteUrl?: string;
-    assignedTo?: string;
     startCommit?: string;
     startBranch?: string;
     runnerType: string;
@@ -103,25 +102,12 @@ export async function updatePlan(
   return response.data;
 }
 
-export async function assignPlan(
-  apiUrl: string,
-  projectId: string,
-  headers: any,
-  id: string,
-  assignedTo: string,
-): Promise<any> {
-  const baseUrl = `${apiUrl}/api/projects/${projectId}/plans`;
-  const response = await httpClient.post(`${baseUrl}/${id}/assign`, { assignedTo }, { headers });
-  return response.data;
-}
-
 export async function startPlanLifecycle(
   apiUrl: string,
   projectId: string,
   headers: any,
   id: string,
   body: {
-    assignedTo?: string;
     task?: string;
     startCommit?: string;
     startBranch?: string;

@@ -50,7 +50,6 @@ describe('plan quick with completion report integration', () => {
     const result = await executePlanCommand('http://localhost:3001', 'test-project', {}, 'quick', {
       title: 'Quick Plan Title',
       content: 'Quick plan description',
-      agent: 'test-agent',
       runnerType: 'CLAUDE_CODE',
       model: 'claude-opus-4-8',
       reportFile,
@@ -78,7 +77,9 @@ describe('plan quick with completion report integration', () => {
         qualityScore?: number;
       };
     };
-    expect(quickBody.assignedTo).toBe('test-agent');
+    // 에이전트 배정은 API key 인증 정보(agentConfigId)로 서버가 추론하므로
+    // CLI는 더 이상 assignedTo를 요청 body에 보내지 않는다.
+    expect(quickBody.assignedTo).toBeUndefined();
     expect(quickBody.completionReport).toBeDefined();
     expect(quickBody.completionReport!.title).toBe('Quick Report Title');
     expect(quickBody.completionReport!.content).toContain('Did the work.');
@@ -86,11 +87,27 @@ describe('plan quick with completion report integration', () => {
     expect(quickBody.completionReport!.qualityScore).toBe(95);
   });
 
+  it('never forwards an agent option as assignedTo (API key inference only)', async () => {
+    await executePlanCommand('http://localhost:3001', 'test-project', {}, 'quick', {
+      title: 'Quick Plan Title',
+      content: 'Quick plan description',
+      // 폐기된 --agent 입력이 들어오더라도 quick plan 요청 body로 forwarding되면 안 된다.
+      agent: 'legacy-agent',
+      runnerType: 'CLAUDE_CODE',
+      model: 'claude-opus-4-8',
+      git: false,
+    });
+
+    const quickCall = axiosPostSpy.mock.calls.find((call) => call[0].endsWith('/plans/quick'));
+    expect(quickCall).toBeDefined();
+    const quickBody = quickCall![1] as { assignedTo?: string };
+    expect(quickBody.assignedTo).toBeUndefined();
+  });
+
   it('does not use the just-created quick plan startCommit as the report diff range', async () => {
     await executePlanCommand('http://localhost:3001', 'test-project', {}, 'quick', {
       title: 'Quick Plan Title',
       content: 'Quick plan description',
-      agent: 'test-agent',
       runnerType: 'CLAUDE_CODE',
       model: 'claude-opus-4-8',
       reportFile,
