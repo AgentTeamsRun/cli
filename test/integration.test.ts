@@ -327,7 +327,7 @@ describe('CLI Integration Tests', () => {
       }
     });
 
-    it('plan CRUD/assign: should use project-scoped plan endpoints', async () => {
+    it('plan CRUD: should use project-scoped plan endpoints', async () => {
       axiosPostSpy.mockResolvedValue({ data: { data: { id: 't1' } } } as any);
       axiosGetSpy.mockResolvedValue({ data: { data: { id: 't1' } } } as any);
       axiosPutSpy.mockResolvedValue({ data: { data: { id: 't1' } } } as any);
@@ -346,7 +346,6 @@ describe('CLI Integration Tests', () => {
       await executeCommand('plan', 'get', { id: 'plan-1' });
       await executeCommand('plan', 'show', { id: 'plan-1' });
       await executeCommand('plan', 'update', { id: 'plan-1', status: 'IN_PROGRESS' });
-      await executeCommand('plan', 'assign', { id: 'plan-1', agent: 'agent-a' });
       await executeCommand('plan', 'delete', { id: 'plan-1' });
 
       expect(axiosPostSpy).toHaveBeenNthCalledWith(
@@ -370,12 +369,8 @@ describe('CLI Integration Tests', () => {
         { status: 'IN_PROGRESS' },
         { headers: authHeaders() },
       );
-      expect(axiosPostSpy).toHaveBeenNthCalledWith(
-        2,
-        `${API_URL}/api/projects/${PROJECT_ID}/plans/plan-1/assign`,
-        { assignedTo: 'agent-a' },
-        { headers: authHeaders() },
-      );
+      // 에이전트 배정은 API key 인증 정보로 추론하므로 CLI에 plan assign/--agent 경로가 없다.
+      expect(axiosPostSpy).toHaveBeenCalledTimes(1);
       expect(axiosDeleteSpy).toHaveBeenCalledWith(`${API_URL}/api/projects/${PROJECT_ID}/plans/plan-1`, {
         headers: deleteHeaders(),
       });
@@ -2336,6 +2331,8 @@ describe('CLI Integration Tests', () => {
       expect(cliIndex).not.toContain('--allow-missing-html-preview');
       expect(cliIndex).not.toContain('--author-id <id>');
       expect(cliIndex).not.toContain('--depends-on <id>');
+      // 에이전트 배정은 API key 인증 정보로 추론하므로 플랜 명령에서 --agent를 노출하지 않는다.
+      expect(cliIndex).not.toContain('--agent <agent>');
       expect(cliIndex).toContain(
         'Plan status for list/update/set-status; ignored by create because new plans start as BACKLOG',
       );

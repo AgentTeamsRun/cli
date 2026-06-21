@@ -19,7 +19,6 @@ import {
 } from '../utils/parsers.js';
 import { validatePlanPreviewHtmlSafety } from '../utils/planPreviewHtmlSafety.js';
 import {
-  assignPlan,
   createPlan,
   deletePlan,
   finishPlanLifecycle,
@@ -437,12 +436,10 @@ export async function executePlanCommand(
     }
     case 'start': {
       if (!options.id) throw new Error('--id is required for plan start');
-      const assignAgent = options.agent as string | undefined;
 
       const startGitInfo = options.git === false ? {} : collectGitMetrics();
 
       const body: {
-        assignedTo?: string;
         task?: string;
         startCommit?: string;
         startBranch?: string;
@@ -450,9 +447,6 @@ export async function executePlanCommand(
         model?: string;
         fastMode?: boolean;
       } = {};
-      if (assignAgent) {
-        body.assignedTo = assignAgent;
-      }
       if (options.task) {
         body.task = options.task;
       }
@@ -791,11 +785,6 @@ export async function executePlanCommand(
       await deletePlan(apiUrl, projectId, headers, options.id);
       return { message: `Plan ${options.id} deleted successfully` };
     }
-    case 'assign': {
-      if (!options.id) throw new Error('--id is required for plan assign');
-      if (!options.agent) throw new Error('--agent is required for plan assign');
-      return assignPlan(apiUrl, projectId, headers, options.id, options.agent);
-    }
     case 'download': {
       if (!options.id) throw new Error('--id is required for plan download');
       const projectRoot = findProjectRoot();
@@ -904,8 +893,6 @@ export async function executePlanCommand(
       const runnerType = String(options.runnerType);
       const model = String(options.model);
 
-      const assignAgent = options.agent as string | undefined;
-
       // Resolve plan content: --content > --file > template fallback
       let planContent: string | undefined = undefined;
       const hasQuickContent = typeof options.content === 'string' && options.content.trim().length > 0;
@@ -953,7 +940,6 @@ export async function executePlanCommand(
         complexity: string;
         priority: string;
         repositoryRemoteUrl?: string;
-        assignedTo?: string;
         runnerType: string;
         model: string;
         fastMode?: boolean;
@@ -965,7 +951,6 @@ export async function executePlanCommand(
         complexity: quickComplexity,
         priority,
         ...(repositoryRemoteUrl ? { repositoryRemoteUrl } : {}),
-        ...(assignAgent ? { assignedTo: assignAgent } : {}),
         runnerType,
         model,
         fastMode: options.fast === true,

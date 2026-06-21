@@ -167,7 +167,7 @@ text 출력에서 객체 필드는 핵심 식별 필드(`id/title/status/priorit
 - (추가) 단축 커맨드
   - `agentteams plan start --id <planId>`
     - 내부적으로 `POST /api/projects/:projectId/plans/:id/start`를 호출합니다.
-    - 서버는 플랜을 `IN_PROGRESS`로 변경하고(`startedAt` 포함), 필요 시 `assignedTo`를 함께 설정합니다.
+    - 서버는 플랜을 `IN_PROGRESS`로 변경하고(`startedAt` 포함), API key 인증 컨텍스트의 에이전트 설정을 기준으로 배정 정보를 추론합니다.
   - `agentteams plan finish --id <planId>`
     - 내부적으로 `POST /api/projects/:projectId/plans/:id/finish`를 호출합니다.
     - 요청에 completion report payload가 포함되면, 서버는 completion report를 생성합니다.
@@ -197,7 +197,7 @@ Convention commands are tightly coupled to `.agentteams/`.
 - Completion reports: `.../completion-reports`
 - Postmortems: `.../post-mortems`
 
-CLI supports `--api-url`, `--api-key`, `--team-id`, `--project-id`, `--agent-name` overrides for environments without local config.
+CLI supports `--api-url`, `--api-key`, `--team-id`, and `--project-id` overrides for environments without local config.
 
 #### `report create` 입력 규칙
 
@@ -313,12 +313,11 @@ stateDiagram-v2
 
 If you attempt a disallowed transition, the API returns `400` with `허용되지 않은 상태 전이입니다`.
 
-### `plan assign` behavior
+### Plan assignment behavior
 
-`agentteams plan assign` sets the plan to `ASSIGNED` as long as the plan is not terminal.
+The CLI does not expose a `plan assign` command or a plan `--agent` option. Plan assignment is inferred by the API from the authenticated API key's agent configuration during lifecycle operations such as `plan start` and quick-plan creation.
 
-- Not allowed when current status is `DONE` or `CANCELLED`
-- Otherwise allowed and results in `ASSIGNED`
+If a product surface needs explicit reassignment, it should use the server-side assignment API path rather than reintroducing CLI-side agent selection.
 
 ### Content edit/delete constraints (status-based)
 

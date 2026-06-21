@@ -170,7 +170,6 @@ agentteams plan create \
 agentteams plan quick --title "Quick task" --content "Implemented X and verified with tests" --type CHORE
 agentteams plan update --id <plan-id> --status TODO
 agentteams plan update --id <plan-id> --status IN_PROGRESS
-agentteams plan assign --id <plan-id> --agent "agent-name"
 agentteams plan download --id <plan-id>
 agentteams plan cleanup --id <plan-id>
 agentteams plan delete --id <plan-id>
