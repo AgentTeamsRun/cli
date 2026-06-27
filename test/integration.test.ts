@@ -376,6 +376,27 @@ describe('CLI Integration Tests', () => {
       });
     });
 
+    it('prefixed entity id: should normalize agentteams_pln_ prefix to a bare id', async () => {
+      axiosGetSpy.mockResolvedValue({ data: { data: { id: 't1' } } } as any);
+      axiosPutSpy.mockResolvedValue({ data: { data: { id: 't1' } } } as any);
+
+      const uuid = 'f62762fc-730a-4201-8586-e2541505ed1b';
+      await executeCommand('plan', 'get', { id: `agentteams_pln_${uuid}` });
+      await executeCommand('plan', 'update', {
+        id: `agentteams_pln_${uuid}`,
+        status: 'IN_PROGRESS',
+      });
+
+      expect(axiosGetSpy).toHaveBeenCalledWith(`${API_URL}/api/projects/${PROJECT_ID}/plans/${uuid}`, {
+        headers: authHeaders(),
+      });
+      expect(axiosPutSpy).toHaveBeenCalledWith(
+        `${API_URL}/api/projects/${PROJECT_ID}/plans/${uuid}`,
+        { status: 'IN_PROGRESS' },
+        { headers: authHeaders() },
+      );
+    });
+
     it('linear issue get: should call the linear issue endpoint', async () => {
       axiosGetSpy.mockResolvedValue({
         data: {
@@ -1848,6 +1869,170 @@ describe('CLI Integration Tests', () => {
       }
     });
 
+    it('convention create: should forward --scope to the POST payload', async () => {
+      axiosPostSpy.mockResolvedValueOnce({
+        data: {
+          data: {
+            id: 'cv-scoped',
+            updatedAt: '2026-02-19T00:00:00.000Z',
+            webUrl: 'https://app.example/conventions/cv-scoped',
+          },
+        },
+      } as any);
+
+      const originalCwd = process.cwd();
+      const tempCwd = mkdtempSync(join(tmpdir(), 'agentteams-convention-create-scope-'));
+
+      try {
+        const agentteamsDir = join(tempCwd, '.agentteams');
+        mkdirSync(join(agentteamsDir, 'rules'), { recursive: true });
+
+        writeFileSync(
+          join(agentteamsDir, 'config.json'),
+          JSON.stringify(
+            {
+              teamId: 'team_1',
+              projectId: PROJECT_ID,
+              agentName: 'test-agent',
+              apiKey: 'key_test123',
+              apiUrl: API_URL,
+            },
+            null,
+            2,
+          ) + '\n',
+          'utf-8',
+        );
+
+        const filePath = join(agentteamsDir, 'rules', 'scoped-rule.md');
+        writeFileSync(filePath, `---\ntrigger: always_on\n---\n\n# Scoped Rule\n\n- ok\n`, 'utf-8');
+
+        process.chdir(tempCwd);
+        await executeCommand('convention', 'create', {
+          cwd: tempCwd,
+          file: ['.agentteams/rules/scoped-rule.md'],
+          scope: 'PERSONAL',
+        });
+
+        expect(axiosPostSpy).toHaveBeenCalledWith(
+          `${API_URL}/api/projects/${PROJECT_ID}/conventions`,
+          expect.objectContaining({ scope: 'PERSONAL' }),
+          { headers: authHeaders() },
+        );
+      } finally {
+        process.chdir(originalCwd);
+        rmSync(tempCwd, { recursive: true, force: true });
+      }
+    });
+
+    it('convention create: should read scope from frontmatter when flag is absent', async () => {
+      axiosPostSpy.mockResolvedValueOnce({
+        data: {
+          data: {
+            id: 'cv-fm-scoped',
+            updatedAt: '2026-02-19T00:00:00.000Z',
+            webUrl: 'https://app.example/conventions/cv-fm-scoped',
+          },
+        },
+      } as any);
+
+      const originalCwd = process.cwd();
+      const tempCwd = mkdtempSync(join(tmpdir(), 'agentteams-convention-create-fm-scope-'));
+
+      try {
+        const agentteamsDir = join(tempCwd, '.agentteams');
+        mkdirSync(join(agentteamsDir, 'rules'), { recursive: true });
+
+        writeFileSync(
+          join(agentteamsDir, 'config.json'),
+          JSON.stringify(
+            {
+              teamId: 'team_1',
+              projectId: PROJECT_ID,
+              agentName: 'test-agent',
+              apiKey: 'key_test123',
+              apiUrl: API_URL,
+            },
+            null,
+            2,
+          ) + '\n',
+          'utf-8',
+        );
+
+        const filePath = join(agentteamsDir, 'rules', 'fm-scoped-rule.md');
+        writeFileSync(filePath, `---\ntrigger: always_on\nscope: PERSONAL\n---\n\n# FM Scoped Rule\n\n- ok\n`, 'utf-8');
+
+        process.chdir(tempCwd);
+        await executeCommand('convention', 'create', {
+          cwd: tempCwd,
+          file: ['.agentteams/rules/fm-scoped-rule.md'],
+        });
+
+        expect(axiosPostSpy).toHaveBeenCalledWith(
+          `${API_URL}/api/projects/${PROJECT_ID}/conventions`,
+          expect.objectContaining({ scope: 'PERSONAL' }),
+          { headers: authHeaders() },
+        );
+      } finally {
+        process.chdir(originalCwd);
+        rmSync(tempCwd, { recursive: true, force: true });
+      }
+    });
+
+    it('convention create: should omit scope from payload when neither flag nor frontmatter set it', async () => {
+      axiosPostSpy.mockResolvedValueOnce({
+        data: {
+          data: {
+            id: 'cv-no-scope',
+            updatedAt: '2026-02-19T00:00:00.000Z',
+            webUrl: 'https://app.example/conventions/cv-no-scope',
+          },
+        },
+      } as any);
+
+      const originalCwd = process.cwd();
+      const tempCwd = mkdtempSync(join(tmpdir(), 'agentteams-convention-create-no-scope-'));
+
+      try {
+        const agentteamsDir = join(tempCwd, '.agentteams');
+        mkdirSync(join(agentteamsDir, 'rules'), { recursive: true });
+
+        writeFileSync(
+          join(agentteamsDir, 'config.json'),
+          JSON.stringify(
+            {
+              teamId: 'team_1',
+              projectId: PROJECT_ID,
+              agentName: 'test-agent',
+              apiKey: 'key_test123',
+              apiUrl: API_URL,
+            },
+            null,
+            2,
+          ) + '\n',
+          'utf-8',
+        );
+
+        const filePath = join(agentteamsDir, 'rules', 'plain-rule.md');
+        writeFileSync(filePath, `---\ntrigger: always_on\n---\n\n# Plain Rule\n\n- ok\n`, 'utf-8');
+
+        process.chdir(tempCwd);
+        await executeCommand('convention', 'create', {
+          cwd: tempCwd,
+          file: ['.agentteams/rules/plain-rule.md'],
+        });
+
+        const postCall = axiosPostSpy.mock.calls.find(
+          (call) => call[0] === `${API_URL}/api/projects/${PROJECT_ID}/conventions`,
+        );
+        expect(postCall).toBeDefined();
+        const payload = postCall![1] as Record<string, unknown>;
+        expect('scope' in payload).toBe(false);
+      } finally {
+        process.chdir(originalCwd);
+        rmSync(tempCwd, { recursive: true, force: true });
+      }
+    });
+
     it('convention create: should show actionable frontmatter parse errors', async () => {
       const originalCwd = process.cwd();
       const tempCwd = mkdtempSync(join(tmpdir(), 'agentteams-convention-create-bad-yaml-'));
@@ -1951,6 +2136,7 @@ describe('CLI Integration Tests', () => {
       await executeCommand('report', 'create', {
         title: 'Test report',
         file: reportFile,
+        planId: 'plan-1',
         runnerType: 'CLAUDE_CODE',
         model: 'claude-opus-4-6',
       });
@@ -1964,6 +2150,7 @@ describe('CLI Integration Tests', () => {
           title: 'Test report',
           content: '# Report',
           status: 'COMPLETED',
+          planId: 'plan-1',
         }),
         { headers: authHeaders() },
       );
@@ -1980,6 +2167,7 @@ describe('CLI Integration Tests', () => {
       await executeCommand('report', 'create', {
         title: 'File report',
         file: reportFile,
+        planId: 'plan-1',
         runnerType: 'CLAUDE_CODE',
         model: 'claude-opus-4-6',
       });
@@ -1989,6 +2177,7 @@ describe('CLI Integration Tests', () => {
         expect.objectContaining({
           title: 'File report',
           content: '## Summary\n- done',
+          planId: 'plan-1',
         }),
         { headers: authHeaders() },
       );
@@ -2090,6 +2279,7 @@ describe('CLI Integration Tests', () => {
       await executeCommand('report', 'create', {
         title: 'Metric report',
         file: reportFile,
+        planId: 'plan-1',
         runnerType: 'CLAUDE_CODE',
         model: 'claude-opus-4-6',
         git: false,

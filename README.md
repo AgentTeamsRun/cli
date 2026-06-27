@@ -167,6 +167,7 @@ agentteams plan create \
   # - `plan create` sends the current git origin URL by default.
   # - Use `--repository-remote-url <url>` to override it.
 
+# quick log: record already-done work (creates a plan + report in one shot)
 agentteams plan quick --title "Quick task" --content "Implemented X and verified with tests" --type CHORE
 agentteams plan update --id <plan-id> --status TODO
 agentteams plan update --id <plan-id> --status IN_PROGRESS
@@ -185,7 +186,7 @@ Priorities: `LOW`, `MEDIUM`, `HIGH`
 
 Plan template values (create): `refactor-minimal`, `quick-minimal`
 
-`plan quick` behavior:
+`plan quick` (quick log) behavior — the path for recording work you already finished without a pre-existing plan:
 
 - Creates a plan with `--content` as the plan body (`--content` or `--file` is required)
 - Uses `LOW` as the default priority (override with `--priority`)
@@ -237,12 +238,15 @@ agentteams agent-config delete --id <config-id>
 
 Manage completion reports.
 
+A completion report is always tied to a plan, so `report create` **requires `--plan-id`** — there is no standalone (plan-less) report. To record work you already finished without a pre-existing plan, use a quick log (`agentteams plan quick`) instead.
+
 Tip: Include reproducible verification evidence (commands + outcomes), but keep outcomes short: `pass/fail + 1–3 lines of summary`. Do not paste long raw logs into the report body.
 
 ```bash
 agentteams report list
 
 agentteams report create \
+  --plan-id <plan-id> \
   --title "AgentTeams completion report" \
   --file ./report.md \
   --status COMPLETED
@@ -253,6 +257,7 @@ agentteams report create \
 
 # with metrics (auto + manual)
 agentteams report create \
+  --plan-id <plan-id> \
   --title "CLI metrics report" \
   --file ./report.md \
   --files-modified 5 \
@@ -262,6 +267,7 @@ agentteams report create \
 
 # disable git auto collection
 agentteams report create \
+  --plan-id <plan-id> \
   --title "Manual metrics report" \
   --file ./report.md \
   --no-git
@@ -365,9 +371,20 @@ Most resource commands support `--format json|text`.
 Output behavior by default:
 
 - `plan create|update|start|finish|quick`: prints short summary lines on stdout by default.
+- `report|postmortem|coaction create|update` and `document create|update`: print short meta-only summary lines by default (the full record body — e.g. the document content — is **not** echoed to stdout).
 - `plan list|get` and other read-oriented commands: keep full output by default.
 - `--verbose`: always prints full output to stdout.
+- `--format json` (explicit): prints the full structured result, keeping existing automation consumers intact.
 - `--output-file <path>`: always writes full output to file and keeps stdout short.
+
+### Prefixed entity IDs
+
+Entity references copied from the AgentTeams web UI carry a type prefix (e.g. `agentteams_pln_<uuid>`). Any `--id`/`--plan-id`/`--completion-report-id`/etc. value is normalized to its bare id automatically, so you can paste a prefixed id directly:
+
+```bash
+agentteams plan get --id agentteams_pln_f62762fc-730a-4201-8586-e2541505ed1b
+# resolves to plan f62762fc-730a-4201-8586-e2541505ed1b
+```
 
 ### Plan HTML Preview Enforcement
 

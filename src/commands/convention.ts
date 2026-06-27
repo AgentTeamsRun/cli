@@ -51,6 +51,7 @@ type ConventionDeleteOptions = ConventionCommandOptions & {
 
 type ConventionCreateOptions = ConventionCommandOptions & {
   file: string | string[];
+  scope?: string;
 };
 
 type ConventionListItem = {
@@ -793,12 +794,14 @@ export async function conventionCreate(options: ConventionCreateOptions): Promis
     const trigger = toOptionalString(frontmatter.trigger)?.trim();
     const description = toOptionalString(frontmatter.description)?.trim();
     const agentInstruction = toOptionalString(frontmatter.agentInstruction);
+    const scope = toOptionalString(options.scope)?.trim() || toOptionalString(frontmatter.scope)?.trim();
 
     if (trigger) payload.trigger = trigger;
     if (description) payload.description = description;
     if (typeof agentInstruction === 'string' && agentInstruction.trim().length > 0) {
       payload.agentInstruction = agentInstruction.trimEnd();
     }
+    if (scope) payload.scope = scope;
 
     const response = await withSpinner(`Creating convention for ${fileRelativePath}...`, () =>
       httpClient.post(`${apiUrl}/api/projects/${config.projectId}/conventions`, payload, { headers }),

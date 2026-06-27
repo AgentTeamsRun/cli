@@ -47,6 +47,13 @@ export async function executeReportCommand(apiUrl: string, headers: any, action:
       return getReport(apiUrl, options.projectId, headers, options.id);
     }
     case 'create': {
+      // 완료보고서는 항상 plan에 종속된다. plan 없이 빠르게 기록하려면 `agentteams plan quick`(퀵로그)를 사용한다.
+      if (!toNonEmptyString(options.planId)) {
+        throw new Error(
+          '--plan-id is required for report create. A completion report must be linked to a plan. ' +
+            'To record work without a pre-existing plan, use `agentteams plan quick` (quick log) instead.',
+        );
+      }
       if (!options.runnerType || !options.model) {
         throw new Error('--runner-type and --model are required for report create.');
       }
