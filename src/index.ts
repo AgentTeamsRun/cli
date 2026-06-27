@@ -292,9 +292,13 @@ program
 
 program
   .command('comment')
-  .description('Manage plan comments')
-  .argument('<action>', 'Action to perform (list, get, create, update, delete)')
-  .option('--id <id>', 'Comment ID')
+  .description('Manage plan comments and their 1-depth replies')
+  .argument(
+    '<action>',
+    'Action to perform (list, get, create, update, delete, reply-list, reply-create, reply-update, reply-delete)',
+  )
+  .option('--id <id>', 'Comment ID (parent comment ID for reply-list/reply-create)')
+  .option('--reply-id <id>', 'Reply ID (for reply-update/reply-delete)')
   .option('--plan-id <id>', 'Plan ID')
   .option('--type <type>', 'Comment type (RISK, MODIFICATION, GENERAL)')
   .option('--content <content>', 'Comment content')
@@ -309,6 +313,7 @@ program
     try {
       const result = await executeCommand('comment', action, {
         id: options.id,
+        replyId: options.replyId,
         planId: options.planId,
         type: options.type,
         content: options.content,
