@@ -1848,6 +1848,170 @@ describe('CLI Integration Tests', () => {
       }
     });
 
+    it('convention create: should forward --scope to the POST payload', async () => {
+      axiosPostSpy.mockResolvedValueOnce({
+        data: {
+          data: {
+            id: 'cv-scoped',
+            updatedAt: '2026-02-19T00:00:00.000Z',
+            webUrl: 'https://app.example/conventions/cv-scoped',
+          },
+        },
+      } as any);
+
+      const originalCwd = process.cwd();
+      const tempCwd = mkdtempSync(join(tmpdir(), 'agentteams-convention-create-scope-'));
+
+      try {
+        const agentteamsDir = join(tempCwd, '.agentteams');
+        mkdirSync(join(agentteamsDir, 'rules'), { recursive: true });
+
+        writeFileSync(
+          join(agentteamsDir, 'config.json'),
+          JSON.stringify(
+            {
+              teamId: 'team_1',
+              projectId: PROJECT_ID,
+              agentName: 'test-agent',
+              apiKey: 'key_test123',
+              apiUrl: API_URL,
+            },
+            null,
+            2,
+          ) + '\n',
+          'utf-8',
+        );
+
+        const filePath = join(agentteamsDir, 'rules', 'scoped-rule.md');
+        writeFileSync(filePath, `---\ntrigger: always_on\n---\n\n# Scoped Rule\n\n- ok\n`, 'utf-8');
+
+        process.chdir(tempCwd);
+        await executeCommand('convention', 'create', {
+          cwd: tempCwd,
+          file: ['.agentteams/rules/scoped-rule.md'],
+          scope: 'PERSONAL',
+        });
+
+        expect(axiosPostSpy).toHaveBeenCalledWith(
+          `${API_URL}/api/projects/${PROJECT_ID}/conventions`,
+          expect.objectContaining({ scope: 'PERSONAL' }),
+          { headers: authHeaders() },
+        );
+      } finally {
+        process.chdir(originalCwd);
+        rmSync(tempCwd, { recursive: true, force: true });
+      }
+    });
+
+    it('convention create: should read scope from frontmatter when flag is absent', async () => {
+      axiosPostSpy.mockResolvedValueOnce({
+        data: {
+          data: {
+            id: 'cv-fm-scoped',
+            updatedAt: '2026-02-19T00:00:00.000Z',
+            webUrl: 'https://app.example/conventions/cv-fm-scoped',
+          },
+        },
+      } as any);
+
+      const originalCwd = process.cwd();
+      const tempCwd = mkdtempSync(join(tmpdir(), 'agentteams-convention-create-fm-scope-'));
+
+      try {
+        const agentteamsDir = join(tempCwd, '.agentteams');
+        mkdirSync(join(agentteamsDir, 'rules'), { recursive: true });
+
+        writeFileSync(
+          join(agentteamsDir, 'config.json'),
+          JSON.stringify(
+            {
+              teamId: 'team_1',
+              projectId: PROJECT_ID,
+              agentName: 'test-agent',
+              apiKey: 'key_test123',
+              apiUrl: API_URL,
+            },
+            null,
+            2,
+          ) + '\n',
+          'utf-8',
+        );
+
+        const filePath = join(agentteamsDir, 'rules', 'fm-scoped-rule.md');
+        writeFileSync(filePath, `---\ntrigger: always_on\nscope: PERSONAL\n---\n\n# FM Scoped Rule\n\n- ok\n`, 'utf-8');
+
+        process.chdir(tempCwd);
+        await executeCommand('convention', 'create', {
+          cwd: tempCwd,
+          file: ['.agentteams/rules/fm-scoped-rule.md'],
+        });
+
+        expect(axiosPostSpy).toHaveBeenCalledWith(
+          `${API_URL}/api/projects/${PROJECT_ID}/conventions`,
+          expect.objectContaining({ scope: 'PERSONAL' }),
+          { headers: authHeaders() },
+        );
+      } finally {
+        process.chdir(originalCwd);
+        rmSync(tempCwd, { recursive: true, force: true });
+      }
+    });
+
+    it('convention create: should omit scope from payload when neither flag nor frontmatter set it', async () => {
+      axiosPostSpy.mockResolvedValueOnce({
+        data: {
+          data: {
+            id: 'cv-no-scope',
+            updatedAt: '2026-02-19T00:00:00.000Z',
+            webUrl: 'https://app.example/conventions/cv-no-scope',
+          },
+        },
+      } as any);
+
+      const originalCwd = process.cwd();
+      const tempCwd = mkdtempSync(join(tmpdir(), 'agentteams-convention-create-no-scope-'));
+
+      try {
+        const agentteamsDir = join(tempCwd, '.agentteams');
+        mkdirSync(join(agentteamsDir, 'rules'), { recursive: true });
+
+        writeFileSync(
+          join(agentteamsDir, 'config.json'),
+          JSON.stringify(
+            {
+              teamId: 'team_1',
+              projectId: PROJECT_ID,
+              agentName: 'test-agent',
+              apiKey: 'key_test123',
+              apiUrl: API_URL,
+            },
+            null,
+            2,
+          ) + '\n',
+          'utf-8',
+        );
+
+        const filePath = join(agentteamsDir, 'rules', 'plain-rule.md');
+        writeFileSync(filePath, `---\ntrigger: always_on\n---\n\n# Plain Rule\n\n- ok\n`, 'utf-8');
+
+        process.chdir(tempCwd);
+        await executeCommand('convention', 'create', {
+          cwd: tempCwd,
+          file: ['.agentteams/rules/plain-rule.md'],
+        });
+
+        const postCall = axiosPostSpy.mock.calls.find(
+          (call) => call[0] === `${API_URL}/api/projects/${PROJECT_ID}/conventions`,
+        );
+        expect(postCall).toBeDefined();
+        const payload = postCall![1] as Record<string, unknown>;
+        expect('scope' in payload).toBe(false);
+      } finally {
+        process.chdir(originalCwd);
+        rmSync(tempCwd, { recursive: true, force: true });
+      }
+    });
+
     it('convention create: should show actionable frontmatter parse errors', async () => {
       const originalCwd = process.cwd();
       const tempCwd = mkdtempSync(join(tmpdir(), 'agentteams-convention-create-bad-yaml-'));

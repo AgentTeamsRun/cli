@@ -3,7 +3,7 @@
 import { createRequire } from 'node:module';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
-import { Command } from 'commander';
+import { Command, Option } from 'commander';
 import { executeCommand } from './commands/index.js';
 import { formatOutput } from './utils/formatter.js';
 import { handleError } from './utils/errors.js';
@@ -762,6 +762,12 @@ program
     [] as string[],
   )
   .option('--apply', 'Apply changes to server (default: dry-run)', false)
+  .addOption(
+    new Option('--scope <scope>', 'Convention scope (create only; defaults to PROJECT)').choices([
+      'PROJECT',
+      'PERSONAL',
+    ]),
+  )
   .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
   .option('--verbose', 'Print full output to stdout (useful with --output-file)', false)
   .addHelpText('after', CONVENTION_HINT)
@@ -771,6 +777,7 @@ program
         cwd: options.cwd ?? process.cwd(),
         file: options.file,
         apply: options.apply,
+        scope: options.scope,
       });
 
       printCommandResult({

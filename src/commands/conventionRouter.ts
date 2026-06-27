@@ -29,7 +29,7 @@ async function executeConventionCommandWithContext(action: string, options: any)
       if (!hasFiles) {
         throw new Error('--file is required for convention create');
       }
-      return conventionCreate({ cwd: options?.cwd, file: options.file });
+      return conventionCreate({ cwd: options?.cwd, file: options.file, scope: options?.scope });
     }
     case 'update': {
       const files = options?.file;
