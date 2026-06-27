@@ -167,6 +167,7 @@ agentteams plan create \
   # - `plan create` sends the current git origin URL by default.
   # - Use `--repository-remote-url <url>` to override it.
 
+# quick log: record already-done work (creates a plan + report in one shot)
 agentteams plan quick --title "Quick task" --content "Implemented X and verified with tests" --type CHORE
 agentteams plan update --id <plan-id> --status TODO
 agentteams plan update --id <plan-id> --status IN_PROGRESS
@@ -185,7 +186,7 @@ Priorities: `LOW`, `MEDIUM`, `HIGH`
 
 Plan template values (create): `refactor-minimal`, `quick-minimal`
 
-`plan quick` behavior:
+`plan quick` (quick log) behavior — the path for recording work you already finished without a pre-existing plan:
 
 - Creates a plan with `--content` as the plan body (`--content` or `--file` is required)
 - Uses `LOW` as the default priority (override with `--priority`)
@@ -237,12 +238,15 @@ agentteams agent-config delete --id <config-id>
 
 Manage completion reports.
 
+A completion report is always tied to a plan, so `report create` **requires `--plan-id`** — there is no standalone (plan-less) report. To record work you already finished without a pre-existing plan, use a quick log (`agentteams plan quick`) instead.
+
 Tip: Include reproducible verification evidence (commands + outcomes), but keep outcomes short: `pass/fail + 1–3 lines of summary`. Do not paste long raw logs into the report body.
 
 ```bash
 agentteams report list
 
 agentteams report create \
+  --plan-id <plan-id> \
   --title "AgentTeams completion report" \
   --file ./report.md \
   --status COMPLETED
@@ -253,6 +257,7 @@ agentteams report create \
 
 # with metrics (auto + manual)
 agentteams report create \
+  --plan-id <plan-id> \
   --title "CLI metrics report" \
   --file ./report.md \
   --files-modified 5 \
@@ -262,6 +267,7 @@ agentteams report create \
 
 # disable git auto collection
 agentteams report create \
+  --plan-id <plan-id> \
   --title "Manual metrics report" \
   --file ./report.md \
   --no-git

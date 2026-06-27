@@ -331,7 +331,7 @@ export function buildQuickPlanResult(
   const reportCreated = !!report;
 
   return {
-    message: `Quick plan completed (${planId})`,
+    message: `Quick log completed (${planId})`,
     planId,
     ...(status ? { status } : {}),
     reportCreated,
@@ -972,16 +972,16 @@ export async function executePlanCommand(
       }
 
       const quickResult = await withSpinner(
-        'Completing quick plan...',
+        'Completing quick log...',
         () => quickPlan(apiUrl, projectId, headers, quickBody),
-        'Quick plan completed',
+        'Quick log completed',
       );
       if (hasQuickFile) deleteIfTempFile(options.file as string, { keep: options.keepTemp });
       if (options.reportFile) deleteIfTempFile(options.reportFile, { keep: options.keepTemp });
 
       const planId: string = quickResult?.data?.id ?? quickResult?.data?.plan?.id;
       if (!planId) {
-        throw new Error('Failed to complete quick plan: no plan ID returned.');
+        throw new Error('Failed to complete quick log: no plan ID returned.');
       }
 
       return buildQuickPlanResult(planId, quickResult, quickResult);

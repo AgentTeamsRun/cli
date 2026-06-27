@@ -2136,6 +2136,7 @@ describe('CLI Integration Tests', () => {
       await executeCommand('report', 'create', {
         title: 'Test report',
         file: reportFile,
+        planId: 'plan-1',
         runnerType: 'CLAUDE_CODE',
         model: 'claude-opus-4-6',
       });
@@ -2149,6 +2150,7 @@ describe('CLI Integration Tests', () => {
           title: 'Test report',
           content: '# Report',
           status: 'COMPLETED',
+          planId: 'plan-1',
         }),
         { headers: authHeaders() },
       );
@@ -2165,6 +2167,7 @@ describe('CLI Integration Tests', () => {
       await executeCommand('report', 'create', {
         title: 'File report',
         file: reportFile,
+        planId: 'plan-1',
         runnerType: 'CLAUDE_CODE',
         model: 'claude-opus-4-6',
       });
@@ -2174,6 +2177,7 @@ describe('CLI Integration Tests', () => {
         expect.objectContaining({
           title: 'File report',
           content: '## Summary\n- done',
+          planId: 'plan-1',
         }),
         { headers: authHeaders() },
       );
@@ -2275,6 +2279,7 @@ describe('CLI Integration Tests', () => {
       await executeCommand('report', 'create', {
         title: 'Metric report',
         file: reportFile,
+        planId: 'plan-1',
         runnerType: 'CLAUDE_CODE',
         model: 'claude-opus-4-6',
         git: false,
