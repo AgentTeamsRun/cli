@@ -14,6 +14,9 @@ const summaryDefaultActions: Record<string, Set<string>> = {
   report: new Set(['create', 'update']),
   postmortem: new Set(['create', 'update']),
   coaction: new Set(['create', 'update']),
+  // document create/update echo the full body in their response; keep stdout
+  // meta-only by default so agents are not flooded with the document content.
+  document: new Set(['create', 'update']),
   linear: new Set(['comment-create']),
 };
 
@@ -48,7 +51,9 @@ export function createSummaryLines(
 ): string[] {
   const lines: string[] = [];
 
-  const message = extractString(result, 'message');
+  // Commands attach a human-readable `message` at the top level (alongside the
+  // nested `data` payload), so prefer that before the nested candidate.
+  const message = extractTopLevelString(result, 'message') ?? extractString(result, 'message');
   if (message) {
     lines.push(message);
   } else {

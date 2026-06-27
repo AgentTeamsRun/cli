@@ -376,6 +376,27 @@ describe('CLI Integration Tests', () => {
       });
     });
 
+    it('prefixed entity id: should normalize agentteams_pln_ prefix to a bare id', async () => {
+      axiosGetSpy.mockResolvedValue({ data: { data: { id: 't1' } } } as any);
+      axiosPutSpy.mockResolvedValue({ data: { data: { id: 't1' } } } as any);
+
+      const uuid = 'f62762fc-730a-4201-8586-e2541505ed1b';
+      await executeCommand('plan', 'get', { id: `agentteams_pln_${uuid}` });
+      await executeCommand('plan', 'update', {
+        id: `agentteams_pln_${uuid}`,
+        status: 'IN_PROGRESS',
+      });
+
+      expect(axiosGetSpy).toHaveBeenCalledWith(`${API_URL}/api/projects/${PROJECT_ID}/plans/${uuid}`, {
+        headers: authHeaders(),
+      });
+      expect(axiosPutSpy).toHaveBeenCalledWith(
+        `${API_URL}/api/projects/${PROJECT_ID}/plans/${uuid}`,
+        { status: 'IN_PROGRESS' },
+        { headers: authHeaders() },
+      );
+    });
+
     it('linear issue get: should call the linear issue endpoint', async () => {
       axiosGetSpy.mockResolvedValue({
         data: {

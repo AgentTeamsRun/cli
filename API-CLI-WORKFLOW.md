@@ -131,7 +131,7 @@ Many list endpoints accept `page` and `pageSize`.
 
 ### `--output-file <path>` / `--verbose`
 
-대상(주요 커맨드 전반): `init`, `sync`, `status`, `plan`, `comment`, `report`, `postmortem`, `dependency`, `agent-config`, `config`, `convention`
+대상(주요 커맨드 전반): `init`, `sync`, `status`, `plan`, `comment`, `report`, `postmortem`, `coaction`, `document`, `dependency`, `agent-config`, `config`, `convention`
 
 - `--output-file <path>`
   - “원래 stdout에 출력될 전체 결과”를 지정한 파일에 그대로 저장합니다.
@@ -142,6 +142,12 @@ Many list endpoints accept `page` and `pageSize`.
   - `--output-file`과 함께 사용하면 stdout에도 전체 결과를 출력합니다(파일 저장은 유지).
 
 요약 출력은 기본 영어 메시지로 출력됩니다(자동화/로그 파싱 관점에서 고정된 문구를 선호).
+
+`plan/report/postmortem/coaction/document`의 `create`/`update`는 기본적으로 메타 중심 요약만 stdout에 출력하고, 레코드 본문(예: 문서 content)은 echo하지 않습니다. 전체 구조화 결과가 필요하면 `--format json`(명시) 또는 `--verbose`를 사용하세요.
+
+### Prefixed entity ID 정규화
+
+웹 UI 엔티티 레퍼런스의 prefixed id(`agentteams_pln_<uuid>` 등)는 `--id`/`--plan-id`/`--completion-report-id` 등에 그대로 전달해도 내부에서 bare id로 정규화됩니다(`agentteams_pln_f627…` → `f627…`).
 
 text 출력에서 객체 필드는 핵심 식별 필드(`id/title/status/priority/updatedAt/createdAt`)를 우선 표시한 뒤 나머지를 정렬해 출력합니다.
 

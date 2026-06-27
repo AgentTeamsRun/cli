@@ -221,4 +221,68 @@ describe('outputPolicy', () => {
       }),
     ).toBe(true);
   });
+
+  it('prints summary by default for document create/update (no body echo)', () => {
+    expect(
+      shouldPrintSummary({
+        resource: 'document',
+        action: 'create',
+        format: 'json',
+        formatExplicit: false,
+      }),
+    ).toBe(true);
+
+    expect(
+      shouldPrintSummary({
+        resource: 'document',
+        action: 'update',
+        format: 'json',
+        formatExplicit: false,
+      }),
+    ).toBe(true);
+  });
+
+  it('does not echo the document body in default summary lines', () => {
+    const lines = createSummaryLines(
+      {
+        message: 'Document updated',
+        data: {
+          id: 'doc-123',
+          title: 'Runbook',
+          body: 'A'.repeat(5000),
+          webUrl: 'https://agentteams.example/documents/doc-123',
+        },
+      },
+      { resource: 'document', action: 'update' },
+    );
+
+    expect(lines).toEqual([
+      'Document updated',
+      'id: doc-123, title: Runbook',
+      'webUrl: https://agentteams.example/documents/doc-123',
+    ]);
+    expect(lines.some((line) => line.includes('AAAA'))).toBe(false);
+  });
+
+  it('keeps full output for document update when json is explicitly requested', () => {
+    expect(
+      shouldPrintSummary({
+        resource: 'document',
+        action: 'update',
+        format: 'json',
+        formatExplicit: true,
+      }),
+    ).toBe(false);
+  });
+
+  it('keeps full output for document list by default', () => {
+    expect(
+      shouldPrintSummary({
+        resource: 'document',
+        action: 'list',
+        format: 'json',
+        formatExplicit: false,
+      }),
+    ).toBe(false);
+  });
 });

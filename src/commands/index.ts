@@ -16,6 +16,7 @@ import { executeLinearCommand } from './linear.js';
 import { executeAttachmentCommand } from './attachment.js';
 import { loadConfig } from '../utils/config.js';
 import { normalizeCommandContext, withCommandContext } from '../utils/commandContext.js';
+import { normalizeEntityIdOptions } from '../utils/entityId.js';
 import { attachErrorContext } from '../utils/errors.js';
 import type { Config } from '../types/index.js';
 
@@ -62,8 +63,11 @@ export async function executeCommand(
   action: string,
   options: Record<string, unknown>,
 ): Promise<unknown> {
+  // Accept prefixed entity ids (e.g. `agentteams_pln_<uuid>`) pasted from web
+  // UI references by normalizing them to bare ids before any command runs.
+  const normalizedOptions = normalizeEntityIdOptions(options);
   return withCommandContext(normalizeCommandContext(resource, action), () =>
-    executeCommandWithContext(resource, action, options),
+    executeCommandWithContext(resource, action, normalizedOptions),
   );
 }
 

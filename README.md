@@ -365,9 +365,20 @@ Most resource commands support `--format json|text`.
 Output behavior by default:
 
 - `plan create|update|start|finish|quick`: prints short summary lines on stdout by default.
+- `report|postmortem|coaction create|update` and `document create|update`: print short meta-only summary lines by default (the full record body — e.g. the document content — is **not** echoed to stdout).
 - `plan list|get` and other read-oriented commands: keep full output by default.
 - `--verbose`: always prints full output to stdout.
+- `--format json` (explicit): prints the full structured result, keeping existing automation consumers intact.
 - `--output-file <path>`: always writes full output to file and keeps stdout short.
+
+### Prefixed entity IDs
+
+Entity references copied from the AgentTeams web UI carry a type prefix (e.g. `agentteams_pln_<uuid>`). Any `--id`/`--plan-id`/`--completion-report-id`/etc. value is normalized to its bare id automatically, so you can paste a prefixed id directly:
+
+```bash
+agentteams plan get --id agentteams_pln_f62762fc-730a-4201-8586-e2541505ed1b
+# resolves to plan f62762fc-730a-4201-8586-e2541505ed1b
+```
 
 ### Plan HTML Preview Enforcement
 
