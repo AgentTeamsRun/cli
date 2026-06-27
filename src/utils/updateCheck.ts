@@ -55,6 +55,19 @@ async function fetchLatestVersion(): Promise<string | null> {
   }
 }
 
+export async function getLatestCliVersion(): Promise<string | null> {
+  const cache = readCache();
+  if (cache && Date.now() - cache.lastCheck < CHECK_INTERVAL_MS) {
+    return cache.latestVersion;
+  }
+
+  const latestVersion = await fetchLatestVersion();
+  if (!latestVersion) return null;
+
+  writeCache({ lastCheck: Date.now(), latestVersion });
+  return latestVersion;
+}
+
 export function compareVersions(current: string, latest: string): boolean {
   const parse = (v: string) => v.replace(/^v/, '').split('.').map(Number);
   const c = parse(current);
@@ -87,7 +100,7 @@ export function startUpdateCheck(currentVersion: string): Promise<string | null>
     }
 
     // 2. 캐시 없거나 만료 → npm registry fallback
-    const latestVersion = await fetchLatestVersion();
+    const latestVersion = await getLatestCliVersion();
     if (!latestVersion) return null;
 
     writeCache({ lastCheck: Date.now(), latestVersion });
