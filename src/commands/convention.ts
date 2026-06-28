@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, unlinkSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { atomicWriteFileSync } from '../utils/atomicWrite.js';
 import { basename, join, relative, resolve, sep } from 'node:path';
 import httpClient from '../utils/httpClient.js';
@@ -8,7 +9,11 @@ import { diffLines, createTwoFilesPatch } from 'diff';
 import { loadConfig, findProjectConfig } from '../utils/config.js';
 import { withSpinner } from '../utils/spinner.js';
 import { withoutJsonContentType } from '../utils/httpHeaders.js';
+import { compareVersions, getLatestCliVersion } from '../utils/updateCheck.js';
 import type { Config } from '../types/index.js';
+
+const require = createRequire(import.meta.url);
+const pkg = require('../../package.json') as { version: string };
 
 const CONVENTION_DIR = '.agentteams';
 const LEGACY_CONVENTION_DOWNLOAD_DIR = 'conventions';
@@ -18,6 +23,8 @@ const CONVENTION_MANIFEST_FILE = 'conventions.manifest.json';
 type ConventionCommandOptions = {
   cwd?: string;
   config?: Config;
+  currentCliVersion?: string;
+  latestCliVersion?: string | null;
 };
 
 type ConventionDownloadManifestV1 = {
@@ -423,8 +430,21 @@ export async function checkConventionFreshness(
 export type ConventionStatusResult = {
   /** True when the local conventions are behind the server (any change or platform-guide drift). */
   updateAvailable: boolean;
+  /** Explicit alias for updateAvailable; CLI updates are reported separately. */
+  conventionUpdateAvailable: boolean;
   platformGuidesChanged: boolean;
   conventionChanges: ConventionFreshnessChange[];
+  cliUpdateAvailable: boolean;
+  currentCliVersion: string;
+  latestCliVersion: string | null;
+  /** True when either conventions or the CLI need action. */
+  actionRequired: boolean;
+  actions: {
+    updateCli: string | null;
+    syncConventions: string | null;
+  };
+  /** Strong, machine-readable next-step hints for agents and humans. */
+  hints: string[];
   /** One-line human-readable summary. */
   summary: string;
 };
@@ -438,8 +458,105 @@ export function buildStatusSummary(result: ConventionFreshnessResult): string {
   if (counts.updated > 0) parts.push(`${counts.updated} updated`);
   if (counts.deleted > 0) parts.push(`${counts.deleted} deleted`);
 
-  if (parts.length === 0) return '✓ Conventions up to date';
-  return `⚠ Updates available (${parts.join(', ')}). Run 'agentteams convention download' to sync.`;
+  if (parts.length === 0) return '✓ Conventions/platform guides up to date';
+  return `ACTION REQUIRED: Convention updates available (${parts.join(', ')}). Run 'agentteams convention download' now, then re-read .agentteams/convention.md and changed rule files.`;
+}
+
+function buildCliSummary(
+  currentCliVersion: string,
+  latestCliVersion: string | null,
+  cliUpdateAvailable: boolean,
+): string {
+  if (cliUpdateAvailable && latestCliVersion) {
+    return `ACTION REQUIRED: AgentTeams CLI update available (${currentCliVersion} → ${latestCliVersion}). Run 'npm install -g @agentteams/cli' before continuing.`;
+  }
+
+  if (!latestCliVersion) {
+    return `⚠ AgentTeams CLI latest-version check unavailable. Current CLI: ${currentCliVersion}. Run 'npm view @agentteams/cli version' to verify manually.`;
+  }
+
+  return `✓ AgentTeams CLI up to date (${currentCliVersion})`;
+}
+
+function buildCombinedStatusSummary(params: {
+  conventionSummary: string;
+  cliSummary: string;
+  conventionUpdateAvailable: boolean;
+  cliUpdateAvailable: boolean;
+}): string {
+  if (params.conventionUpdateAvailable || params.cliUpdateAvailable) {
+    return [params.cliSummary, params.conventionSummary].join(' ');
+  }
+
+  return `${params.cliSummary}; ${params.conventionSummary}`;
+}
+
+async function resolveCliUpdateStatus(options?: ConventionCommandOptions): Promise<{
+  currentCliVersion: string;
+  latestCliVersion: string | null;
+  cliUpdateAvailable: boolean;
+}> {
+  const currentCliVersion = options?.currentCliVersion ?? pkg.version;
+  const latestCliVersion =
+    options && 'latestCliVersion' in options ? (options.latestCliVersion ?? null) : await getLatestCliVersion();
+  const cliUpdateAvailable = latestCliVersion ? compareVersions(currentCliVersion, latestCliVersion) : false;
+  return { currentCliVersion, latestCliVersion, cliUpdateAvailable };
+}
+
+function buildStatusResult(params: {
+  freshness: ConventionFreshnessResult;
+  currentCliVersion: string;
+  latestCliVersion: string | null;
+  cliUpdateAvailable: boolean;
+}): ConventionStatusResult {
+  const conventionUpdateAvailable =
+    params.freshness.platformGuidesChanged || params.freshness.conventionChanges.length > 0;
+  const conventionSummary = buildStatusSummary(params.freshness);
+  const cliSummary = buildCliSummary(params.currentCliVersion, params.latestCliVersion, params.cliUpdateAvailable);
+  const actions = {
+    updateCli: params.cliUpdateAvailable ? 'npm install -g @agentteams/cli' : null,
+    syncConventions: conventionUpdateAvailable ? 'agentteams convention download' : null,
+  };
+  const hints: string[] = [];
+
+  if (params.cliUpdateAvailable && params.latestCliVersion) {
+    hints.push(
+      `ACTION REQUIRED: Update AgentTeams CLI first: ${actions.updateCli} (current ${params.currentCliVersion}, latest ${params.latestCliVersion}).`,
+    );
+  } else if (!params.latestCliVersion) {
+    hints.push(
+      `WARNING: CLI latest-version check was unavailable. Current CLI is ${params.currentCliVersion}; verify with 'npm view @agentteams/cli version' if freshness matters.`,
+    );
+  } else {
+    hints.push(`OK: AgentTeams CLI is up to date (${params.currentCliVersion}).`);
+  }
+
+  if (conventionUpdateAvailable) {
+    hints.push(
+      `ACTION REQUIRED: Sync conventions now: ${actions.syncConventions}. After syncing, re-read .agentteams/convention.md and any changed rule files before continuing.`,
+    );
+  } else {
+    hints.push('OK: Conventions and platform guides are up to date.');
+  }
+
+  return {
+    updateAvailable: conventionUpdateAvailable,
+    conventionUpdateAvailable,
+    platformGuidesChanged: params.freshness.platformGuidesChanged,
+    conventionChanges: params.freshness.conventionChanges,
+    cliUpdateAvailable: params.cliUpdateAvailable,
+    currentCliVersion: params.currentCliVersion,
+    latestCliVersion: params.latestCliVersion,
+    actionRequired: conventionUpdateAvailable || params.cliUpdateAvailable,
+    actions,
+    hints,
+    summary: buildCombinedStatusSummary({
+      conventionSummary,
+      cliSummary,
+      conventionUpdateAvailable,
+      cliUpdateAvailable: params.cliUpdateAvailable,
+    }),
+  };
 }
 
 /**
@@ -453,15 +570,14 @@ export function buildStatusSummary(result: ConventionFreshnessResult): string {
 export async function conventionStatus(options?: ConventionCommandOptions): Promise<ConventionStatusResult> {
   const config = options?.config ?? loadConfig();
   const projectRoot = findProjectRoot(options?.cwd);
+  const cliStatus = await resolveCliUpdateStatus(options);
 
   // Not configured or no local conventions → nothing to compare; treat as up to date.
   if (!config || !projectRoot) {
-    return {
-      updateAvailable: false,
-      platformGuidesChanged: false,
-      conventionChanges: [],
-      summary: '✓ Conventions up to date',
-    };
+    return buildStatusResult({
+      freshness: { platformGuidesChanged: false, conventionChanges: [] },
+      ...cliStatus,
+    });
   }
 
   const apiUrl = getApiBaseUrl(config.apiUrl);
@@ -471,12 +587,7 @@ export async function conventionStatus(options?: ConventionCommandOptions): Prom
   };
 
   const freshness = await checkConventionFreshness(apiUrl, config.projectId, headers, projectRoot);
-  return {
-    updateAvailable: freshness.platformGuidesChanged || freshness.conventionChanges.length > 0,
-    platformGuidesChanged: freshness.platformGuidesChanged,
-    conventionChanges: freshness.conventionChanges,
-    summary: buildStatusSummary(freshness),
-  };
+  return buildStatusResult({ freshness, ...cliStatus });
 }
 
 export async function conventionList(): Promise<any> {
