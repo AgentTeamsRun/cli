@@ -812,7 +812,7 @@ program
     '--suggested-tags <tags>',
     'Comma-separated AI-suggested tags (auto-promoted when they match existing tags, else await user review)',
   )
-  .option('--visibility <visibility>', 'Document visibility (PROJECT or PRIVATE)')
+  .option('--visibility <visibility>', 'Document visibility: PRIVATE or PROJECT (default: PRIVATE)')
   .option('--archived <state>', 'Archive filter for list (ACTIVE, ARCHIVED, ALL)')
   .option('--revision-id <id>', 'Document revision ID')
   .option('--comment-id <id>', 'Document comment ID')
