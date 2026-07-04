@@ -23,8 +23,8 @@ import {
   deletePlan,
   finishPlanLifecycle,
   getPlan,
-  getPlanDependencies,
   getPlanDetail,
+  getPlanDependencies,
   getPlanStatus,
   linkOriginIssue,
   listOriginIssues,
@@ -57,10 +57,22 @@ type PlanRunbookPlan = {
   contentMarkdown?: string | null;
 };
 
+type PlanRunbookProgress = {
+  total: number;
+  todo: number;
+  inProgress: number;
+  done: number;
+  skipped: number;
+  blocked: number;
+  completed: number;
+  percent: number;
+};
+
 type PlanRunbookDetailResponse = {
   data: {
     plan: PlanRunbookPlan;
     tasks?: PlanRunbookTask[];
+    progress?: PlanRunbookProgress | null;
   };
 };
 
@@ -212,6 +224,32 @@ export function buildPlanRunbookFrontmatter(plan: {
   ]
     .filter(Boolean)
     .join('\n');
+}
+
+export function buildPlanRunbookMarkdown(plan: {
+  contentVersion?: string | null;
+  contentMarkdown?: string | null;
+  progress?: PlanRunbookProgress | null;
+}): string {
+  const markdown = plan.contentMarkdown?.trim() ?? '';
+  if (plan.contentVersion !== 'V2' || !plan.progress) {
+    return markdown;
+  }
+
+  const progress = plan.progress;
+  const progressMarkdown = [
+    '## Progress',
+    '',
+    `- Total: ${progress.total}`,
+    `- Completed: ${progress.completed} / ${progress.total} (${progress.percent}%)`,
+    `- TODO: ${progress.todo}`,
+    `- In Progress: ${progress.inProgress}`,
+    `- Blocked: ${progress.blocked}`,
+    `- Done: ${progress.done}`,
+    `- Skipped: ${progress.skipped}`,
+  ].join('\n');
+
+  return markdown ? `${progressMarkdown}\n\n${markdown}` : progressMarkdown;
 }
 
 const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -961,7 +999,12 @@ export async function executePlanCommand(
             downloadedAt: new Date().toISOString(),
           });
 
-          const markdown = addTaskIdCommentsToPlanRunbook(plan.contentMarkdown ?? '', tasks, plan.contentVersion);
+          const progressMarkdown = buildPlanRunbookMarkdown({
+            contentVersion: plan.contentVersion,
+            contentMarkdown: plan.contentMarkdown,
+            progress: planDetail.progress ?? null,
+          });
+          const markdown = addTaskIdCommentsToPlanRunbook(progressMarkdown, tasks, plan.contentVersion);
           writeFileSync(filePath, `${frontmatter}\n\n${markdown}`, 'utf-8');
           if (plan.contentVersion === 'V2' && tasks.length > 0) {
             writeFileSync(sidecarPath, `${JSON.stringify(buildPlanTaskSidecar(plan.id, tasks), null, 2)}\n`, 'utf-8');

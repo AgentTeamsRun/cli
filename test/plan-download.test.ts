@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   addTaskIdCommentsToPlanRunbook,
+  buildPlanRunbookMarkdown,
   buildPlanTaskSidecar,
   buildFreshnessNoticeLines,
   buildPlanRunbookFrontmatter,
@@ -36,6 +37,41 @@ describe('buildPlanRunbookFrontmatter', () => {
   it('omits webUrl when absent', () => {
     const fm = buildPlanRunbookFrontmatter({ ...base, webUrl: null });
     expect(fm).not.toContain('webUrl');
+  });
+});
+
+describe('buildPlanRunbookMarkdown', () => {
+  it('prepends progress summary for v2 plans', () => {
+    const markdown = buildPlanRunbookMarkdown({
+      contentVersion: 'V2',
+      progress: {
+        total: 3,
+        todo: 1,
+        inProgress: 1,
+        done: 1,
+        skipped: 0,
+        blocked: 0,
+        completed: 1,
+        percent: 33,
+      },
+      contentMarkdown: '## TODOs\n\n### 1. Task A\n\nStatus: DONE',
+    });
+
+    expect(markdown).toContain('## Progress');
+    expect(markdown).toContain('- Completed: 1 / 3 (33%)');
+    expect(markdown).toContain('- In Progress: 1');
+    expect(markdown).toContain('## TODOs');
+    expect(markdown.indexOf('## Progress')).toBeLessThan(markdown.indexOf('## TODOs'));
+  });
+
+  it('keeps v1 markdown unchanged', () => {
+    expect(
+      buildPlanRunbookMarkdown({
+        contentVersion: 'V1',
+        progress: null,
+        contentMarkdown: 'plain v1 runbook',
+      }),
+    ).toBe('plain v1 runbook');
   });
 });
 
