@@ -161,6 +161,33 @@ export function buildUniquePlanRunbookFileName(title: string, planId: string, ex
   return fileName;
 }
 
+// 플랜 런북 다운로드 파일의 frontmatter를 조립한다. v2 플랜은 contentVersion을 포함해
+// 실행 에이전트가 구조화 플랜임을 인지할 수 있게 한다(본문 sections/tasks는 서버가 구조화
+// 데이터에서 파생한 contentMarkdown으로 흘러온다). v1 호환: contentVersion 미제공 시 생략.
+export function buildPlanRunbookFrontmatter(plan: {
+  id: string;
+  title: string;
+  status: string;
+  priority: string;
+  webUrl?: string | null;
+  contentVersion?: string | null;
+  downloadedAt: string;
+}): string {
+  return [
+    '---',
+    `planId: ${plan.id}`,
+    `title: ${plan.title}`,
+    `status: ${plan.status}`,
+    `priority: ${plan.priority}`,
+    plan.contentVersion ? `contentVersion: ${plan.contentVersion}` : null,
+    plan.webUrl ? `webUrl: ${plan.webUrl}` : null,
+    `downloadedAt: ${plan.downloadedAt}`,
+    '---',
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
 export function readPlanHtmlUploadInput(options: { file?: string; stdin?: boolean }): string {
   const hasFile = typeof options.file === 'string' && options.file.trim().length > 0;
   const hasStdin = options.stdin === true;
@@ -816,18 +843,15 @@ export async function executePlanCommand(
           const fileName = buildUniquePlanRunbookFileName(plan.title, plan.id, remainingFiles);
           const filePath = join(activePlanDir, fileName);
 
-          const frontmatter = [
-            '---',
-            `planId: ${plan.id}`,
-            `title: ${plan.title}`,
-            `status: ${plan.status}`,
-            `priority: ${plan.priority}`,
-            plan.webUrl ? `webUrl: ${plan.webUrl}` : null,
-            `downloadedAt: ${new Date().toISOString()}`,
-            '---',
-          ]
-            .filter(Boolean)
-            .join('\n');
+          const frontmatter = buildPlanRunbookFrontmatter({
+            id: plan.id,
+            title: plan.title,
+            status: plan.status,
+            priority: plan.priority,
+            webUrl: plan.webUrl,
+            contentVersion: plan.contentVersion,
+            downloadedAt: new Date().toISOString(),
+          });
 
           const markdown = plan.contentMarkdown ?? '';
           writeFileSync(filePath, `${frontmatter}\n\n${markdown}`, 'utf-8');

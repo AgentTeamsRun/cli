@@ -4,9 +4,38 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   buildFreshnessNoticeLines,
+  buildPlanRunbookFrontmatter,
   buildUniquePlanRunbookFileName,
   readPlanHtmlUploadInput,
 } from '../src/commands/plan.js';
+
+describe('buildPlanRunbookFrontmatter', () => {
+  const base = {
+    id: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+    title: 'My Plan',
+    status: 'BACKLOG',
+    priority: 'HIGH',
+    webUrl: 'https://agentteams.run/go?type=plan&id=x',
+    downloadedAt: '2026-07-04T00:00:00.000Z',
+  };
+
+  it('v2 plan includes contentVersion line', () => {
+    const fm = buildPlanRunbookFrontmatter({ ...base, contentVersion: 'V2' });
+    expect(fm).toContain('contentVersion: V2');
+    expect(fm).toContain('planId: a1b2c3d4-e5f6-7890-abcd-ef1234567890');
+    expect(fm).toContain('webUrl: https://agentteams.run/go?type=plan&id=x');
+  });
+
+  it('omits contentVersion when absent (v1 compatibility)', () => {
+    const fm = buildPlanRunbookFrontmatter(base);
+    expect(fm).not.toContain('contentVersion');
+  });
+
+  it('omits webUrl when absent', () => {
+    const fm = buildPlanRunbookFrontmatter({ ...base, webUrl: null });
+    expect(fm).not.toContain('webUrl');
+  });
+});
 
 describe('buildFreshnessNoticeLines', () => {
   it('includes platform guide change and convention changes', () => {
