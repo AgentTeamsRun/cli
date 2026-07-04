@@ -11,6 +11,7 @@ export interface OutputPolicyContext {
 
 const summaryDefaultActions: Record<string, Set<string>> = {
   plan: new Set(['create', 'update', 'start', 'finish']),
+  task: new Set(['start', 'finish']),
   report: new Set(['create', 'update']),
   postmortem: new Set(['create', 'update']),
   coaction: new Set(['create', 'update']),

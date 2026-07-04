@@ -3,6 +3,8 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
+  addTaskIdCommentsToPlanRunbook,
+  buildPlanTaskSidecar,
   buildFreshnessNoticeLines,
   buildPlanRunbookFrontmatter,
   buildUniquePlanRunbookFileName,
@@ -83,6 +85,81 @@ describe('buildUniquePlanRunbookFileName', () => {
     expect(f1).toBe('plan-aaaaaaaa.md');
     expect(f2).toBe('plan-bbbbbbbb.md');
     expect(f1).not.toBe(f2);
+  });
+});
+
+describe('plan v2 task metadata', () => {
+  const tasks = [
+    { id: 'task-a', title: 'Task A', status: 'TODO', orderIndex: 0, dependsOnTaskIds: [] },
+    { id: 'task-b', title: 'Task B', status: 'TODO', orderIndex: 1, dependsOnTaskIds: ['task-a'] },
+  ];
+
+  it('injects hidden task id comments before v2 task headings', () => {
+    const markdown = '## TODOs\n\n### 1. Task A — TODO\n\ndo A\n\n### 2. Task B — TODO\n\ndo B';
+    const withComments = addTaskIdCommentsToPlanRunbook(markdown, tasks, 'V2');
+
+    expect(withComments).toContain('<!-- agentteams-task-id: task-a -->\n### 1. Task A');
+    expect(withComments).toContain('<!-- agentteams-task-id: task-b -->\n### 2. Task B');
+  });
+
+  it('injects task id comments only for matching headings inside TODOs', () => {
+    const markdown = [
+      '## Context',
+      '',
+      '### 1. Task A — TODO',
+      '',
+      'background note',
+      '',
+      '## TODOs',
+      '',
+      '### 1. Task A — TODO',
+      '',
+      'do A',
+      '',
+      '### 2. Different title — TODO',
+      '',
+      'not task B',
+      '',
+      '### 2. Task B — TODO',
+      '',
+      'do B',
+    ].join('\n');
+
+    const withComments = addTaskIdCommentsToPlanRunbook(markdown, tasks, 'V2');
+
+    expect(withComments).toContain('### 1. Task A — TODO\n\nbackground note');
+    expect(withComments).toContain('<!-- agentteams-task-id: task-a -->\n### 1. Task A — TODO\n\ndo A');
+    expect(withComments).not.toContain('<!-- agentteams-task-id: task-b -->\n### 2. Different title');
+    expect(withComments).toContain('<!-- agentteams-task-id: task-b -->\n### 2. Task B — TODO');
+  });
+
+  it('leaves v1 markdown unchanged', () => {
+    const markdown = '## TODOs\n\n### 1. Task A';
+    expect(addTaskIdCommentsToPlanRunbook(markdown, tasks, 'V1')).toBe(markdown);
+  });
+
+  it('builds machine-readable task sidecar data with dependency numbers', () => {
+    expect(buildPlanTaskSidecar('plan-1', tasks)).toEqual({
+      planId: 'plan-1',
+      tasks: [
+        {
+          id: 'task-a',
+          number: 1,
+          title: 'Task A',
+          status: 'TODO',
+          dependsOnTaskIds: [],
+          dependsOnTaskNumbers: [],
+        },
+        {
+          id: 'task-b',
+          number: 2,
+          title: 'Task B',
+          status: 'TODO',
+          dependsOnTaskIds: ['task-a'],
+          dependsOnTaskNumbers: [1],
+        },
+      ],
+    });
   });
 });
 

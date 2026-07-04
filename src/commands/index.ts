@@ -14,6 +14,7 @@ import { executeFeedbackCommand } from './feedback.js';
 import { executeSearchCommand } from './search.js';
 import { executeLinearCommand } from './linear.js';
 import { executeAttachmentCommand } from './attachment.js';
+import { executeTaskCommand } from './task.js';
 import { loadConfig } from '../utils/config.js';
 import { normalizeCommandContext, withCommandContext } from '../utils/commandContext.js';
 import { normalizeEntityIdOptions } from '../utils/entityId.js';
@@ -84,6 +85,7 @@ async function executeCommandWithContext(
     case 'sync':
       return executeSyncCommand(action, options);
     case 'plan':
+    case 'task':
     case 'comment': {
       const config = loadRequiredConfig();
       const { apiUrl, headers } = resolveApiContext(config);
@@ -91,6 +93,12 @@ async function executeCommandWithContext(
       if (resource === 'plan') {
         return withApiErrorContext(apiUrl, () =>
           executePlanCommand(apiUrl, config.projectId, headers, action, options),
+        );
+      }
+
+      if (resource === 'task') {
+        return withApiErrorContext(apiUrl, () =>
+          executeTaskCommand(apiUrl, config.projectId, headers, action, options),
         );
       }
 
