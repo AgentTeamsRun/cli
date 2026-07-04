@@ -20,6 +20,17 @@ export async function getPlan(apiUrl: string, projectId: string, headers: any, i
   return response.data;
 }
 
+export async function getPlanDetail(
+  apiUrl: string,
+  projectId: string,
+  headers: Record<string, string>,
+  id: string,
+): Promise<unknown> {
+  const baseUrl = `${apiUrl}/api/projects/${projectId}/plans`;
+  const response = await httpClient.get(`${baseUrl}/${id}/detail`, { headers });
+  return response.data;
+}
+
 export async function getPlanDependencies(apiUrl: string, projectId: string, headers: any, id: string): Promise<any> {
   const baseUrl = `${apiUrl}/api/projects/${projectId}/plans`;
   const response = await httpClient.get(`${baseUrl}/${id}/dependencies`, { headers });

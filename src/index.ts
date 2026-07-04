@@ -291,6 +291,43 @@ program
   });
 
 program
+  .command('task')
+  .description('Manage plan tasks')
+  .argument('<action>', 'Action to perform (start, finish)')
+  .option('--plan-id <id>', 'Plan ID')
+  .option('--task-id <id>', 'Plan task ID')
+  .option('--status <status>', 'Task finish status: DONE, BLOCKED, or SKIPPED')
+  .option('--format <format>', 'Output format (json)')
+  .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
+  .option('--verbose', 'Print full output to stdout (useful with --output-file)', false)
+  .addHelpText('after', CONVENTION_HINT)
+  .action(async (action, options) => {
+    try {
+      const normalizedFormat = normalizeFormat(options.format);
+      const result = await executeCommand('task', action, {
+        planId: options.planId,
+        taskId: options.taskId,
+        status: options.status,
+        format: normalizedFormat,
+        formatExplicit: typeof options.format === 'string',
+      });
+
+      printCommandResult({
+        result,
+        format: normalizedFormat,
+        outputFile: options.outputFile,
+        verbose: options.verbose,
+        resource: 'task',
+        action,
+        formatExplicit: typeof options.format === 'string',
+      });
+    } catch (error) {
+      console.error(handleError(error));
+      process.exit(1);
+    }
+  });
+
+program
   .command('comment')
   .description('Manage plan comments and their 1-depth replies')
   .argument(

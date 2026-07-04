@@ -3,10 +3,77 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
+  addTaskIdCommentsToPlanRunbook,
+  buildPlanRunbookMarkdown,
+  buildPlanTaskSidecar,
   buildFreshnessNoticeLines,
+  buildPlanRunbookFrontmatter,
   buildUniquePlanRunbookFileName,
   readPlanHtmlUploadInput,
 } from '../src/commands/plan.js';
+
+describe('buildPlanRunbookFrontmatter', () => {
+  const base = {
+    id: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+    title: 'My Plan',
+    status: 'BACKLOG',
+    priority: 'HIGH',
+    webUrl: 'https://agentteams.run/go?type=plan&id=x',
+    downloadedAt: '2026-07-04T00:00:00.000Z',
+  };
+
+  it('v2 plan includes contentVersion line', () => {
+    const fm = buildPlanRunbookFrontmatter({ ...base, contentVersion: 'V2' });
+    expect(fm).toContain('contentVersion: V2');
+    expect(fm).toContain('planId: a1b2c3d4-e5f6-7890-abcd-ef1234567890');
+    expect(fm).toContain('webUrl: https://agentteams.run/go?type=plan&id=x');
+  });
+
+  it('omits contentVersion when absent (v1 compatibility)', () => {
+    const fm = buildPlanRunbookFrontmatter(base);
+    expect(fm).not.toContain('contentVersion');
+  });
+
+  it('omits webUrl when absent', () => {
+    const fm = buildPlanRunbookFrontmatter({ ...base, webUrl: null });
+    expect(fm).not.toContain('webUrl');
+  });
+});
+
+describe('buildPlanRunbookMarkdown', () => {
+  it('prepends progress summary for v2 plans', () => {
+    const markdown = buildPlanRunbookMarkdown({
+      contentVersion: 'V2',
+      progress: {
+        total: 3,
+        todo: 1,
+        inProgress: 1,
+        done: 1,
+        skipped: 0,
+        blocked: 0,
+        completed: 1,
+        percent: 33,
+      },
+      contentMarkdown: '## TODOs\n\n### 1. Task A\n\nStatus: DONE',
+    });
+
+    expect(markdown).toContain('## Progress');
+    expect(markdown).toContain('- Completed: 1 / 3 (33%)');
+    expect(markdown).toContain('- In Progress: 1');
+    expect(markdown).toContain('## TODOs');
+    expect(markdown.indexOf('## Progress')).toBeLessThan(markdown.indexOf('## TODOs'));
+  });
+
+  it('keeps v1 markdown unchanged', () => {
+    expect(
+      buildPlanRunbookMarkdown({
+        contentVersion: 'V1',
+        progress: null,
+        contentMarkdown: 'plain v1 runbook',
+      }),
+    ).toBe('plain v1 runbook');
+  });
+});
 
 describe('buildFreshnessNoticeLines', () => {
   it('includes platform guide change and convention changes', () => {
@@ -54,6 +121,81 @@ describe('buildUniquePlanRunbookFileName', () => {
     expect(f1).toBe('plan-aaaaaaaa.md');
     expect(f2).toBe('plan-bbbbbbbb.md');
     expect(f1).not.toBe(f2);
+  });
+});
+
+describe('plan v2 task metadata', () => {
+  const tasks = [
+    { id: 'task-a', title: 'Task A', status: 'TODO', orderIndex: 0, dependsOnTaskIds: [] },
+    { id: 'task-b', title: 'Task B', status: 'TODO', orderIndex: 1, dependsOnTaskIds: ['task-a'] },
+  ];
+
+  it('injects hidden task id comments before v2 task headings', () => {
+    const markdown = '## TODOs\n\n### 1. Task A — TODO\n\ndo A\n\n### 2. Task B — TODO\n\ndo B';
+    const withComments = addTaskIdCommentsToPlanRunbook(markdown, tasks, 'V2');
+
+    expect(withComments).toContain('<!-- agentteams-task-id: task-a -->\n### 1. Task A');
+    expect(withComments).toContain('<!-- agentteams-task-id: task-b -->\n### 2. Task B');
+  });
+
+  it('injects task id comments only for matching headings inside TODOs', () => {
+    const markdown = [
+      '## Context',
+      '',
+      '### 1. Task A — TODO',
+      '',
+      'background note',
+      '',
+      '## TODOs',
+      '',
+      '### 1. Task A — TODO',
+      '',
+      'do A',
+      '',
+      '### 2. Different title — TODO',
+      '',
+      'not task B',
+      '',
+      '### 2. Task B — TODO',
+      '',
+      'do B',
+    ].join('\n');
+
+    const withComments = addTaskIdCommentsToPlanRunbook(markdown, tasks, 'V2');
+
+    expect(withComments).toContain('### 1. Task A — TODO\n\nbackground note');
+    expect(withComments).toContain('<!-- agentteams-task-id: task-a -->\n### 1. Task A — TODO\n\ndo A');
+    expect(withComments).not.toContain('<!-- agentteams-task-id: task-b -->\n### 2. Different title');
+    expect(withComments).toContain('<!-- agentteams-task-id: task-b -->\n### 2. Task B — TODO');
+  });
+
+  it('leaves v1 markdown unchanged', () => {
+    const markdown = '## TODOs\n\n### 1. Task A';
+    expect(addTaskIdCommentsToPlanRunbook(markdown, tasks, 'V1')).toBe(markdown);
+  });
+
+  it('builds machine-readable task sidecar data with dependency numbers', () => {
+    expect(buildPlanTaskSidecar('plan-1', tasks)).toEqual({
+      planId: 'plan-1',
+      tasks: [
+        {
+          id: 'task-a',
+          number: 1,
+          title: 'Task A',
+          status: 'TODO',
+          dependsOnTaskIds: [],
+          dependsOnTaskNumbers: [],
+        },
+        {
+          id: 'task-b',
+          number: 2,
+          title: 'Task B',
+          status: 'TODO',
+          dependsOnTaskIds: ['task-a'],
+          dependsOnTaskNumbers: [1],
+        },
+      ],
+    });
   });
 });
 

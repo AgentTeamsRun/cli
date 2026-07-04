@@ -23,6 +23,7 @@ import {
   deletePlan,
   finishPlanLifecycle,
   getPlan,
+  getPlanDetail,
   getPlanDependencies,
   getPlanStatus,
   linkOriginIssue,
@@ -37,6 +38,43 @@ import {
 } from '../api/plan.js';
 
 const PLAN_COMPLEXITY_VALUES: readonly string[] = PLAN_COMPLEXITY_ORDER;
+
+type PlanRunbookTask = {
+  id: string;
+  title: string;
+  status: string;
+  orderIndex: number;
+  dependsOnTaskIds?: string[];
+};
+
+type PlanRunbookPlan = {
+  id: string;
+  title: string;
+  status: string;
+  priority: string;
+  webUrl?: string | null;
+  contentVersion?: string | null;
+  contentMarkdown?: string | null;
+};
+
+type PlanRunbookProgress = {
+  total: number;
+  todo: number;
+  inProgress: number;
+  done: number;
+  skipped: number;
+  blocked: number;
+  completed: number;
+  percent: number;
+};
+
+type PlanRunbookDetailResponse = {
+  data: {
+    plan: PlanRunbookPlan;
+    tasks?: PlanRunbookTask[];
+    progress?: PlanRunbookProgress | null;
+  };
+};
 
 // Lightweight, warning-only heuristic that flags an obvious mismatch between the declared
 // complexity and the plan body length. It never rejects — precise structural validation is future work.
@@ -159,6 +197,133 @@ export function buildUniquePlanRunbookFileName(title: string, planId: string, ex
   }
 
   return fileName;
+}
+
+// 플랜 런북 다운로드 파일의 frontmatter를 조립한다. v2 플랜은 contentVersion을 포함해
+// 실행 에이전트가 구조화 플랜임을 인지할 수 있게 한다(본문 sections/tasks는 서버가 구조화
+// 데이터에서 파생한 contentMarkdown으로 흘러온다). v1 호환: contentVersion 미제공 시 생략.
+export function buildPlanRunbookFrontmatter(plan: {
+  id: string;
+  title: string;
+  status: string;
+  priority: string;
+  webUrl?: string | null;
+  contentVersion?: string | null;
+  downloadedAt: string;
+}): string {
+  return [
+    '---',
+    `planId: ${plan.id}`,
+    `title: ${plan.title}`,
+    `status: ${plan.status}`,
+    `priority: ${plan.priority}`,
+    plan.contentVersion ? `contentVersion: ${plan.contentVersion}` : null,
+    plan.webUrl ? `webUrl: ${plan.webUrl}` : null,
+    `downloadedAt: ${plan.downloadedAt}`,
+    '---',
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
+export function buildPlanRunbookMarkdown(plan: {
+  contentVersion?: string | null;
+  contentMarkdown?: string | null;
+  progress?: PlanRunbookProgress | null;
+}): string {
+  const markdown = plan.contentMarkdown?.trim() ?? '';
+  if (plan.contentVersion !== 'V2' || !plan.progress) {
+    return markdown;
+  }
+
+  const progress = plan.progress;
+  const progressMarkdown = [
+    '## Progress',
+    '',
+    `- Total: ${progress.total}`,
+    `- Completed: ${progress.completed} / ${progress.total} (${progress.percent}%)`,
+    `- TODO: ${progress.todo}`,
+    `- In Progress: ${progress.inProgress}`,
+    `- Blocked: ${progress.blocked}`,
+    `- Done: ${progress.done}`,
+    `- Skipped: ${progress.skipped}`,
+  ].join('\n');
+
+  return markdown ? `${progressMarkdown}\n\n${markdown}` : progressMarkdown;
+}
+
+const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+export function addTaskIdCommentsToPlanRunbook(
+  markdown: string,
+  tasks: PlanRunbookTask[],
+  contentVersion?: string | null,
+): string {
+  if (contentVersion !== 'V2' || tasks.length === 0) return markdown;
+
+  const orderedTasks = [...tasks].sort((a, b) => a.orderIndex - b.orderIndex);
+  const lines = markdown.split('\n');
+  const output: string[] = [];
+  let nextTaskIndex = 0;
+  let isInsideTodos = false;
+
+  for (const line of lines) {
+    const isSecondLevelHeading = /^##\s+/.test(line);
+    if (isSecondLevelHeading) {
+      isInsideTodos = /^##\s+TODOs\s*$/.test(line);
+    }
+
+    const task = orderedTasks[nextTaskIndex];
+    const taskNumber = nextTaskIndex + 1;
+    const taskHeading = task
+      ? new RegExp(
+          `^###\\s+${taskNumber}\\.\\s+${escapeRegExp(task.title)}\\s+—\\s+${escapeRegExp(task.status)}(?:\\s+\\(Wave\\s+\\d+\\))?\\s*$`,
+        )
+      : null;
+    if (isInsideTodos && taskHeading?.test(line)) {
+      const previousLine = output[output.length - 1] ?? '';
+      const comment = `<!-- agentteams-task-id: ${task.id} -->`;
+      if (previousLine !== comment) {
+        output.push(comment);
+      }
+      nextTaskIndex += 1;
+    }
+    output.push(line);
+  }
+
+  return output.join('\n');
+}
+
+export function buildPlanTaskSidecar(
+  planId: string,
+  tasks: PlanRunbookTask[],
+): {
+  planId: string;
+  tasks: {
+    id: string;
+    number: number;
+    title: string;
+    status: string;
+    dependsOnTaskIds: string[];
+    dependsOnTaskNumbers: number[];
+  }[];
+} {
+  const orderedTasks = [...tasks].sort((a, b) => a.orderIndex - b.orderIndex);
+  const taskNumberById = new Map(orderedTasks.map((task, index) => [task.id, index + 1]));
+
+  return {
+    planId,
+    tasks: orderedTasks.map((task, index) => ({
+      id: task.id,
+      number: index + 1,
+      title: task.title,
+      status: task.status,
+      dependsOnTaskIds: task.dependsOnTaskIds ?? [],
+      dependsOnTaskNumbers: (task.dependsOnTaskIds ?? [])
+        .map((dependencyId) => taskNumberById.get(dependencyId))
+        .filter((number): number is number => typeof number === 'number'),
+    })),
+  };
 }
 
 export function readPlanHtmlUploadInput(options: { file?: string; stdin?: boolean }): string {
@@ -795,8 +960,10 @@ export async function executePlanCommand(
       const result = await withSpinner(
         'Downloading plan...',
         async () => {
-          const response = await getPlan(apiUrl, projectId, headers, options.id);
-          const plan = response.data;
+          const response = (await getPlanDetail(apiUrl, projectId, headers, options.id)) as PlanRunbookDetailResponse;
+          const planDetail = response.data;
+          const plan = planDetail.plan;
+          const tasks = Array.isArray(planDetail.tasks) ? (planDetail.tasks as PlanRunbookTask[]) : [];
 
           const activePlanDir = join(projectRoot, '.agentteams', 'cli', 'active-plan');
           if (!existsSync(activePlanDir)) {
@@ -810,31 +977,46 @@ export async function executePlanCommand(
             const match = content.match(/^planId:\s*(.+)$/m);
             if (match && match[1].trim() === plan.id) {
               rmSync(existingPath);
+              const sidecarPath = join(activePlanDir, existing.replace(/\.md$/i, '.tasks.json'));
+              if (existsSync(sidecarPath)) {
+                rmSync(sidecarPath);
+              }
             }
           }
           const remainingFiles = readdirSync(activePlanDir).filter((name) => name.endsWith('.md'));
           const fileName = buildUniquePlanRunbookFileName(plan.title, plan.id, remainingFiles);
           const filePath = join(activePlanDir, fileName);
+          const sidecarFileName = fileName.replace(/\.md$/i, '.tasks.json');
+          const sidecarPath = join(activePlanDir, sidecarFileName);
 
-          const frontmatter = [
-            '---',
-            `planId: ${plan.id}`,
-            `title: ${plan.title}`,
-            `status: ${plan.status}`,
-            `priority: ${plan.priority}`,
-            plan.webUrl ? `webUrl: ${plan.webUrl}` : null,
-            `downloadedAt: ${new Date().toISOString()}`,
-            '---',
-          ]
-            .filter(Boolean)
-            .join('\n');
+          const frontmatter = buildPlanRunbookFrontmatter({
+            id: plan.id,
+            title: plan.title,
+            status: plan.status,
+            priority: plan.priority,
+            webUrl: plan.webUrl,
+            contentVersion: plan.contentVersion,
+            downloadedAt: new Date().toISOString(),
+          });
 
-          const markdown = plan.contentMarkdown ?? '';
+          const progressMarkdown = buildPlanRunbookMarkdown({
+            contentVersion: plan.contentVersion,
+            contentMarkdown: plan.contentMarkdown,
+            progress: planDetail.progress ?? null,
+          });
+          const markdown = addTaskIdCommentsToPlanRunbook(progressMarkdown, tasks, plan.contentVersion);
           writeFileSync(filePath, `${frontmatter}\n\n${markdown}`, 'utf-8');
+          if (plan.contentVersion === 'V2' && tasks.length > 0) {
+            writeFileSync(sidecarPath, `${JSON.stringify(buildPlanTaskSidecar(plan.id, tasks), null, 2)}\n`, 'utf-8');
+          }
 
           return {
             message: `Plan downloaded to ${fileName}`,
             filePath: `.agentteams/cli/active-plan/${fileName}`,
+            sidecarPath:
+              plan.contentVersion === 'V2' && tasks.length > 0
+                ? `.agentteams/cli/active-plan/${sidecarFileName}`
+                : undefined,
           };
         },
         'Plan downloaded',
@@ -866,10 +1048,17 @@ export async function executePlanCommand(
               if (match && match[1].trim() === options.id) {
                 rmSync(join(activePlanDir, file));
                 deleted.push(file);
+                const sidecar = file.replace(/\.md$/i, '.tasks.json');
+                const sidecarPath = join(activePlanDir, sidecar);
+                if (existsSync(sidecarPath)) {
+                  rmSync(sidecarPath);
+                  deleted.push(sidecar);
+                }
               }
             }
           } else {
-            for (const file of allFiles) {
+            const sidecars = readdirSync(activePlanDir).filter((f) => f.endsWith('.tasks.json'));
+            for (const file of [...allFiles, ...sidecars]) {
               rmSync(join(activePlanDir, file));
               deleted.push(file);
             }
