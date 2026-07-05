@@ -2229,6 +2229,10 @@ describe('CLI Integration Tests', () => {
           priority: 'HIGH',
           type: 'BUG_FIX',
         });
+        await executeCommand('code-review', 'resolve', {
+          id: 'review-1',
+          findingId: 'finding-1',
+        });
 
         expect(axiosGetSpy).toHaveBeenCalledWith(`${API_URL}/api/projects/${PROJECT_ID}/code-reviews`, {
           headers: authHeaders(),
@@ -2255,6 +2259,11 @@ describe('CLI Integration Tests', () => {
             priority: 'HIGH',
             type: 'BUG_FIX',
           }),
+          { headers: authHeaders() },
+        );
+        expect(axiosPostSpy).toHaveBeenCalledWith(
+          `${API_URL}/api/projects/${PROJECT_ID}/code-reviews/review-1/findings/finding-1/resolve`,
+          {},
           { headers: authHeaders() },
         );
       } finally {

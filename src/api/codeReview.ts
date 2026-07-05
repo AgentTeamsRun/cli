@@ -90,6 +90,18 @@ export async function dismissCodeReviewFinding(
   return response.data;
 }
 
+export async function resolveCodeReviewFinding(
+  apiUrl: string,
+  projectId: string,
+  headers: any,
+  id: string,
+  findingId: string,
+): Promise<any> {
+  const baseUrl = `${apiUrl}/api/projects/${projectId}/code-reviews`;
+  const response = await httpClient.post(`${baseUrl}/${id}/findings/${findingId}/resolve`, {}, { headers });
+  return response.data;
+}
+
 export async function undismissCodeReviewFinding(
   apiUrl: string,
   projectId: string,

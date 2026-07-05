@@ -214,3 +214,79 @@ describe('code-review update', () => {
     expect(axiosPatchSpy).not.toHaveBeenCalled();
   });
 });
+
+describe('code-review resolve', () => {
+  const apiUrl = 'http://localhost:3001';
+  const projectId = 'project_1';
+  const headers = { 'X-API-Key': 'key_test123', 'Content-Type': 'application/json' };
+
+  let axiosPostSpy: jest.SpiedFunction<typeof axios.post>;
+
+  beforeEach(() => {
+    jest.restoreAllMocks();
+    axiosPostSpy = jest.spyOn(axios, 'post');
+  });
+
+  it('resolves a single finding via the resolve endpoint', async () => {
+    axiosPostSpy.mockResolvedValueOnce({
+      data: { data: { id: 'review-1', status: 'COMPLETED' } },
+    } as any);
+
+    await executeCodeReviewCommand(apiUrl, projectId, headers, 'resolve', {
+      id: 'review-1',
+      findingId: 'finding-1',
+    });
+
+    expect(axiosPostSpy).toHaveBeenCalledTimes(1);
+    expect(axiosPostSpy).toHaveBeenCalledWith(
+      'http://localhost:3001/api/projects/project_1/code-reviews/review-1/findings/finding-1/resolve',
+      {},
+      { headers },
+    );
+  });
+
+  it('resolves multiple findings from --finding-ids', async () => {
+    axiosPostSpy
+      .mockResolvedValueOnce({ data: { data: { id: 'review-1', status: 'PARTIAL' } } } as any)
+      .mockResolvedValueOnce({ data: { data: { id: 'review-1', status: 'COMPLETED' } } } as any);
+
+    const result = await executeCodeReviewCommand(apiUrl, projectId, headers, 'resolve', {
+      id: 'review-1',
+      findingIds: 'finding-1,finding-2',
+    });
+
+    expect(axiosPostSpy).toHaveBeenCalledTimes(2);
+    expect(axiosPostSpy).toHaveBeenNthCalledWith(
+      1,
+      'http://localhost:3001/api/projects/project_1/code-reviews/review-1/findings/finding-1/resolve',
+      {},
+      { headers },
+    );
+    expect(axiosPostSpy).toHaveBeenNthCalledWith(
+      2,
+      'http://localhost:3001/api/projects/project_1/code-reviews/review-1/findings/finding-2/resolve',
+      {},
+      { headers },
+    );
+    expect(result).toMatchObject({
+      data: {
+        codeReviewId: 'review-1',
+        findingIds: ['finding-1', 'finding-2'],
+      },
+    });
+  });
+
+  it('requires a code review id and at least one finding id', async () => {
+    await expect(
+      executeCodeReviewCommand(apiUrl, projectId, headers, 'resolve', {
+        findingId: 'finding-1',
+      }),
+    ).rejects.toThrow(/--id is required/);
+    await expect(
+      executeCodeReviewCommand(apiUrl, projectId, headers, 'resolve', {
+        id: 'review-1',
+      }),
+    ).rejects.toThrow(/--finding-id or --finding-ids is required/);
+    expect(axiosPostSpy).not.toHaveBeenCalled();
+  });
+});
