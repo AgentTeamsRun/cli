@@ -752,13 +752,9 @@ export async function executePlanCommand(
         );
       }
 
-      // HTML preview is mandatory for plan create — there is no escape hatch. This keeps the
-      // plan body and its human-facing preview in sync.
+      // HTML preview is optional for plan create (V2 plans do not render a preview).
       const createHasHtmlInput = hasPlanHtmlPreviewInput(options);
-      if (!createHasHtmlInput) {
-        throw new Error('An HTML preview is required for plan create. Provide --html-file <path> or --html-stdin.');
-      }
-      const createHtmlContent = readPlanHtmlPreviewInput(options);
+      const createHtmlContent = createHasHtmlInput ? readPlanHtmlPreviewInput(options) : undefined;
 
       // Lightweight complexity sanity check (warning only). A FULL plan body should look multi-wave;
       // a MINIMAL one should be short and single-scoped. This nudges authors toward the right tier
@@ -906,21 +902,7 @@ export async function executePlanCommand(
         body.complexityChangeReason = options.complexityReason;
       }
 
-      // Preview-affecting fields mirror the source hash inputs (title, type, priority, content).
-      // A status-only or complexity-only change does not affect the preview, so the HTML preview is not required.
-      const previewAffecting =
-        typeof body.content === 'string' ||
-        typeof body.title === 'string' ||
-        typeof body.type === 'string' ||
-        typeof body.priority === 'string';
-
       const updateHasHtmlInput = hasPlanHtmlPreviewInput(options);
-      if (previewAffecting && !updateHasHtmlInput) {
-        throw new Error(
-          'An HTML preview is required when updating the plan body, title, type, or priority. ' +
-            'Provide --html-file <path> or --html-stdin.',
-        );
-      }
       const updateHtmlContent = updateHasHtmlInput ? readPlanHtmlPreviewInput(options) : undefined;
 
       const updateResult = await withSpinner(

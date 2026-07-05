@@ -3,7 +3,7 @@ import { join, resolve } from 'node:path';
 import { createReport, deleteReport, getReport, listReports, updateReport } from '../api/report.js';
 import { findProjectConfig } from '../utils/config.js';
 import { getGitRemoteOriginUrl } from '../utils/git.js';
-import { parseReportOptions } from '../utils/report.js';
+import { parseReportOptions, parseReviewRecommendation } from '../utils/report.js';
 
 import {
   deleteIfTempFile,
@@ -114,6 +114,8 @@ export async function executeReportCommand(apiUrl: string, headers: any, action:
       const commitEnd = toNonEmptyString(options.commitEnd);
       const pullRequestId = toNonEmptyString(options.pullRequestId);
       const qualityScore = toNonNegativeInteger(options.qualityScore);
+      const reviewRecommendation = parseReviewRecommendation(options.reviewRecommendation);
+      const reviewReason = toNonEmptyString(options.reviewReason);
 
       if (commitHash !== undefined) body.commitHash = commitHash;
       if (branchName !== undefined) body.branchName = branchName;
@@ -125,6 +127,8 @@ export async function executeReportCommand(apiUrl: string, headers: any, action:
       if (commitEnd !== undefined) body.commitEnd = commitEnd;
       if (pullRequestId !== undefined) body.pullRequestId = pullRequestId;
       if (qualityScore !== undefined) body.qualityScore = qualityScore;
+      if (reviewRecommendation !== undefined) body.reviewRecommendation = reviewRecommendation;
+      if (reviewReason !== undefined) body.reviewReason = reviewReason;
 
       return updateReport(apiUrl, options.projectId, headers, options.id, body);
     }

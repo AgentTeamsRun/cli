@@ -161,11 +161,11 @@ program
   .option('--stdin', 'Read plan HTML summary from stdin (upload-html only)', false)
   .option(
     '--html-file <path>',
-    'Read the plan HTML preview from a local file (required for create and body/title/type/priority updates)',
+    'Read the plan HTML preview from a local file (optional for create/update; V2 plans no longer render a preview)',
   )
   .option(
     '--html-stdin',
-    'Read the plan HTML preview from stdin (create/update; mutually exclusive with --html-file)',
+    'Read the plan HTML preview from stdin (optional for create/update; mutually exclusive with --html-file)',
     false,
   )
   .option('--source-label <label>', 'Optional source label for uploaded plan HTML summary')
@@ -440,6 +440,8 @@ program
   .option('--commit-end <hash>', 'Commit range end hash (manual only)')
   .option('--pull-request-id <id>', 'Pull request ID (manual only)')
   .option('--quality-score <n>', 'Quality score 0-100')
+  .option('--review-recommendation <value>', 'Code review recommendation: REQUIRED or NOT_NEEDED (create/update)')
+  .option('--review-reason <text>', 'One-line reason for the review recommendation (create/update)')
   .option('--repository-remote-url <url>', 'Repository remote origin URL (create; defaults to git origin)')
   .option(
     '--runner-type <type>',
@@ -478,6 +480,8 @@ program
         commitEnd: options.commitEnd,
         pullRequestId: options.pullRequestId,
         qualityScore: options.qualityScore,
+        reviewRecommendation: options.reviewRecommendation,
+        reviewReason: options.reviewReason,
         repositoryRemoteUrl: options.repositoryRemoteUrl,
         git: options.git,
         page: options.page,
@@ -512,10 +516,10 @@ program
   .description('Manage independent code reviews')
   .argument(
     '<action>',
-    'Action to perform (list, get, show, create, update, create-plan, submit-result, cancel, delete, dismiss, undismiss)',
+    'Action to perform (list, get, show, create, update, create-plan, submit-result, cancel, delete, dismiss, resolve, undismiss)',
   )
   .option('--id <id>', 'Code review ID')
-  .option('--finding-id <id>', 'Finding ID for dismiss/undismiss')
+  .option('--finding-id <id>', 'Finding ID for dismiss/resolve/undismiss')
   .option('--title <title>', 'Code review or generated plan title')
   .option(
     '--target-type <type>',
@@ -538,7 +542,7 @@ program
   .option('--findings-file <path>', 'Read findings JSON array from a local file (create, submit-result)')
   .option('--result-summary <text>', 'Review result summary (submit-result)')
   .option('--error-message <text>', 'Failure reason when --status FAILED (submit-result)')
-  .option('--finding-ids <ids>', 'Comma-separated finding IDs for create-plan')
+  .option('--finding-ids <ids>', 'Comma-separated finding IDs for create-plan or resolve')
   .option('--priority <priority>', 'Generated plan priority (LOW, MEDIUM, HIGH)')
   .option('--type <type>', 'Generated plan type (FEATURE, BUG_FIX, ISSUE, REFACTOR, CHORE)')
   .option('--runner-type <type>', 'Runner type snapshot: CLAUDE_CODE, CODEX, ANTIGRAVITY, AMP, OPENCODE')

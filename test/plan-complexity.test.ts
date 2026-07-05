@@ -31,10 +31,10 @@ describe('plan create complexity validation', () => {
     ).rejects.toThrow(/Invalid --complexity/);
   });
 
-  it('rejects create without an HTML preview even when complexity is valid', async () => {
+  it('allows create without an HTML preview when complexity is valid', async () => {
     await expect(
       executePlanCommand(apiUrl, projectId, headers, 'create', { ...baseCreateOptions, complexity: 'MINIMAL' }),
-    ).rejects.toThrow(/HTML preview is required/);
+    ).rejects.not.toThrow(/HTML preview is required/);
   });
 });
 

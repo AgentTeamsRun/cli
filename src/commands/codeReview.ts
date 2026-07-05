@@ -8,6 +8,7 @@ import {
   dismissCodeReviewFinding,
   getCodeReview,
   listCodeReviews,
+  resolveCodeReviewFinding,
   submitCodeReviewResult,
   undismissCodeReviewFinding,
   updateCodeReview,
@@ -71,6 +72,18 @@ const addOptionalStringField = (body: Record<string, unknown>, field: string, va
   if (parsed) {
     body[field] = parsed;
   }
+};
+
+const parseFindingIdOptions = (options: any, action: string): string[] => {
+  const findingIds = [
+    ...parseCsv(options.findingIds),
+    ...(toNonEmptyString(options.findingId) ? [toNonEmptyString(options.findingId) as string] : []),
+  ];
+  const uniqueFindingIds = [...new Set(findingIds)];
+  if (uniqueFindingIds.length === 0) {
+    throw new Error(`--finding-id or --finding-ids is required for code-review ${action}`);
+  }
+  return uniqueFindingIds;
 };
 
 export async function executeCodeReviewCommand(
@@ -243,6 +256,29 @@ export async function executeCodeReviewCommand(
         'Dismissing finding...',
         () => dismissCodeReviewFinding(apiUrl, projectId, headers, options.id, options.findingId),
         'Finding dismissed',
+      );
+    }
+    case 'resolve': {
+      if (!options.id) throw new Error('--id is required for code-review resolve');
+      const findingIds = parseFindingIdOptions(options, 'resolve');
+      return withSpinner(
+        findingIds.length === 1 ? 'Resolving finding...' : 'Resolving findings...',
+        async () => {
+          const results = [];
+          for (const findingId of findingIds) {
+            results.push(await resolveCodeReviewFinding(apiUrl, projectId, headers, options.id, findingId));
+          }
+          return findingIds.length === 1
+            ? results[0]
+            : {
+                data: {
+                  codeReviewId: options.id,
+                  findingIds,
+                  results,
+                },
+              };
+        },
+        findingIds.length === 1 ? 'Finding resolved' : 'Findings resolved',
       );
     }
     case 'undismiss': {
