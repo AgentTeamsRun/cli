@@ -440,6 +440,8 @@ program
   .option('--commit-end <hash>', 'Commit range end hash (manual only)')
   .option('--pull-request-id <id>', 'Pull request ID (manual only)')
   .option('--quality-score <n>', 'Quality score 0-100')
+  .option('--review-recommendation <value>', 'Code review recommendation: REQUIRED or NOT_NEEDED (create/update)')
+  .option('--review-reason <text>', 'One-line reason for the review recommendation (create/update)')
   .option('--repository-remote-url <url>', 'Repository remote origin URL (create; defaults to git origin)')
   .option(
     '--runner-type <type>',
@@ -478,6 +480,8 @@ program
         commitEnd: options.commitEnd,
         pullRequestId: options.pullRequestId,
         qualityScore: options.qualityScore,
+        reviewRecommendation: options.reviewRecommendation,
+        reviewReason: options.reviewReason,
         repositoryRemoteUrl: options.repositoryRemoteUrl,
         git: options.git,
         page: options.page,

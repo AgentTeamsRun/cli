@@ -22,6 +22,18 @@ export interface ReportPayload {
   reviewReason?: string;
 }
 
+/**
+ * --review-recommendation 값을 검증한다. REQUIRED/NOT_NEEDED만 허용하고,
+ * 그 외 비어있지 않은 값은 경고 후 무시한다. report create/update가 공유한다.
+ */
+export function parseReviewRecommendation(value: unknown): string | undefined {
+  const raw = toNonEmptyString(value);
+  if (raw === undefined) return undefined;
+  if (raw === 'REQUIRED' || raw === 'NOT_NEEDED') return raw;
+  console.warn(`Ignoring invalid --review-recommendation "${raw}" (expected REQUIRED or NOT_NEEDED)`);
+  return undefined;
+}
+
 export function parseReportOptions(
   options: any,
   {
@@ -68,18 +80,7 @@ export function parseReportOptions(
   const pullRequestId = toNonEmptyString(options.pullRequestId);
   const qualityScore = toNonNegativeInteger(options.qualityScore);
 
-  const reviewRecommendationRaw = toNonEmptyString(options.reviewRecommendation);
-  const reviewRecommendation =
-    reviewRecommendationRaw === 'REQUIRED' || reviewRecommendationRaw === 'NOT_NEEDED'
-      ? reviewRecommendationRaw
-      : reviewRecommendationRaw !== undefined
-        ? (() => {
-            console.warn(
-              `Ignoring invalid --review-recommendation "${reviewRecommendationRaw}" (expected REQUIRED or NOT_NEEDED)`,
-            );
-            return undefined;
-          })()
-        : undefined;
+  const reviewRecommendation = parseReviewRecommendation(options.reviewRecommendation);
   const reviewReason = toNonEmptyString(options.reviewReason);
 
   const payload: ReportPayload = {
