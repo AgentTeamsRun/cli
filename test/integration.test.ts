@@ -729,17 +729,23 @@ describe('CLI Integration Tests', () => {
         rmSync(htmlDir, { recursive: true, force: true });
       });
 
-      it('plan create: should fail when no HTML preview input is provided', async () => {
-        await expect(
-          executeCommand('plan', 'create', {
-            title: 'Plan',
-            content: 'body',
-            complexity: 'STANDARD',
-            runnerType: 'CLAUDE_CODE',
-            model: 'claude-opus-4-6',
-          }),
-        ).rejects.toThrow('An HTML preview is required for plan create');
-        expect(axiosPostSpy).not.toHaveBeenCalled();
+      it('plan create: should succeed when no HTML preview input is provided', async () => {
+        axiosPostSpy.mockResolvedValue({ data: { data: { id: 'plan-no-html' } } } as any);
+
+        await executeCommand('plan', 'create', {
+          title: 'Plan',
+          content: 'body',
+          complexity: 'STANDARD',
+          runnerType: 'CLAUDE_CODE',
+          model: 'claude-opus-4-6',
+        });
+
+        expect(axiosPostSpy).toHaveBeenCalledWith(
+          `${API_URL}/api/projects/${PROJECT_ID}/plans`,
+          expect.objectContaining({ title: 'Plan', content: 'body', complexity: 'STANDARD' }),
+          { headers: authHeaders() },
+        );
+        expect(axiosPutSpy).not.toHaveBeenCalled();
       });
 
       it('plan create: should create the plan then upload the HTML preview', async () => {
@@ -816,18 +822,30 @@ describe('CLI Integration Tests', () => {
         expect(axiosPostSpy).toHaveBeenCalled();
       });
 
-      it('plan update: should require an HTML preview when the body changes', async () => {
-        await expect(executeCommand('plan', 'update', { id: 'plan-1', content: 'new body' })).rejects.toThrow(
-          'An HTML preview is required when updating the plan body',
+      it('plan update: should succeed without an HTML preview when the body changes', async () => {
+        axiosPutSpy.mockResolvedValue({ data: { data: { id: 'plan-1' } } } as any);
+
+        await executeCommand('plan', 'update', { id: 'plan-1', content: 'new body' });
+
+        expect(axiosPutSpy).toHaveBeenCalledWith(
+          `${API_URL}/api/projects/${PROJECT_ID}/plans/plan-1`,
+          { content: 'new body' },
+          { headers: authHeaders() },
         );
-        expect(axiosPutSpy).not.toHaveBeenCalled();
+        expect(axiosPutSpy).toHaveBeenCalledTimes(1);
       });
 
-      it('plan update: should require an HTML preview when title/type/priority changes', async () => {
-        await expect(executeCommand('plan', 'update', { id: 'plan-1', priority: 'HIGH' })).rejects.toThrow(
-          'An HTML preview is required when updating the plan body',
+      it('plan update: should succeed without an HTML preview when title/type/priority changes', async () => {
+        axiosPutSpy.mockResolvedValue({ data: { data: { id: 'plan-1' } } } as any);
+
+        await executeCommand('plan', 'update', { id: 'plan-1', priority: 'HIGH' });
+
+        expect(axiosPutSpy).toHaveBeenCalledWith(
+          `${API_URL}/api/projects/${PROJECT_ID}/plans/plan-1`,
+          { priority: 'HIGH' },
+          { headers: authHeaders() },
         );
-        expect(axiosPutSpy).not.toHaveBeenCalled();
+        expect(axiosPutSpy).toHaveBeenCalledTimes(1);
       });
 
       it('plan update: should update body then upload the HTML preview', async () => {
