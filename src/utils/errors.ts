@@ -3,6 +3,7 @@ import { AxiosError, isAxiosError } from 'axios';
 type ApiErrorPayload = {
   message?: unknown;
   errorCode?: unknown;
+  minimumVersion?: unknown;
 };
 
 export type ErrorContext = {
@@ -59,6 +60,32 @@ export function attachErrorContext(error: unknown, context: ErrorContext): unkno
   return error;
 }
 
+function formatUpgradeRequiredMessage(options: { message: string; minimumVersion?: string }): string {
+  const { message, minimumVersion } = options;
+  const lines: string[] = [
+    'Your AgentTeams CLI version is no longer supported.',
+    'Next: Upgrade to the latest CLI and retry.',
+    '  npm install -g @agentteams/cli@latest',
+  ];
+
+  if (minimumVersion) {
+    lines.push(`Minimum supported version: ${minimumVersion}`);
+  }
+
+  lines.push(
+    'Verify:',
+    '  agentteams --version',
+    'If the version is still old after upgrade, you may have multiple installs — check with:',
+    '  which -a agentteams',
+  );
+
+  if (message) {
+    lines.push(`Details: ${message}`);
+  }
+
+  return lines.join('\n');
+}
+
 export function handleError(error: unknown, context?: ErrorContext): string {
   const resolvedContext = getErrorContext(error, context);
 
@@ -69,6 +96,11 @@ export function handleError(error: unknown, context?: ErrorContext): string {
       const rawMessage = typeof data?.message === 'string' ? data.message : error.message;
       const message = typeof rawMessage === 'string' ? translateServerMessage(rawMessage) : String(rawMessage);
       const errorCode = typeof data?.errorCode === 'string' ? data.errorCode : undefined;
+      const minimumVersion = typeof data?.minimumVersion === 'string' ? data.minimumVersion : undefined;
+
+      if (status === 426 || errorCode === 'CLI_UPGRADE_REQUIRED') {
+        return formatUpgradeRequiredMessage({ message, minimumVersion });
+      }
 
       switch (status) {
         case 400:
