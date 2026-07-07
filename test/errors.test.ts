@@ -2,7 +2,10 @@ import { describe, expect, it } from '@jest/globals';
 import { AxiosError } from 'axios';
 import { attachErrorContext, handleError } from '../src/utils/errors.js';
 
-function makeAxiosError(status: number, data?: { message?: string; errorCode?: string }): AxiosError {
+function makeAxiosError(
+  status: number,
+  data?: { message?: string; errorCode?: string; minimumVersion?: string },
+): AxiosError {
   return new AxiosError(data?.message ?? `HTTP ${status}`, undefined, undefined, undefined, {
     status,
     statusText: 'error',
@@ -51,6 +54,49 @@ describe('errors', () => {
       'Conflict (stale update).',
     );
     expect(handleError(makeAxiosError(500, { message: 'boom' }))).toContain('Server error occurred.');
+  });
+
+  it('maps 426 / CLI_UPGRADE_REQUIRED to a friendly upgrade guide', () => {
+    const result = handleError(
+      makeAxiosError(426, {
+        message: 'CLI version 0.0.10 is no longer supported. Please upgrade: npm install -g @agentteams/cli',
+        errorCode: 'CLI_UPGRADE_REQUIRED',
+        minimumVersion: '0.0.20',
+      }),
+    );
+
+    expect(result).not.toContain('HTTP 426 error');
+    expect(result).toContain('Your AgentTeams CLI version is no longer supported.');
+    expect(result).toContain('npm install -g @agentteams/cli@latest');
+    expect(result).toContain('agentteams --version');
+    expect(result).toContain('which -a agentteams');
+    expect(result).toContain('Minimum supported version: 0.0.20');
+    expect(result).toContain(
+      'Details: CLI version 0.0.10 is no longer supported. Please upgrade: npm install -g @agentteams/cli',
+    );
+  });
+
+  it('handles plain 426 without errorCode or minimumVersion', () => {
+    const result = handleError(makeAxiosError(426, { message: 'upgrade required' }));
+
+    expect(result).not.toContain('HTTP 426 error');
+    expect(result).toContain('Your AgentTeams CLI version is no longer supported.');
+    expect(result).toContain('npm install -g @agentteams/cli@latest');
+    expect(result).not.toContain('Minimum supported version:');
+    expect(result).toContain('Details: upgrade required');
+  });
+
+  it('handles CLI_UPGRADE_REQUIRED errorCode with a non-426 status', () => {
+    const result = handleError(
+      makeAxiosError(200, {
+        message: 'CLI version 0.0.10 is no longer supported.',
+        errorCode: 'CLI_UPGRADE_REQUIRED',
+        minimumVersion: '0.0.20',
+      }),
+    );
+
+    expect(result).toContain('Your AgentTeams CLI version is no longer supported.');
+    expect(result).toContain('Minimum supported version: 0.0.20');
   });
 
   it('handles connection, generic Error, and non-Error values', () => {
