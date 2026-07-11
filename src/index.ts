@@ -161,11 +161,11 @@ program
   .option('--stdin', 'Read plan HTML summary from stdin (upload-html only)', false)
   .option(
     '--html-file <path>',
-    'Read the plan HTML preview from a local file (optional for create/update; V2 plans no longer render a preview)',
+    'Read a legacy V1 plan HTML preview from a local file (optional for create/update; not displayed for V2 plans)',
   )
   .option(
     '--html-stdin',
-    'Read the plan HTML preview from stdin (optional for create/update; mutually exclusive with --html-file)',
+    'Read a legacy V1 plan HTML preview from stdin (optional for create/update; not displayed for V2 plans)',
     false,
   )
   .option('--source-label <label>', 'Optional source label for uploaded plan HTML summary')

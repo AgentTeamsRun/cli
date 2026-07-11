@@ -386,38 +386,11 @@ agentteams plan get --id agentteams_pln_f62762fc-730a-4201-8586-e2541505ed1b
 # resolves to plan f62762fc-730a-4201-8586-e2541505ed1b
 ```
 
-### Plan HTML Preview Enforcement
+### Legacy V1 Plan HTML Preview
 
-`plan create` and preview-affecting `plan update` calls require an HTML preview in the same command. The CLI does **not** generate the HTML automatically — you (or an AI agent) author the preview that summarizes the plan body, and the CLI enforces that it is provided and uploaded. The canonical source remains the Markdown/Tiptap plan body; the HTML is a separate human-facing summary.
+V2 plans render structured sections and tasks directly in the web UI and do not display uploaded HTML previews. Do not pass `--html-file` or `--html-stdin` for V2 plan workflows.
 
-Provide the preview with one of these mutually exclusive inputs:
-
-- `--html-file <path>`: read the HTML preview from a local file.
-- `--html-stdin`: read the HTML preview from stdin.
-
-```bash
-# create: plan body + required HTML preview, uploaded in one command
-agentteams plan create \
-  --title "My plan" \
-  --file .agentteams/cli/temp/plan-body.md \
-  --html-file .agentteams/cli/temp/plan-summary.html \
-  --runner-type CLAUDE_CODE --model <model-id>
-
-# update: body change requires the HTML preview too
-agentteams plan update \
-  --id <plan-id> \
-  --file .agentteams/cli/temp/plan-body.md \
-  --html-file .agentteams/cli/temp/plan-summary.html
-```
-
-Rules:
-
-- `plan create` fails if no HTML preview input is given. On success the plan is created, then the preview is uploaded in the same command.
-- `plan update` requires the HTML preview when the request changes `--content`/`--file`, `--title`, `--type`, or `--priority` (the fields that affect the preview's source hash). A status-only update (`--status`) does **not** require the preview.
-- If the HTML upload fails after the plan was created/updated, the command exits with an error noting the partial failure (the plan body and preview are out of sync). Re-run `agentteams plan upload-html` to recover.
-- The HTML preview is mandatory for `plan create` and preview-affecting `plan update`; there is no escape hatch. This keeps the plan body and its human-facing preview in sync.
-
-The standalone `agentteams plan upload-html` action still exists for re-uploading or fixing a preview:
+The optional HTML inputs and standalone `plan upload-html` action remain for legacy V1 plans that expose the visualization tab:
 
 ```bash
 agentteams plan upload-html \

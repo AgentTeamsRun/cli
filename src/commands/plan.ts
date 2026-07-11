@@ -752,7 +752,7 @@ export async function executePlanCommand(
         );
       }
 
-      // HTML preview is optional for plan create (V2 plans do not render a preview).
+      // Kept for legacy V1 compatibility; V2 web views do not render uploaded HTML previews.
       const createHasHtmlInput = hasPlanHtmlPreviewInput(options);
       const createHtmlContent = createHasHtmlInput ? readPlanHtmlPreviewInput(options) : undefined;
 
