@@ -20,14 +20,16 @@ export async function getPlan(apiUrl: string, projectId: string, headers: any, i
   return response.data;
 }
 
-export async function getPlanDetail(
+// 실행 런북(API 키 전용): 화면 통합 상세(/detail)와 달리 Markdown 본문 + V2 작업/진행률을 제공한다.
+// plan download는 이 endpoint만 사용해 본문과 실행 lifecycle sidecar를 안정적으로 받는다.
+export async function getPlanRunbook(
   apiUrl: string,
   projectId: string,
   headers: Record<string, string>,
   id: string,
 ): Promise<unknown> {
   const baseUrl = `${apiUrl}/api/projects/${projectId}/plans`;
-  const response = await httpClient.get(`${baseUrl}/${id}/detail`, { headers });
+  const response = await httpClient.get(`${baseUrl}/${id}/runbook`, { headers });
   return response.data;
 }
 

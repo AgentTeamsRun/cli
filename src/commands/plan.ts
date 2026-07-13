@@ -23,7 +23,7 @@ import {
   deletePlan,
   finishPlanLifecycle,
   getPlan,
-  getPlanDetail,
+  getPlanRunbook,
   getPlanDependencies,
   getPlanStatus,
   linkOriginIssue,
@@ -942,7 +942,7 @@ export async function executePlanCommand(
       const result = await withSpinner(
         'Downloading plan...',
         async () => {
-          const response = (await getPlanDetail(apiUrl, projectId, headers, options.id)) as PlanRunbookDetailResponse;
+          const response = (await getPlanRunbook(apiUrl, projectId, headers, options.id)) as PlanRunbookDetailResponse;
           const planDetail = response.data;
           const plan = planDetail.plan;
           const tasks = Array.isArray(planDetail.tasks) ? (planDetail.tasks as PlanRunbookTask[]) : [];
