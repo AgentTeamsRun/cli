@@ -591,6 +591,97 @@ describe('CLI Integration Tests', () => {
       );
     });
 
+    it('plan download: should request the runbook endpoint and write body + task sidecar', async () => {
+      const runbook = {
+        plan: {
+          id: 'plan-1',
+          title: 'Runbook Plan',
+          status: 'BACKLOG',
+          priority: 'HIGH',
+          webUrl: 'https://agentteams.run/go?type=plan&id=plan-1',
+          contentVersion: 'V2',
+          contentMarkdown: '## TODOs\n\n### 1. Task A — TODO\n\ndo A\n\n### 2. Task B — TODO\n\ndo B',
+        },
+        tasks: [
+          { id: 'task-a', title: 'Task A', status: 'TODO', orderIndex: 0, dependsOnTaskIds: [] },
+          { id: 'task-b', title: 'Task B', status: 'TODO', orderIndex: 1, dependsOnTaskIds: ['task-a'] },
+        ],
+        progress: {
+          total: 2,
+          todo: 2,
+          inProgress: 0,
+          done: 0,
+          skipped: 0,
+          blocked: 0,
+          completed: 0,
+          percent: 0,
+        },
+      };
+      axiosGetSpy.mockResolvedValue({ data: { data: runbook } } as any);
+
+      const originalCwd = process.cwd();
+      const tempCwd = mkdtempSync(join(tmpdir(), 'agentteams-plan-download-'));
+
+      try {
+        const agentteamsDir = join(tempCwd, '.agentteams');
+        mkdirSync(agentteamsDir, { recursive: true });
+        writeFileSync(
+          join(agentteamsDir, 'config.json'),
+          JSON.stringify(
+            {
+              teamId: 'team_1',
+              projectId: PROJECT_ID,
+              agentName: 'test-agent',
+              apiKey: 'key_test123',
+              apiUrl: API_URL,
+            },
+            null,
+            2,
+          ) + '\n',
+          'utf-8',
+        );
+
+        process.chdir(tempCwd);
+        const result = (await executeCommand('plan', 'download', { id: 'plan-1' })) as {
+          filePath: string;
+          sidecarPath?: string;
+        };
+
+        // 다운로드는 화면 통합 상세(/detail)가 아니라 실행 런북(/runbook)만 요청한다.
+        expect(axiosGetSpy).toHaveBeenCalledWith(`${API_URL}/api/projects/${PROJECT_ID}/plans/plan-1/runbook`, {
+          headers: authHeaders(),
+        });
+        expect(axiosGetSpy).not.toHaveBeenCalledWith(
+          `${API_URL}/api/projects/${PROJECT_ID}/plans/plan-1/detail`,
+          expect.anything(),
+        );
+
+        // V2 다운로드 파일은 Progress 요약 뒤에 비어 있지 않은 본문과 task-id 주석을 포함한다.
+        const savedMarkdown = readFileSync(join(tempCwd, result.filePath), 'utf-8');
+        expect(savedMarkdown).toContain('## Progress');
+        expect(savedMarkdown).toContain('### 1. Task A — TODO');
+        expect(savedMarkdown).toContain('<!-- agentteams-task-id: task-a -->\n### 1. Task A');
+
+        // sidecar는 task id와 의존 task 번호를 보존한다.
+        expect(result.sidecarPath).toBeDefined();
+        const sidecar = JSON.parse(readFileSync(join(tempCwd, result.sidecarPath as string), 'utf-8'));
+        expect(sidecar.tasks).toEqual([
+          { id: 'task-a', number: 1, title: 'Task A', status: 'TODO', dependsOnTaskIds: [], dependsOnTaskNumbers: [] },
+          {
+            id: 'task-b',
+            number: 2,
+            title: 'Task B',
+            status: 'TODO',
+            dependsOnTaskIds: ['task-a'],
+            dependsOnTaskNumbers: [1],
+          },
+        ]);
+      } finally {
+        process.chdir(originalCwd);
+        rmSync(tempCwd, { recursive: true, force: true });
+      }
+    });
+
     it('plan create: should always send BACKLOG status even when --status is provided', async () => {
       axiosPostSpy.mockResolvedValue({ data: { data: { id: 't1' } } } as any);
       axiosPutSpy.mockResolvedValue({ data: { data: { id: 't1' } } } as any);
