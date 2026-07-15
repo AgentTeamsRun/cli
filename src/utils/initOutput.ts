@@ -1,6 +1,6 @@
 import chalk from 'chalk';
 import { formatOutput } from './formatter.js';
-import type { AgentFileEntry } from '../commands/init.js';
+import type { AgentFileEntry, WorktreeInitResult } from '../commands/init.js';
 
 export type InitOutputFormat = 'human' | 'json';
 
@@ -25,9 +25,39 @@ function isInitResult(result: unknown): result is InitResultShape {
   );
 }
 
+function isWorktreeInitResult(result: unknown): result is WorktreeInitResult {
+  if (!result || typeof result !== 'object') return false;
+  const r = result as Record<string, unknown>;
+  return (
+    r.success === true &&
+    r.mode === 'worktree' &&
+    typeof r.worktreePath === 'string' &&
+    typeof r.sourcePath === 'string' &&
+    typeof r.targetPath === 'string' &&
+    (r.materialization === 'symlink' || r.materialization === 'copy' || r.materialization === 'existing')
+  );
+}
+
 export function printInitResult(result: unknown, format: InitOutputFormat): void {
   if (format === 'json') {
     console.log(formatOutput(result));
+    return;
+  }
+
+  if (isWorktreeInitResult(result)) {
+    console.log('✓ Detected a linked git worktree.');
+    if (result.warning) {
+      console.warn(`⚠ ${result.warning}`);
+    }
+    if (result.materialization === 'existing') {
+      console.log(`✓ .agentteams already exists: ${result.targetPath}`);
+    } else if (result.materialization === 'copy') {
+      console.log(`✓ Copied .agentteams into the worktree: ${result.targetPath}`);
+    } else {
+      console.log(`✓ Linked .agentteams into the worktree: ${result.targetPath}`);
+    }
+    console.log(`  Source: ${result.sourcePath}`);
+    console.log('  OAuth and interactive prompts were skipped because the main checkout is already configured.');
     return;
   }
 

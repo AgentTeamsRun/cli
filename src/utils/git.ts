@@ -1,4 +1,5 @@
 import * as childProcess from 'node:child_process';
+import { basename, dirname, isAbsolute, resolve } from 'node:path';
 
 export interface GitMetrics {
   commitHash?: string;
@@ -16,7 +17,7 @@ export interface GitMetrics {
 type ExecFileSyncFn = (
   file: string,
   args: readonly string[],
-  options: { encoding: 'utf8'; stdio: ['ignore', 'pipe', 'ignore']; windowsHide?: boolean },
+  options: { cwd?: string; encoding: 'utf8'; stdio: ['ignore', 'pipe', 'ignore']; windowsHide?: boolean },
 ) => string;
 
 export function collectGitMetrics(
@@ -46,9 +47,35 @@ export function getGitRemoteOriginUrl(
   return runGit(execFileSyncImpl, ['remote', 'get-url', 'origin']);
 }
 
-function runGit(execFileSyncImpl: ExecFileSyncFn, args: string[]): string | undefined {
+export function resolveMainCheckoutRoot(
+  cwd: string,
+  execFileSyncImpl: ExecFileSyncFn = childProcess.execFileSync,
+): string | null {
+  const commonDir = runGit(execFileSyncImpl, ['rev-parse', '--git-common-dir'], cwd);
+  const gitDir = runGit(execFileSyncImpl, ['rev-parse', '--git-dir'], cwd);
+  if (!commonDir || !gitDir) return null;
+
+  const absoluteCommonDir = isAbsolute(commonDir) ? resolve(commonDir) : resolve(cwd, commonDir);
+  const absoluteGitDir = isAbsolute(gitDir) ? resolve(gitDir) : resolve(cwd, gitDir);
+  if (absoluteCommonDir === absoluteGitDir || basename(absoluteCommonDir) !== '.git') return null;
+
+  return dirname(absoluteCommonDir);
+}
+
+export function resolveGitTopLevel(
+  cwd: string,
+  execFileSyncImpl: ExecFileSyncFn = childProcess.execFileSync,
+): string | null {
+  const topLevel = runGit(execFileSyncImpl, ['rev-parse', '--show-toplevel'], cwd);
+  if (!topLevel) return null;
+
+  return isAbsolute(topLevel) ? resolve(topLevel) : resolve(cwd, topLevel);
+}
+
+function runGit(execFileSyncImpl: ExecFileSyncFn, args: string[], cwd?: string): string | undefined {
   try {
     const output = execFileSyncImpl('git', args, {
+      cwd,
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
       windowsHide: true,

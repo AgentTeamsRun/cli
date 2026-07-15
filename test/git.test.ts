@@ -1,5 +1,10 @@
 import { describe, it, expect } from '@jest/globals';
-import { collectGitMetrics, getGitRemoteOriginUrl } from '../src/utils/git.js';
+import {
+  collectGitMetrics,
+  getGitRemoteOriginUrl,
+  resolveGitTopLevel,
+  resolveMainCheckoutRoot,
+} from '../src/utils/git.js';
 
 describe('Git Metrics Utility', () => {
   it('collects commit hash, branch, and shortstat metrics', () => {
@@ -102,5 +107,68 @@ describe('Git Metrics Utility', () => {
     });
 
     expect(remoteUrl).toBe('git@github.com:agentteams/agentteams.git');
+  });
+});
+
+describe('resolveMainCheckoutRoot', () => {
+  it('returns the main checkout root for a linked worktree', () => {
+    const root = resolveMainCheckoutRoot('/worktrees/feature', (_cmd, args) => {
+      const serializedArgs = args.join(' ');
+      if (serializedArgs === 'rev-parse --git-common-dir') return '/repos/project/.git\n';
+      if (serializedArgs === 'rev-parse --git-dir') return '/repos/project/.git/worktrees/feature\n';
+      throw new Error(`unexpected args: ${serializedArgs}`);
+    });
+
+    expect(root).toBe('/repos/project');
+  });
+
+  it('returns null for the main checkout', () => {
+    const root = resolveMainCheckoutRoot('/repos/project', (_cmd, args) => {
+      const serializedArgs = args.join(' ');
+      if (serializedArgs === 'rev-parse --git-common-dir') return '.git\n';
+      if (serializedArgs === 'rev-parse --git-dir') return '.git\n';
+      throw new Error(`unexpected args: ${serializedArgs}`);
+    });
+
+    expect(root).toBeNull();
+  });
+
+  it('returns null when git lookup fails', () => {
+    const root = resolveMainCheckoutRoot('/not-a-repository', () => {
+      throw new Error('git not found');
+    });
+
+    expect(root).toBeNull();
+  });
+
+  it('resolves relative git directory output from cwd', () => {
+    const root = resolveMainCheckoutRoot('/repos/project', (_cmd, args) => {
+      const serializedArgs = args.join(' ');
+      if (serializedArgs === 'rev-parse --git-common-dir') return '.git\n';
+      if (serializedArgs === 'rev-parse --git-dir') return '.git/worktrees/feature\n';
+      throw new Error(`unexpected args: ${serializedArgs}`);
+    });
+
+    expect(root).toBe('/repos/project');
+  });
+});
+
+describe('resolveGitTopLevel', () => {
+  it('returns an absolute repository root', () => {
+    const root = resolveGitTopLevel('/repos/project/packages/cli', (_cmd, args, options) => {
+      expect(args).toEqual(['rev-parse', '--show-toplevel']);
+      expect(options.cwd).toBe('/repos/project/packages/cli');
+      return '/repos/project\n';
+    });
+
+    expect(root).toBe('/repos/project');
+  });
+
+  it('returns null outside a git repository', () => {
+    const root = resolveGitTopLevel('/not-a-repository', () => {
+      throw new Error('not a git repository');
+    });
+
+    expect(root).toBeNull();
   });
 });

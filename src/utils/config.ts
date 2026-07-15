@@ -1,7 +1,8 @@
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, realpathSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import type { Config } from '../types/index.js';
+import { resolveGitTopLevel, resolveMainCheckoutRoot } from './git.js';
 
 const CONFIG_DIR = '.agentteams';
 const CONFIG_FILE = 'config.json';
@@ -47,14 +48,32 @@ function loadEnvConfig(): Partial<Config> {
  */
 export function findProjectConfig(startDir: string): string | null {
   let current = resolve(startDir);
+  const repositoryRoot = resolveGitTopLevel(current);
+
+  if (repositoryRoot) {
+    try {
+      current = realpathSync(current);
+    } catch {
+      return null;
+    }
+  }
 
   while (true) {
     const candidate = join(current, CONFIG_DIR, CONFIG_FILE);
     if (existsSync(candidate)) return candidate;
 
+    // Repository-scoped lookup must not silently adopt a parent project's or $HOME config.
+    if (repositoryRoot && current === repositoryRoot) break;
+
     const parent = dirname(current);
     if (parent === current) break; // reached filesystem root
     current = parent;
+  }
+
+  const mainCheckoutRoot = repositoryRoot ? resolveMainCheckoutRoot(repositoryRoot) : null;
+  if (mainCheckoutRoot) {
+    const mainCheckoutConfig = join(mainCheckoutRoot, CONFIG_DIR, CONFIG_FILE);
+    if (existsSync(mainCheckoutConfig)) return mainCheckoutConfig;
   }
 
   return null;
