@@ -83,6 +83,25 @@ describe('printInitResult', () => {
       expect(output).not.toContain('agentteams_plan_123e4567-e89b-12d3-a456-426614174000');
       expect(output).not.toContain('Start plan plan_123e4567-e89b-12d3-a456-426614174000');
     });
+
+    it('worktree 부트스트랩 결과와 링크 원본을 출력한다', () => {
+      printInitResult(
+        {
+          success: true,
+          mode: 'worktree',
+          worktreePath: '/worktrees/feature',
+          sourcePath: '/project/.agentteams',
+          targetPath: '/worktrees/feature/.agentteams',
+          materialization: 'symlink',
+        },
+        'human',
+      );
+
+      const output = captureOutput(logSpy);
+      expect(output).toContain('Detected a linked git worktree');
+      expect(output).toContain('Source: /project/.agentteams');
+      expect(output).toContain('OAuth and interactive prompts were skipped');
+    });
   });
 
   describe('json format', () => {

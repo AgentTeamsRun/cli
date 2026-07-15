@@ -151,6 +151,9 @@ describe('CLI Integration Tests', () => {
           agentName: 'test-agent',
         }),
       );
+      if ('mode' in result) {
+        throw new Error('Expected the OAuth init path outside a linked worktree.');
+      }
       const parsedAuthUrl = new URL(result.authUrl);
       expect(parsedAuthUrl.searchParams.get('ap')).toBeTruthy();
       expect(result.authUrl).not.toContain(tempCwd);
@@ -245,6 +248,9 @@ describe('CLI Integration Tests', () => {
 
       const { executeInitCommand } = await import('../src/commands/init.js');
       const result = await executeInitCommand({ cwd: tempCwd });
+      if ('mode' in result) {
+        throw new Error('Expected the OAuth init path outside a linked worktree.');
+      }
 
       const savedConfig = JSON.parse(readFileSync(result.configPath, 'utf-8'));
       expect(savedConfig).toEqual({

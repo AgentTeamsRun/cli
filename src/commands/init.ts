@@ -1,4 +1,15 @@
-import { writeFileSync, readFileSync, appendFileSync, existsSync, mkdirSync } from 'node:fs';
+import {
+  appendFileSync,
+  cpSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  symlinkSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { constants, createCipheriv, publicEncrypt, randomBytes } from 'node:crypto';
 import { multiselect, isCancel, cancel } from '@clack/prompts';
@@ -10,6 +21,7 @@ import { createSpinner, withSpinner } from '../utils/spinner.js';
 import { withCommandContext } from '../utils/commandContext.js';
 import { conventionDownload } from './convention.js';
 import type { Config } from '../types/index.js';
+import { resolveGitTopLevel, resolveMainCheckoutRoot } from '../utils/git.js';
 
 const AUTH_BASE_URL = process.env.AGENTTEAMS_WEB_URL || 'https://agentteams.run';
 
@@ -42,7 +54,7 @@ export type AgentFileEntry = {
   type: 'created' | 'example';
 };
 
-type InitResult = {
+type OAuthInitResult = {
   success: true;
   authUrl: string;
   configPath: string;
@@ -54,6 +66,18 @@ type InitResult = {
   seedPlanId: string | null;
   seedPlanWebUrl: string | null;
 };
+
+export type WorktreeInitResult = {
+  success: true;
+  mode: 'worktree';
+  worktreePath: string;
+  sourcePath: string;
+  targetPath: string;
+  materialization: 'symlink' | 'copy' | 'existing';
+  warning?: string;
+};
+
+type InitResult = OAuthInitResult | WorktreeInitResult;
 
 function isSshEnvironment(): boolean {
   return Boolean(process.env.SSH_CONNECTION || process.env.SSH_CLIENT || process.env.SSH_TTY);
@@ -306,12 +330,89 @@ alwaysApply: true
   return entries;
 }
 
+function isConfiguredMainCheckout(sourcePath: string): boolean {
+  try {
+    const config = JSON.parse(readFileSync(join(sourcePath, CONFIG_FILE), 'utf-8')) as Record<string, unknown>;
+    return ['teamId', 'projectId', 'apiKey'].every(
+      (field) => typeof config[field] === 'string' && config[field].length > 0,
+    );
+  } catch {
+    return false;
+  }
+}
+
+function isBrokenSymbolicLink(path: string): boolean {
+  try {
+    return lstatSync(path).isSymbolicLink() && !existsSync(path);
+  } catch {
+    return false;
+  }
+}
+
+export function bootstrapLinkedWorktree(cwd: string): WorktreeInitResult | null {
+  let worktreePath: string;
+  try {
+    worktreePath = realpathSync(resolve(cwd));
+  } catch {
+    return null;
+  }
+
+  if (resolveGitTopLevel(worktreePath) !== worktreePath) return null;
+
+  const mainCheckoutRoot = resolveMainCheckoutRoot(worktreePath);
+  if (!mainCheckoutRoot) return null;
+
+  const sourcePath = join(mainCheckoutRoot, CONFIG_DIR);
+  if (!existsSync(sourcePath) || !isConfiguredMainCheckout(sourcePath)) return null;
+
+  const targetPath = join(worktreePath, CONFIG_DIR);
+  if (isBrokenSymbolicLink(targetPath)) {
+    unlinkSync(targetPath);
+  } else if (existsSync(targetPath)) {
+    return {
+      success: true,
+      mode: 'worktree',
+      worktreePath,
+      sourcePath,
+      targetPath,
+      materialization: 'existing',
+    };
+  }
+
+  try {
+    symlinkSync(sourcePath, targetPath, 'dir');
+    return {
+      success: true,
+      mode: 'worktree',
+      worktreePath,
+      sourcePath,
+      targetPath,
+      materialization: 'symlink',
+    };
+  } catch (error) {
+    const warning = `Could not create the .agentteams symlink (${error instanceof Error ? error.message : String(error)}). Copied the directory instead.`;
+    cpSync(sourcePath, targetPath, { recursive: true });
+    return {
+      success: true,
+      mode: 'worktree',
+      worktreePath,
+      sourcePath,
+      targetPath,
+      materialization: 'copy',
+      warning,
+    };
+  }
+}
+
 export async function executeInitCommand(options?: InitOptions): Promise<InitResult> {
   return withCommandContext('init', () => executeInitCommandWithContext(options));
 }
 
 async function executeInitCommandWithContext(options?: InitOptions): Promise<InitResult> {
   const cwd = resolve(options?.cwd ?? process.cwd());
+  const worktreeResult = bootstrapLinkedWorktree(cwd);
+  if (worktreeResult) return worktreeResult;
+
   const configPath = join(cwd, CONFIG_DIR, CONFIG_FILE);
   const conventionPath = join(cwd, CONFIG_DIR, CONVENTION_FILE);
 
