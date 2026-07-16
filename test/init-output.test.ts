@@ -102,6 +102,46 @@ describe('printInitResult', () => {
       expect(output).toContain('Source: /project/.agentteams');
       expect(output).toContain('OAuth and interactive prompts were skipped');
     });
+
+    it('worktree 진입점 상태와 issue를 출력한다', () => {
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+      printInitResult(
+        {
+          success: true,
+          mode: 'worktree',
+          worktreePath: '/worktrees/feature',
+          sourcePath: '/project/.agentteams',
+          targetPath: '/worktrees/feature/.agentteams',
+          materialization: 'symlink',
+          entryPoints: [
+            { relativePath: 'CLAUDE.md', state: 'created' },
+            { relativePath: 'AGENTS.md', state: 'tracked' },
+            { relativePath: 'GEMINI.md', state: 'existing' },
+            { relativePath: '.cursor/rules/agentteams.mdc', state: 'blocked' },
+          ],
+          issues: [
+            {
+              code: 'exclude-write-failed',
+              path: '/repo/.git/info/exclude',
+              message: 'Could not update /repo/.git/info/exclude: EACCES',
+            },
+          ],
+        },
+        'human',
+      );
+
+      const output = captureOutput(logSpy);
+      expect(output).toContain('Agent entry point created: CLAUDE.md');
+      expect(output).toContain('Agent entry point already tracked: AGENTS.md');
+      expect(output).toContain('Agent entry point already exists: GEMINI.md');
+
+      const warnings = captureOutput(warnSpy);
+      expect(warnings).toContain('Agent entry point skipped: .cursor/rules/agentteams.mdc');
+      expect(warnings).toContain('Could not update /repo/.git/info/exclude: EACCES');
+
+      warnSpy.mockRestore();
+    });
   });
 
   describe('json format', () => {
