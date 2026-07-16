@@ -8,7 +8,10 @@ import { executeCommand } from './commands/index.js';
 import { formatOutput } from './utils/formatter.js';
 import { handleError } from './utils/errors.js';
 import { createSummaryLines, shouldPrintSummary, type OutputFormat } from './utils/outputPolicy.js';
-import { printInitResult, type InitOutputFormat } from './utils/initOutput.js';
+import { printInitResult } from './utils/initOutput.js';
+import { printDoctorResult, resolveDoctorExitCode } from './utils/doctorOutput.js';
+import type { DoctorResult } from './commands/doctor.js';
+import { executeValidatedInteractiveCommand, normalizeInteractiveFormat } from './utils/interactiveCommand.js';
 import { startUpdateCheck, readCache, compareVersions, formatUpdateMessage } from './utils/updateCheck.js';
 
 const require = createRequire(import.meta.url);
@@ -20,14 +23,6 @@ function normalizeFormat(format: unknown): OutputFormat {
   if (format === undefined || format === null || format === '') return 'json';
   if (format === 'json') return 'json';
   throw new Error(`Unsupported output format: ${String(format)}. Only json is supported.`);
-}
-
-function normalizeInteractiveFormat(format: unknown): InitOutputFormat {
-  if (format === undefined || format === null || format === '') return 'human';
-  if (format === 'json') return 'json';
-  throw new Error(
-    `Unsupported output format: ${String(format)}. Use json or omit --format for the human-readable view.`,
-  );
 }
 
 function writeOutputFile(outputFile: string, content: string): { resolvedPath: string; bytes: number } {
@@ -103,6 +98,26 @@ program
       const format = normalizeInteractiveFormat(options.format);
 
       printInitResult(result, format);
+    } catch (error) {
+      console.error(handleError(error));
+      process.exit(1);
+    }
+  });
+
+program
+  .command('doctor')
+  .description('Diagnose and prepare convention reachability for non-git root projects')
+  .option('--format <format>', 'Output format (json; defaults to human-readable view)')
+  .addHelpText('after', CONVENTION_HINT)
+  .action(async (options) => {
+    try {
+      const { result, format } = await executeValidatedInteractiveCommand(options.format, async () =>
+        executeCommand('doctor', 'run', { cwd: process.cwd() }),
+      );
+
+      printDoctorResult(result as DoctorResult, format);
+      // exitCode (not process.exit) lets stdout flush before termination.
+      process.exitCode = resolveDoctorExitCode(result as DoctorResult);
     } catch (error) {
       console.error(handleError(error));
       process.exit(1);

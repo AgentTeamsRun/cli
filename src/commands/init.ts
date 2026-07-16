@@ -22,6 +22,15 @@ import { withCommandContext } from '../utils/commandContext.js';
 import { conventionDownload } from './convention.js';
 import type { Config } from '../types/index.js';
 import { resolveGitTopLevel, resolveMainCheckoutRoot } from '../utils/git.js';
+import {
+  DEFAULT_CONVENTION_REFERENCE,
+  ensureConventionEntryPoints,
+  ensureLocalExclude,
+  isReadableRegularFile,
+  toAnchoredExcludePattern,
+  type ConventionEntryPointState,
+  type ConventionIssue,
+} from '../utils/conventionLink.js';
 
 const AUTH_BASE_URL = process.env.AGENTTEAMS_WEB_URL || 'https://agentteams.run';
 
@@ -67,13 +76,22 @@ type OAuthInitResult = {
   seedPlanWebUrl: string | null;
 };
 
+export type WorktreeEntryPointState = ConventionEntryPointState;
+
+export type WorktreeEntryPointEntry = {
+  relativePath: string;
+  state: WorktreeEntryPointState;
+};
+
 export type WorktreeInitResult = {
   success: true;
   mode: 'worktree';
   worktreePath: string;
   sourcePath: string;
   targetPath: string;
-  materialization: 'symlink' | 'copy' | 'existing';
+  materialization: 'symlink' | 'copy' | 'existing' | 'blocked';
+  entryPoints: WorktreeEntryPointEntry[];
+  issues: ConventionIssue[];
   warning?: string;
 };
 
@@ -292,15 +310,6 @@ function generateAgentEntryPointFiles(cwd: string, selectedFiles: string[]): Age
     return [];
   }
 
-  const DEFAULT_CONVENTION_REFERENCE = `---
-alwaysApply: true
----
-
-# AGENT_RULES
-
-**Before starting any task, always refer to \`.agentteams/convention.md\`.**
-`;
-
   const entries: AgentFileEntry[] = [];
 
   for (const relativePath of selectedFiles) {
@@ -365,43 +374,87 @@ export function bootstrapLinkedWorktree(cwd: string): WorktreeInitResult | null 
   const sourcePath = join(mainCheckoutRoot, CONFIG_DIR);
   if (!existsSync(sourcePath) || !isConfiguredMainCheckout(sourcePath)) return null;
 
-  const targetPath = join(worktreePath, CONFIG_DIR);
-  if (isBrokenSymbolicLink(targetPath)) {
-    unlinkSync(targetPath);
-  } else if (existsSync(targetPath)) {
-    return {
-      success: true,
-      mode: 'worktree',
-      worktreePath,
-      sourcePath,
-      targetPath,
-      materialization: 'existing',
-    };
+  // The convention root is the parent of the canonical .agentteams directory.
+  // Following the canonical path resolves double links as well
+  // (worktree/.agentteams → member/.agentteams → non-git-root/.agentteams),
+  // so the entry point set is read from the actual root — not the member repo.
+  let conventionRoot: string | null = null;
+  try {
+    conventionRoot = dirname(realpathSync(sourcePath));
+  } catch {
+    conventionRoot = null;
   }
 
-  try {
-    symlinkSync(sourcePath, targetPath, 'dir');
-    return {
-      success: true,
-      mode: 'worktree',
-      worktreePath,
-      sourcePath,
-      targetPath,
-      materialization: 'symlink',
-    };
-  } catch (error) {
-    const warning = `Could not create the .agentteams symlink (${error instanceof Error ? error.message : String(error)}). Copied the directory instead.`;
-    cpSync(sourcePath, targetPath, { recursive: true });
-    return {
-      success: true,
-      mode: 'worktree',
-      worktreePath,
-      sourcePath,
-      targetPath,
-      materialization: 'copy',
-      warning,
-    };
+  const selectedEntryPoints = conventionRoot
+    ? AGENT_ENTRY_POINT_FILES.map((f) => f.value).filter((relativePath) =>
+        isReadableRegularFile(join(conventionRoot, relativePath)),
+      )
+    : [];
+
+  // Local exclude registration comes before creating any managed path so a
+  // bootstrap never dirties the shared repository state.
+  const issues: ConventionIssue[] = [];
+  const excludeResult = ensureLocalExclude(worktreePath, [
+    toAnchoredExcludePattern(CONFIG_DIR),
+    ...selectedEntryPoints.map(toAnchoredExcludePattern),
+  ]);
+  if (excludeResult.status === 'blocked' && excludeResult.issue) {
+    issues.push(excludeResult.issue);
   }
+  const excludeReady = excludeResult.status === 'ready';
+
+  const targetPath = join(worktreePath, CONFIG_DIR);
+  let materialization: WorktreeInitResult['materialization'];
+  let warning: string | undefined;
+
+  if (!excludeReady) {
+    materialization = existsSync(targetPath) ? 'existing' : 'blocked';
+  } else if (isBrokenSymbolicLink(targetPath)) {
+    unlinkSync(targetPath);
+    try {
+      symlinkSync(sourcePath, targetPath, 'dir');
+      materialization = 'symlink';
+    } catch (error) {
+      warning = `Could not create the .agentteams symlink (${error instanceof Error ? error.message : String(error)}). Copied the directory instead.`;
+      cpSync(sourcePath, targetPath, { recursive: true });
+      materialization = 'copy';
+    }
+  } else if (existsSync(targetPath)) {
+    materialization = 'existing';
+  } else {
+    try {
+      symlinkSync(sourcePath, targetPath, 'dir');
+      materialization = 'symlink';
+    } catch (error) {
+      warning = `Could not create the .agentteams symlink (${error instanceof Error ? error.message : String(error)}). Copied the directory instead.`;
+      cpSync(sourcePath, targetPath, { recursive: true });
+      materialization = 'copy';
+    }
+  }
+
+  const entryPointResult = ensureConventionEntryPoints(worktreePath, selectedEntryPoints, {
+    allowCreate: excludeReady,
+    validateExistingReference: false,
+  });
+  issues.push(...entryPointResult.issues);
+  const entryPoints = entryPointResult.entries.map(({ relativePath, state }) => ({ relativePath, state }));
+
+  const result: WorktreeInitResult = {
+    success: true,
+    mode: 'worktree',
+    worktreePath,
+    sourcePath,
+    targetPath,
+    materialization,
+    entryPoints,
+    issues,
+  };
+
+  if (warning) {
+    result.warning = warning;
+  }
+
+  return result;
 }
 
 export async function executeInitCommand(options?: InitOptions): Promise<InitResult> {

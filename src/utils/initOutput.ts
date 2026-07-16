@@ -34,7 +34,10 @@ function isWorktreeInitResult(result: unknown): result is WorktreeInitResult {
     typeof r.worktreePath === 'string' &&
     typeof r.sourcePath === 'string' &&
     typeof r.targetPath === 'string' &&
-    (r.materialization === 'symlink' || r.materialization === 'copy' || r.materialization === 'existing')
+    (r.materialization === 'symlink' ||
+      r.materialization === 'copy' ||
+      r.materialization === 'existing' ||
+      r.materialization === 'blocked')
   );
 }
 
@@ -49,7 +52,9 @@ export function printInitResult(result: unknown, format: InitOutputFormat): void
     if (result.warning) {
       console.warn(`⚠ ${result.warning}`);
     }
-    if (result.materialization === 'existing') {
+    if (result.materialization === 'blocked') {
+      console.warn(`⚠ .agentteams was not created because local exclude is blocked: ${result.targetPath}`);
+    } else if (result.materialization === 'existing') {
       console.log(`✓ .agentteams already exists: ${result.targetPath}`);
     } else if (result.materialization === 'copy') {
       console.log(`✓ Copied .agentteams into the worktree: ${result.targetPath}`);
@@ -57,6 +62,27 @@ export function printInitResult(result: unknown, format: InitOutputFormat): void
       console.log(`✓ Linked .agentteams into the worktree: ${result.targetPath}`);
     }
     console.log(`  Source: ${result.sourcePath}`);
+
+    if (Array.isArray(result.entryPoints)) {
+      for (const entryPoint of result.entryPoints) {
+        if (entryPoint.state === 'created') {
+          console.log(`✓ Agent entry point created: ${entryPoint.relativePath}`);
+        } else if (entryPoint.state === 'tracked') {
+          console.log(`✓ Agent entry point already tracked: ${entryPoint.relativePath}`);
+        } else if (entryPoint.state === 'existing') {
+          console.log(`✓ Agent entry point already exists: ${entryPoint.relativePath}`);
+        } else {
+          console.warn(`⚠ Agent entry point skipped: ${entryPoint.relativePath}`);
+        }
+      }
+    }
+
+    if (Array.isArray(result.issues)) {
+      for (const issue of result.issues) {
+        console.warn(`⚠ ${issue.message}`);
+      }
+    }
+
     console.log('  OAuth and interactive prompts were skipped because the main checkout is already configured.');
     return;
   }

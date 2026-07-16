@@ -1,4 +1,5 @@
 import { executeInitCommand } from './init.js';
+import { executeDoctorCommand } from './doctor.js';
 import { executeAgentConfigCommand } from './agentConfigCommand.js';
 import { executeConfigCommand } from './config.js';
 import { executeConventionCommand, executeSyncCommand } from './conventionRouter.js';
@@ -80,6 +81,10 @@ async function executeCommandWithContext(
   switch (resource) {
     case 'init':
       return executeInitCommand(options);
+    // Local diagnosis/repair resource: must stay routable without loading the
+    // project config or API context first.
+    case 'doctor':
+      return executeDoctorCommand(options);
     case 'convention':
       return executeConventionCommand(action, options);
     case 'sync':
