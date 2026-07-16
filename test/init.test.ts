@@ -3,7 +3,13 @@ import { execFileSync } from 'node:child_process';
 import { lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { bootstrapLinkedWorktree, buildAuthorizeUrl, detectOsType, executeInitCommand } from '../src/commands/init.js';
+import {
+  bootstrapLinkedWorktree,
+  buildAuthorizeUrl,
+  detectOsType,
+  executeInitCommand,
+  type WorktreeInitResult,
+} from '../src/commands/init.js';
 
 const tempDirs: string[] = [];
 
@@ -31,6 +37,25 @@ function createRepository(): { repositoryDir: string; worktreeDir: string } {
   writeFileSync(join(repositoryDir, '.agentteams', 'convention.md'), '# Convention chain restored\n', 'utf-8');
   execFileSync('git', ['worktree', 'add', '-b', 'worktree-test', worktreeDir], { cwd: repositoryDir });
   return { repositoryDir, worktreeDir };
+}
+
+function expectMaterializedConfig(result: WorktreeInitResult, worktreeDir: string): void {
+  const targetPath = join(worktreeDir, '.agentteams');
+
+  expect(result).toMatchObject({ mode: 'worktree' });
+  expect(readFileSync(join(targetPath, 'convention.md'), 'utf-8')).toBe('# Convention chain restored\n');
+
+  if (result.materialization === 'symlink') {
+    expect(lstatSync(targetPath).isSymbolicLink()).toBe(true);
+    return;
+  }
+
+  expect(process.platform).toBe('win32');
+  expect(result).toMatchObject({
+    materialization: 'copy',
+    warning: expect.stringMatching(/Could not create the \.agentteams symlink .*Copied the directory instead\./),
+  });
+  expect(lstatSync(targetPath).isDirectory()).toBe(true);
 }
 
 afterEach(() => {
@@ -73,16 +98,12 @@ describe('init helpers', () => {
 });
 
 describe('linked worktree bootstrap', () => {
-  test('init links the main checkout config without OAuth or prompts', async () => {
+  test('init materializes the main checkout config without OAuth or prompts', async () => {
     const { worktreeDir } = createRepository();
 
     const result = await executeInitCommand({ cwd: worktreeDir });
 
-    expect(result).toMatchObject({ mode: 'worktree', materialization: 'symlink' });
-    expect(lstatSync(join(worktreeDir, '.agentteams')).isSymbolicLink()).toBe(true);
-    expect(readFileSync(join(worktreeDir, '.agentteams', 'convention.md'), 'utf-8')).toBe(
-      '# Convention chain restored\n',
-    );
+    expectMaterializedConfig(result as WorktreeInitResult, worktreeDir);
   });
 
   test('init leaves an existing worktree config unchanged', async () => {
@@ -115,12 +136,14 @@ describe('linked worktree bootstrap', () => {
   test('replaces a broken .agentteams symlink', async () => {
     const { worktreeDir } = createRepository();
     const targetPath = join(worktreeDir, '.agentteams');
-    symlinkSync(join(worktreeDir, 'missing-agentteams'), targetPath, 'dir');
+    const missingTargetPath = join(worktreeDir, 'missing-agentteams');
+    mkdirSync(missingTargetPath);
+    symlinkSync(missingTargetPath, targetPath, process.platform === 'win32' ? 'junction' : 'dir');
+    rmSync(missingTargetPath, { recursive: true, force: true });
 
     const result = await executeInitCommand({ cwd: worktreeDir });
 
-    expect(result).toMatchObject({ mode: 'worktree', materialization: 'symlink' });
-    expect(lstatSync(targetPath).isSymbolicLink()).toBe(true);
+    expectMaterializedConfig(result as WorktreeInitResult, worktreeDir);
     expect(readFileSync(join(targetPath, 'config.json'), 'utf-8')).toContain('project-1');
   });
 

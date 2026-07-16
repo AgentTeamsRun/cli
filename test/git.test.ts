@@ -1,4 +1,5 @@
 import { describe, it, expect } from '@jest/globals';
+import { resolve } from 'node:path';
 import {
   collectGitMetrics,
   getGitRemoteOriginUrl,
@@ -119,7 +120,7 @@ describe('resolveMainCheckoutRoot', () => {
       throw new Error(`unexpected args: ${serializedArgs}`);
     });
 
-    expect(root).toBe('/repos/project');
+    expect(root).toBe(resolve('/repos/project'));
   });
 
   it('returns null for the main checkout', () => {
@@ -149,7 +150,7 @@ describe('resolveMainCheckoutRoot', () => {
       throw new Error(`unexpected args: ${serializedArgs}`);
     });
 
-    expect(root).toBe('/repos/project');
+    expect(root).toBe(resolve('/repos/project'));
   });
 });
 
@@ -161,7 +162,7 @@ describe('resolveGitTopLevel', () => {
       return '/repos/project\n';
     });
 
-    expect(root).toBe('/repos/project');
+    expect(root).toBe(resolve('/repos/project'));
   });
 
   it('returns null outside a git repository', () => {
