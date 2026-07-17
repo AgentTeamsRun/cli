@@ -11,6 +11,8 @@ describe('stripEntityIdPrefix', () => {
     expect(stripEntityIdPrefix(`agentteams_cnv_${uuid}`)).toBe(uuid);
     expect(stripEntityIdPrefix(`agentteams_pmt_${uuid}`)).toBe(uuid);
     expect(stripEntityIdPrefix(`agentteams_doc_${uuid}`)).toBe(uuid);
+    expect(stripEntityIdPrefix(`agentteams_rvf_${uuid}`)).toBe(uuid);
+    expect(stripEntityIdPrefix(`agentteams_tsk_${uuid}`)).toBe(uuid);
   });
 
   it('leaves bare ids untouched', () => {
@@ -64,6 +66,17 @@ describe('normalizeEntityIdOptions', () => {
     expect(result.codeReviewId).toBe(uuid);
     expect(result.sourcePlanId).toBe(uuid);
     expect(result.sourceCompletionReportId).toBe(uuid);
+  });
+
+  it('normalizes finding and task id flags for focused sub-entity fetches', () => {
+    const uuid = 'f62762fc-730a-4201-8586-e2541505ed1b';
+    const result = normalizeEntityIdOptions({
+      findingId: `agentteams_rvf_${uuid}`,
+      taskId: `agentteams_tsk_${uuid}`,
+    });
+
+    expect(result.findingId).toBe(uuid);
+    expect(result.taskId).toBe(uuid);
   });
 
   it('leaves non-AgentTeams id flags untouched', () => {

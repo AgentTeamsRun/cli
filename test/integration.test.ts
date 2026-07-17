@@ -1168,6 +1168,52 @@ describe('CLI Integration Tests', () => {
       });
     });
 
+    it('finding comments: should create and list without requiring a comment type', async () => {
+      axiosGetSpy.mockResolvedValue({ data: { data: [] } } as any);
+      axiosPostSpy.mockResolvedValue({ data: { data: { id: 'finding-comment-1' } } } as any);
+
+      await executeCommand('comment', 'list', {
+        findingId: 'agentteams_rvf_finding-1',
+        page: '2',
+      });
+      await executeCommand('comment', 'create', {
+        findingId: 'agentteams_rvf_finding-1',
+        content: 'Why is this P2?',
+      });
+
+      const baseUrl = `${API_URL}/api/projects/${PROJECT_ID}/code-reviews/findings/finding-1/comments`;
+      expect(axiosGetSpy).toHaveBeenCalledWith(baseUrl, {
+        headers: authHeaders(),
+        params: { page: 2 },
+      });
+      expect(axiosPostSpy).toHaveBeenCalledWith(baseUrl, { content: 'Why is this P2?' }, { headers: authHeaders() });
+    });
+
+    it('task comments: should create and list with optional plan scope and no comment type', async () => {
+      axiosGetSpy.mockResolvedValue({ data: { data: [] } } as any);
+      axiosPostSpy.mockResolvedValue({ data: { data: { id: 'task-comment-1' } } } as any);
+
+      await executeCommand('comment', 'list', {
+        taskId: 'agentteams_tsk_task-1',
+        planId: 'agentteams_pln_plan-1',
+      });
+      await executeCommand('comment', 'create', {
+        taskId: 'agentteams_tsk_task-1',
+        content: 'Please handle the edge case.',
+      });
+
+      const baseUrl = `${API_URL}/api/projects/${PROJECT_ID}/plans/tasks/task-1/comments`;
+      expect(axiosGetSpy).toHaveBeenCalledWith(baseUrl, {
+        headers: authHeaders(),
+        params: { planId: 'plan-1' },
+      });
+      expect(axiosPostSpy).toHaveBeenCalledWith(
+        baseUrl,
+        { content: 'Please handle the edge case.' },
+        { headers: authHeaders() },
+      );
+    });
+
     it('dependency commands: should use project-scoped URL and blockingPlanId', async () => {
       axiosGetSpy.mockResolvedValue({ data: { data: { blocking: [], dependents: [] } } } as any);
       axiosPostSpy.mockResolvedValue({ data: { data: { id: 'dep-1' } } } as any);
@@ -2600,7 +2646,7 @@ describe('CLI Integration Tests', () => {
         }),
       ).rejects.toThrow('--content, --file, or --template is required for plan create');
       await expect(executeCommand('comment', 'create', { planId: 'plan-1', content: 'x' })).rejects.toThrow(
-        '--type is required for comment create',
+        '--type is required for plan comment create',
       );
       await expect(executeCommand('dependency', 'create', { planId: 'plan-1' })).rejects.toThrow(
         '--blocking-plan-id is required for dependency create',
@@ -2613,6 +2659,8 @@ describe('CLI Integration Tests', () => {
 
     it('CLI definitions: should include new options and remove legacy options', () => {
       const cliIndex = readFileSync(join(process.cwd(), 'src/index.ts'), 'utf-8');
+      const attachmentDefinition = cliIndex.match(/\.command\('attachment'\)[\s\S]*?\.action/)?.[0];
+      const feedbackDefinition = cliIndex.match(/\.command\('feedback'\)[\s\S]*?\.action/)?.[0];
 
       expect(cliIndex).toContain('--task <text>');
       expect(cliIndex).toContain('--type <type>');
@@ -2650,6 +2698,12 @@ describe('CLI Integration Tests', () => {
       expect(cliIndex).toContain(
         'Plan status for list/update/set-status; ignored by create because new plans start as BACKLOG',
       );
+      expect(attachmentDefinition).toBeDefined();
+      expect(feedbackDefinition).toBeDefined();
+      expect(attachmentDefinition).not.toContain(".option('--format <format>', 'Output format (json)', 'json')");
+      expect(feedbackDefinition).not.toContain(".option('--format <format>', 'Output format (json)', 'json')");
+      expect(cliIndex).not.toContain('Print full output to stdout (useful with --output-file)');
+      expect(cliIndex).toContain('Print full raw output to stdout; with --output-file, also echo it');
     });
 
     it('should throw for unknown resource command', async () => {

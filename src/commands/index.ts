@@ -11,12 +11,13 @@ import { executePostMortemCommand } from './postmortem.js';
 import { executeCoActionCommand } from './coaction.js';
 import { executeReportCommand } from './report.js';
 import { executeCodeReviewCommand } from './codeReview.js';
+import { executeChangeSetCommand } from './changeSetCommand.js';
 import { executeFeedbackCommand } from './feedback.js';
 import { executeSearchCommand } from './search.js';
 import { executeLinearCommand } from './linear.js';
 import { executeAttachmentCommand } from './attachment.js';
 import { executeTaskCommand } from './task.js';
-import { loadConfig } from '../utils/config.js';
+import { getConfigurationNotFoundMessage, loadConfig } from '../utils/config.js';
 import { normalizeCommandContext, withCommandContext } from '../utils/commandContext.js';
 import { normalizeEntityIdOptions } from '../utils/entityId.js';
 import { attachErrorContext } from '../utils/errors.js';
@@ -38,7 +39,7 @@ function buildConfigOverrides(options: Record<string, unknown>): Partial<Config>
 function loadRequiredConfig(overrides?: Partial<Config>): Config {
   const config = loadConfig(overrides);
   if (!config) {
-    throw new Error("Configuration not found. Run 'agentteams init' first or set AGENTTEAMS_* environment variables.");
+    throw new Error(getConfigurationNotFoundMessage());
   }
   return config;
 }
@@ -141,6 +142,13 @@ async function executeCommandWithContext(
           ...options,
           projectId: config.projectId,
         }),
+      );
+    }
+    case 'change-set': {
+      const config = loadRequiredConfig(buildConfigOverrides(options));
+      const { apiUrl, headers } = resolveApiContext(config);
+      return withApiErrorContext(apiUrl, () =>
+        executeChangeSetCommand({ apiUrl, projectId: config.projectId, headers }, action, options),
       );
     }
     case 'postmortem': {

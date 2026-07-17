@@ -366,16 +366,18 @@ export AGENTTEAMS_PROJECT_ID="proj_xxx"
 
 ## Output Format
 
-Most resource commands support `--format json|text`.
+리소스·자동화 명령은 기본적으로 전체 구조화 결과를 stdout에 JSON으로 출력합니다. 따라서 별도의 포맷
+옵션 없이도 기본 출력을 `JSON.parse`, `jq` 등의 파이프라인 소비자에 안전하게 전달할 수 있습니다.
 
-Output behavior by default:
+출력 계약은 다음과 같습니다.
 
-- `plan create|update|start|finish|quick`: prints short summary lines on stdout by default.
-- `report|postmortem|coaction create|update` and `document create|update`: print short meta-only summary lines by default (the full record body — e.g. the document content — is **not** echoed to stdout).
-- `plan list|get` and other read-oriented commands: keep full output by default.
-- `--verbose`: always prints full output to stdout.
-- `--format json` (explicit): prints the full structured result, keeping existing automation consumers intact.
-- `--output-file <path>`: always writes full output to file and keeps stdout short.
+- 기본: 리소스·자동화 명령의 전체 JSON 결과를 stdout에 출력합니다.
+- 사람용 예외: `init`, `sync`, `doctor`는 사람이 읽기 쉬운 기본 출력을 유지합니다. 기계가 읽을 수 있는
+  결과가 필요하면 이 명령에 `--format json`을 전달합니다.
+- `--format json`: 기본 자동화 경로와 동일한 전체 JSON 결과를 명시적으로 선택합니다.
+- `--output-file <path>`: 전체 결과를 파일에 저장한 뒤, 저장 경로와 간결한 요약을 stdout에 출력합니다.
+- `--verbose`: 전체 raw 결과를 stdout에 출력합니다. `--output-file`과 함께 사용하면 저장 경로 요약 뒤에
+  전체 결과도 이어서 출력합니다.
 
 ### Prefixed entity IDs
 
@@ -398,13 +400,8 @@ agentteams plan upload-html \
   --file .agentteams/cli/temp/plan-summary.html
 ```
 
-Compatibility note:
-
-- If you need full JSON on stdout for automation, pass `--format json` explicitly.
-
 ```bash
 agentteams plan list --format json
-agentteams plan list --format text
 agentteams plan update --id <plan-id> --status IN_PROGRESS --format json
 ```
 

@@ -19,6 +19,19 @@ export async function getCodeReview(apiUrl: string, projectId: string, headers: 
   return response.data;
 }
 
+export async function getCodeReviewFinding(
+  apiUrl: string,
+  projectId: string,
+  headers: any,
+  findingId: string,
+  codeReviewId?: string,
+): Promise<any> {
+  const baseUrl = `${apiUrl}/api/projects/${projectId}/code-reviews/findings/${findingId}`;
+  const requestConfig = codeReviewId ? { headers, params: { codeReviewId } } : { headers };
+  const response = await httpClient.get(baseUrl, requestConfig);
+  return response.data;
+}
+
 export async function createCodeReview(
   apiUrl: string,
   projectId: string,

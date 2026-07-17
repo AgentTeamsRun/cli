@@ -1,4 +1,5 @@
-import { finishPlanTask, startPlanTask } from '../api/task.js';
+import { finishPlanTask, getPlanTask, startPlanTask } from '../api/task.js';
+import { stripEntityIdPrefix } from '../utils/entityId.js';
 
 const FINISH_STATUSES = new Set(['DONE', 'BLOCKED', 'SKIPPED']);
 
@@ -15,11 +16,17 @@ export async function executeTaskCommand(
   action: string,
   options: Record<string, unknown>,
 ): Promise<unknown> {
-  const planId = toNonEmptyString(options.planId);
-  if (!planId) throw new Error('--plan-id is required for task commands');
-
-  const taskId = toNonEmptyString(options.taskId);
+  const planId = stripEntityIdPrefix(toNonEmptyString(options.planId));
+  const taskId = stripEntityIdPrefix(toNonEmptyString(options.taskId));
   if (!taskId) throw new Error('--task-id is required for task commands');
+
+  // get/show(단건 포커스)는 bare agentteams_tsk_<id> 핸드오프를 지원하므로 --plan-id가 선택이다.
+  // 있으면 부모 일치로 좁힌다. 실행 뮤테이션(start/finish)은 부모 planId가 필수다.
+  if (action === 'get' || action === 'show') {
+    return getPlanTask(apiUrl, projectId, headers, taskId, planId);
+  }
+
+  if (!planId) throw new Error('--plan-id is required for task commands');
 
   switch (action) {
     case 'start': {
@@ -48,6 +55,6 @@ export async function executeTaskCommand(
       };
     }
     default:
-      throw new Error('Unknown task action: ' + action + '. Use start or finish.');
+      throw new Error('Unknown task action: ' + action + '. Use get, start, or finish.');
   }
 }

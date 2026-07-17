@@ -12,6 +12,7 @@ describe('code-review create with --findings-file', () => {
 
   let axiosPostSpy: jest.SpiedFunction<typeof axios.post>;
   let tempDir: string;
+  let originalCwd: string;
 
   const baseOptions = {
     title: 'Test review',
@@ -41,10 +42,46 @@ describe('code-review create with --findings-file', () => {
     jest.restoreAllMocks();
     axiosPostSpy = jest.spyOn(axios, 'post');
     tempDir = mkdtempSync(join(tmpdir(), 'cli-codereview-test-'));
+    originalCwd = process.cwd();
   });
 
   afterEach(() => {
+    process.chdir(originalCwd);
     rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it('warns on stderr when the repository remote URL cannot be auto-detected', async () => {
+    axiosPostSpy.mockResolvedValueOnce({
+      data: { data: { id: 'cdr_abc', status: 'PENDING' } },
+    } as any);
+    const stderrWriteSpy = jest.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    process.chdir(tempDir);
+
+    await executeCodeReviewCommand(apiUrl, projectId, headers, 'create', baseOptions);
+
+    expect(stderrWriteSpy).toHaveBeenCalledWith(
+      '[warn] Unable to auto-detect the repository remote URL. Run from a member repository or pass --repository-remote-url.\n',
+    );
+    const [, body] = axiosPostSpy.mock.calls[0];
+    expect(body).not.toHaveProperty('repositoryRemoteUrl');
+  });
+
+  it.each([
+    ['--no-git', { git: false }],
+    ['--repository-remote-url', { repositoryRemoteUrl: 'git@bitbucket.org:workspace/repo.git' }],
+  ])('does not warn when %s disables repository remote auto-detection', async (_label, options) => {
+    axiosPostSpy.mockResolvedValueOnce({
+      data: { data: { id: 'cdr_abc', status: 'PENDING' } },
+    } as any);
+    const stderrWriteSpy = jest.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    process.chdir(tempDir);
+
+    await executeCodeReviewCommand(apiUrl, projectId, headers, 'create', {
+      ...baseOptions,
+      ...options,
+    });
+
+    expect(stderrWriteSpy).not.toHaveBeenCalled();
   });
 
   it('forwards parsed findings array in the POST body', async () => {
@@ -68,6 +105,42 @@ describe('code-review create with --findings-file', () => {
       model: 'claude-opus-4-7',
       findings: [validFinding],
     });
+  });
+
+  it('preserves automatic history match fields from the create response', async () => {
+    const relatedHistories = [
+      {
+        entityType: 'PLAN',
+        id: 'plan-history-1',
+        title: 'Earlier matching plan',
+        status: 'DONE',
+        qualityScore: null,
+        repositoryId: null,
+        matchedKeywords: ['history matcher'],
+        matchScore: 95,
+        createdAt: '2026-07-17T00:00:00.000Z',
+        webUrl: 'https://agentteams.run/go?type=plan&id=plan-history-1',
+      },
+    ];
+    axiosPostSpy.mockResolvedValueOnce({
+      data: {
+        data: {
+          id: 'cdr_history',
+          status: 'PENDING',
+          historyMatchStatus: 'MATCHED',
+          relatedHistories,
+        },
+      },
+    } as any);
+
+    const result = await executeCodeReviewCommand(apiUrl, projectId, headers, 'create', {
+      ...baseOptions,
+      git: false,
+      diffSummary: 'Update history matcher behavior',
+    });
+
+    expect(result.data.historyMatchStatus).toBe('MATCHED');
+    expect(result.data.relatedHistories).toEqual(relatedHistories);
   });
 
   it('omits findings from the body when --findings-file is not provided', async () => {
@@ -212,6 +285,93 @@ describe('code-review update', () => {
       }),
     ).rejects.toThrow(/At least one metadata field/);
     expect(axiosPatchSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe('code-review get', () => {
+  const apiUrl = 'http://localhost:3001';
+  const projectId = 'project_1';
+  const headers = { 'X-API-Key': 'key_test123', 'Content-Type': 'application/json' };
+
+  let axiosGetSpy: jest.SpiedFunction<typeof axios.get>;
+
+  beforeEach(() => {
+    jest.restoreAllMocks();
+    axiosGetSpy = jest.spyOn(axios, 'get');
+  });
+
+  it('fetches the whole review when only --id is provided', async () => {
+    const relatedHistories = [
+      {
+        entityType: 'COMPLETION_REPORT',
+        id: 'report-history-1',
+        title: 'Earlier rollout report',
+        status: 'COMPLETED',
+        qualityScore: 92,
+        repositoryId: null,
+        matchedKeywords: ['rollout'],
+        matchScore: 88,
+        createdAt: '2026-07-16T00:00:00.000Z',
+        webUrl: 'https://agentteams.run/go?type=completion-report&id=report-history-1',
+      },
+    ];
+    axiosGetSpy.mockResolvedValueOnce({
+      data: {
+        data: {
+          id: 'review-1',
+          status: 'OPEN',
+          historyMatchStatus: 'MATCHED',
+          relatedHistories,
+        },
+      },
+    } as any);
+
+    const result = await executeCodeReviewCommand(apiUrl, projectId, headers, 'get', { id: 'review-1' });
+
+    expect(axiosGetSpy).toHaveBeenCalledTimes(1);
+    expect(axiosGetSpy).toHaveBeenCalledWith('http://localhost:3001/api/projects/project_1/code-reviews/review-1', {
+      headers,
+    });
+    expect(result.data.historyMatchStatus).toBe('MATCHED');
+    expect(result.data.relatedHistories).toEqual(relatedHistories);
+  });
+
+  it('focus-fetches a single finding via the findings endpoint when --finding-id is provided', async () => {
+    axiosGetSpy.mockResolvedValueOnce({
+      data: { data: { finding: { id: 'finding-1' }, review: { id: 'review-1' } } },
+    } as any);
+
+    await executeCodeReviewCommand(apiUrl, projectId, headers, 'get', { findingId: 'finding-1' });
+
+    expect(axiosGetSpy).toHaveBeenCalledTimes(1);
+    expect(axiosGetSpy).toHaveBeenCalledWith(
+      'http://localhost:3001/api/projects/project_1/code-reviews/findings/finding-1',
+      { headers },
+    );
+  });
+
+  it('narrows the single-finding fetch with codeReviewId when --id is also provided', async () => {
+    axiosGetSpy.mockResolvedValueOnce({
+      data: { data: { finding: { id: 'finding-1' }, review: { id: 'review-1' } } },
+    } as any);
+
+    await executeCodeReviewCommand(apiUrl, projectId, headers, 'get', {
+      id: 'review-1',
+      findingId: 'finding-1',
+    });
+
+    expect(axiosGetSpy).toHaveBeenCalledTimes(1);
+    expect(axiosGetSpy).toHaveBeenCalledWith(
+      'http://localhost:3001/api/projects/project_1/code-reviews/findings/finding-1',
+      { headers, params: { codeReviewId: 'review-1' } },
+    );
+  });
+
+  it('throws when neither --id nor --finding-id is provided', async () => {
+    await expect(executeCodeReviewCommand(apiUrl, projectId, headers, 'get', {})).rejects.toThrow(
+      /--id or --finding-id is required/,
+    );
+    expect(axiosGetSpy).not.toHaveBeenCalled();
   });
 });
 

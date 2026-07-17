@@ -90,7 +90,7 @@ program
   .description('Initialize AgentTeams CLI via OAuth')
   .option('--format <format>', 'Output format (json; defaults to human-readable view)')
   .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
-  .option('--verbose', 'Print full output to stdout (useful with --output-file)', false)
+  .option('--verbose', 'Print full raw output to stdout; with --output-file, also echo it', false)
   .addHelpText('after', CONVENTION_HINT)
   .action(async (options) => {
     try {
@@ -129,7 +129,7 @@ program
   .description('Sync local convention files from API')
   .option('--format <format>', 'Output format (json; defaults to human-readable view)')
   .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
-  .option('--verbose', 'Print full output to stdout (useful with --output-file)', false)
+  .option('--verbose', 'Print full raw output to stdout; with --output-file, also echo it', false)
   .addHelpText('after', CONVENTION_HINT)
   .action(async (options) => {
     try {
@@ -234,7 +234,7 @@ program
   .option('--include-deps', 'Include dependencies in plan get/show output', false)
   .option('--format <format>', 'Output format (json)')
   .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
-  .option('--verbose', 'Print full output to stdout (useful with --output-file)', false)
+  .option('--verbose', 'Print full raw output to stdout; with --output-file, also echo it', false)
   .addHelpText('after', CONVENTION_HINT)
   .action(async (action, options) => {
     try {
@@ -308,13 +308,13 @@ program
 program
   .command('task')
   .description('Manage plan tasks')
-  .argument('<action>', 'Action to perform (start, finish)')
-  .option('--plan-id <id>', 'Plan ID')
+  .argument('<action>', 'Action to perform (get, start, finish)')
+  .option('--plan-id <id>', 'Plan ID (optional for get: bare task-id focus; required for start/finish)')
   .option('--task-id <id>', 'Plan task ID')
   .option('--status <status>', 'Task finish status: DONE, BLOCKED, or SKIPPED')
   .option('--format <format>', 'Output format (json)')
   .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
-  .option('--verbose', 'Print full output to stdout (useful with --output-file)', false)
+  .option('--verbose', 'Print full raw output to stdout; with --output-file, also echo it', false)
   .addHelpText('after', CONVENTION_HINT)
   .action(async (action, options) => {
     try {
@@ -344,7 +344,7 @@ program
 
 program
   .command('comment')
-  .description('Manage plan comments and their 1-depth replies')
+  .description('Manage plan, finding, and task comments with 1-depth replies')
   .argument(
     '<action>',
     'Action to perform (list, get, create, update, delete, reply-list, reply-create, reply-update, reply-delete)',
@@ -352,6 +352,8 @@ program
   .option('--id <id>', 'Comment ID (parent comment ID for reply-list/reply-create)')
   .option('--reply-id <id>', 'Reply ID (for reply-update/reply-delete)')
   .option('--plan-id <id>', 'Plan ID')
+  .option('--finding-id <id>', 'Code review finding ID')
+  .option('--task-id <id>', 'Plan task ID')
   .option('--type <type>', 'Comment type (RISK, MODIFICATION, GENERAL)')
   .option('--content <content>', 'Comment content')
   .option('--affected-files <files>', 'Comma-separated list of affected file paths (create/update)')
@@ -359,7 +361,7 @@ program
   .option('--page-size <number>', 'Page size (list only)')
   .option('--format <format>', 'Output format (json)', 'json')
   .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
-  .option('--verbose', 'Print full output to stdout (useful with --output-file)', false)
+  .option('--verbose', 'Print full raw output to stdout; with --output-file, also echo it', false)
   .addHelpText('after', CONVENTION_HINT)
   .action(async (action, options) => {
     try {
@@ -367,6 +369,8 @@ program
         id: options.id,
         replyId: options.replyId,
         planId: options.planId,
+        findingId: options.findingId,
+        taskId: options.taskId,
         type: options.type,
         content: options.content,
         affectedFiles: options.affectedFiles,
@@ -398,9 +402,9 @@ program
   .option('--api-key <key>', 'Override API key (optional)')
   .option('--project-id <id>', 'Override project ID (optional)')
   .option('--team-id <id>', 'Override team ID (optional)')
-  .option('--format <format>', 'Output format (json)', 'json')
+  .option('--format <format>', 'Output format (json)')
   .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
-  .option('--verbose', 'Print full output to stdout (useful with --output-file)', false)
+  .option('--verbose', 'Print full raw output to stdout; with --output-file, also echo it', false)
   .addHelpText('after', CONVENTION_HINT)
   .action(async (action, options) => {
     try {
@@ -474,7 +478,7 @@ program
   .option('--team-id <id>', 'Override team ID (optional)')
   .option('--format <format>', 'Output format (json)')
   .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
-  .option('--verbose', 'Print full output to stdout (useful with --output-file)', false)
+  .option('--verbose', 'Print full raw output to stdout; with --output-file, also echo it', false)
   .addHelpText('after', CONVENTION_HINT)
   .action(async (action, options) => {
     try {
@@ -534,11 +538,11 @@ program
     'Action to perform (list, get, show, create, update, create-plan, submit-result, cancel, delete, dismiss, resolve, undismiss)',
   )
   .option('--id <id>', 'Code review ID')
-  .option('--finding-id <id>', 'Finding ID for dismiss/resolve/undismiss')
+  .option('--finding-id <id>', 'Finding ID for get (single-finding focus), dismiss/resolve/undismiss')
   .option('--title <title>', 'Code review or generated plan title')
   .option(
     '--target-type <type>',
-    'Review target type (BRANCH_DIFF, GITHUB_PR, GITLAB_MR, LOCAL_DIFF, UPLOADED_DIFF, COMMIT_RANGE)',
+    'Review target type (BRANCH_DIFF, GITHUB_PR, GITLAB_MR, BITBUCKET_PR, LOCAL_DIFF, UPLOADED_DIFF, COMMIT_RANGE)',
   )
   .option('--target-ref <ref>', 'Target reference such as branch, PR URL, MR URL, or commit range')
   .option('--repository-remote-url <url>', 'Repository remote origin URL (create; defaults to git origin)')
@@ -572,7 +576,7 @@ program
   .option('--team-id <id>', 'Override team ID (optional)')
   .option('--format <format>', 'Output format (json)')
   .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
-  .option('--verbose', 'Print full output to stdout (useful with --output-file)', false)
+  .option('--verbose', 'Print full raw output to stdout; with --output-file, also echo it', false)
   .addHelpText('after', CONVENTION_HINT)
   .action(async (action, options) => {
     try {
@@ -630,6 +634,52 @@ program
   });
 
 program
+  .command('change-set')
+  .description('Manage cross-repository change sets and merge order')
+  .argument('<action>', 'Action to perform (create, list, get, update, delete, add-item, remove-item)')
+  .option('--id <id>', 'Change set ID')
+  .option('--change-set-id <id>', 'Change set ID for item actions')
+  .option('--item-id <id>', 'Change set item ID')
+  .option('--title <title>', 'Change set title')
+  .option('--description <text>', 'Change set description')
+  .option('--status <status>', 'Status (OPEN, COMPLETED, CANCELLED)')
+  .option('--repository-id <id>', 'Project repository ID')
+  .option('--repository-remote-url <url>', 'Repository remote URL (add-item; defaults to git origin)')
+  .option('--no-git', 'Disable automatic git origin detection')
+  .option('--branch-name <name>', 'Branch name')
+  .option('--target-url <url>', 'Pull or merge request URL')
+  .option('--merge-order <number>', 'Merge order (positive integer)')
+  .option('--code-review-id <id>', 'Linked code review ID')
+  .option('--note <text>', 'Item note')
+  .option('--page <number>', 'Page number (list only)')
+  .option('--page-size <number>', 'Page size (list only)')
+  .option('--api-url <url>', 'Override API URL (optional)')
+  .option('--api-key <key>', 'Override API key (optional)')
+  .option('--project-id <id>', 'Override project ID (optional)')
+  .option('--team-id <id>', 'Override team ID (optional)')
+  .option('--format <format>', 'Output format (json)')
+  .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
+  .option('--verbose', 'Print full raw output to stdout; with --output-file, also echo it', false)
+  .addHelpText('after', CONVENTION_HINT)
+  .action(async (action, options) => {
+    try {
+      const result = await executeCommand('change-set', action, options);
+      printCommandResult({
+        result,
+        format: normalizeFormat(options.format),
+        outputFile: options.outputFile,
+        verbose: options.verbose,
+        resource: 'change-set',
+        action,
+        formatExplicit: typeof options.format === 'string',
+      });
+    } catch (error) {
+      console.error(handleError(error));
+      process.exit(1);
+    }
+  });
+
+program
   .command('postmortem')
   .description('Manage post mortems')
   .argument('<action>', 'Action to perform (list, get, create, update, delete)')
@@ -656,7 +706,7 @@ program
   .option('--team-id <id>', 'Override team ID (optional)')
   .option('--format <format>', 'Output format (json)')
   .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
-  .option('--verbose', 'Print full output to stdout (useful with --output-file)', false)
+  .option('--verbose', 'Print full raw output to stdout; with --output-file, also echo it', false)
   .addHelpText('after', CONVENTION_HINT)
   .action(async (action, options) => {
     try {
@@ -727,7 +777,7 @@ program
   .option('--team-id <id>', 'Override team ID (optional)')
   .option('--format <format>', 'Output format (json)')
   .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
-  .option('--verbose', 'Print full output to stdout (useful with --output-file)', false)
+  .option('--verbose', 'Print full raw output to stdout; with --output-file, also echo it', false)
   .addHelpText('after', CONVENTION_HINT)
   .action(async (action, options) => {
     try {
@@ -779,9 +829,9 @@ program
   .option('--api-key <key>', 'Override API key (optional)')
   .option('--project-id <id>', 'Override project ID (optional)')
   .option('--team-id <id>', 'Override team ID (optional)')
-  .option('--format <format>', 'Output format (json)', 'json')
+  .option('--format <format>', 'Output format (json)')
   .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
-  .option('--verbose', 'Print full output to stdout (useful with --output-file)', false)
+  .option('--verbose', 'Print full raw output to stdout; with --output-file, also echo it', false)
   .addHelpText('after', CONVENTION_HINT)
   .action(async (action, options) => {
     try {
@@ -830,7 +880,7 @@ program
     ]),
   )
   .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
-  .option('--verbose', 'Print full output to stdout (useful with --output-file)', false)
+  .option('--verbose', 'Print full raw output to stdout; with --output-file, also echo it', false)
   .addHelpText('after', CONVENTION_HINT)
   .action(async (action, options) => {
     try {
@@ -884,7 +934,7 @@ program
   .option('--team-id <id>', 'Override team ID (optional)')
   .option('--format <format>', 'Output format (json)', 'json')
   .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
-  .option('--verbose', 'Print full output to stdout (useful with --output-file)', false)
+  .option('--verbose', 'Print full raw output to stdout; with --output-file, also echo it', false)
   .addHelpText('after', CONVENTION_HINT)
   .action(async (action, options) => {
     try {
@@ -914,7 +964,7 @@ program
   .option('--dep-id <id>', 'Dependency ID to delete')
   .option('--format <format>', 'Output format (json)', 'json')
   .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
-  .option('--verbose', 'Print full output to stdout (useful with --output-file)', false)
+  .option('--verbose', 'Print full raw output to stdout; with --output-file, also echo it', false)
   .addHelpText('after', CONVENTION_HINT)
   .action(async (action, options) => {
     try {
@@ -943,7 +993,7 @@ program
   .option('--id <id>', 'Agent config ID')
   .option('--format <format>', 'Output format (json)', 'json')
   .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
-  .option('--verbose', 'Print full output to stdout (useful with --output-file)', false)
+  .option('--verbose', 'Print full raw output to stdout; with --output-file, also echo it', false)
   .addHelpText('after', CONVENTION_HINT)
   .action(async (action, options) => {
     try {
@@ -969,7 +1019,7 @@ program
   .argument('<action>', 'Action to perform (whoami)')
   .option('--format <format>', 'Output format (json)', 'json')
   .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
-  .option('--verbose', 'Print full output to stdout (useful with --output-file)', false)
+  .option('--verbose', 'Print full raw output to stdout; with --output-file, also echo it', false)
   .addHelpText('after', CONVENTION_HINT)
   .action(async (action, options) => {
     try {
@@ -1005,7 +1055,7 @@ program
   .option('--team-id <id>', 'Override team ID (optional)')
   .option('--format <format>', 'Output format (json)', 'json')
   .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
-  .option('--verbose', 'Print full output to stdout (useful with --output-file)', false)
+  .option('--verbose', 'Print full raw output to stdout; with --output-file, also echo it', false)
   .addHelpText('after', CONVENTION_HINT)
   .action(async (options) => {
     try {
@@ -1055,7 +1105,7 @@ linearCommand
   .option('--project-id <id>', 'Override project ID (optional)')
   .option('--format <format>', 'Output format (json)', 'json')
   .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
-  .option('--verbose', 'Print full output to stdout (useful with --output-file)', false)
+  .option('--verbose', 'Print full raw output to stdout; with --output-file, also echo it', false)
   .action(async (action, options) => {
     try {
       if (action !== 'get' && action !== 'create' && action !== 'update') {
@@ -1104,7 +1154,7 @@ linearCommand
   .option('--team-id <id>', 'Override team ID (optional)')
   .option('--format <format>', 'Output format (json)', 'json')
   .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
-  .option('--verbose', 'Print full output to stdout (useful with --output-file)', false)
+  .option('--verbose', 'Print full raw output to stdout; with --output-file, also echo it', false)
   .action(async (action, options) => {
     try {
       if (action !== 'list' && action !== 'create') {

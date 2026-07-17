@@ -35,14 +35,17 @@ export async function executeFeedbackCommand(
         throw new Error(`--category must be one of: ${allowedFeedbackCategories.join(', ')}`);
       }
 
-      await createFeedback(apiUrl, headers, {
+      const feedback = await createFeedback(apiUrl, headers, {
         category,
         submitterType: 'AI',
         title,
         content,
       });
 
-      return '✔ Feedback submitted.';
+      return {
+        message: '✔ Feedback submitted.',
+        ...feedback,
+      };
     }
     default:
       throw new Error(`Unknown action: ${action}`);

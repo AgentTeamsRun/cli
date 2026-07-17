@@ -6,7 +6,7 @@ import httpClient from '../utils/httpClient.js';
 import { isAxiosError } from 'axios';
 import matter from 'gray-matter';
 import { diffLines, createTwoFilesPatch } from 'diff';
-import { loadConfig, findProjectConfig } from '../utils/config.js';
+import { loadConfig, findProjectConfig, getConfigurationNotFoundMessage } from '../utils/config.js';
 import { withSpinner } from '../utils/spinner.js';
 import { withoutJsonContentType } from '../utils/httpHeaders.js';
 import { compareVersions, getLatestCliVersion } from '../utils/updateCheck.js';
@@ -110,7 +110,7 @@ function getApiBaseUrl(apiUrl: string): string {
 function getApiConfigOrThrow(options?: ConventionCommandOptions) {
   const config = options?.config ?? loadConfig();
   if (!config) {
-    throw new Error("Configuration not found. Run 'agentteams init' first or set AGENTTEAMS_* environment variables.");
+    throw new Error(getConfigurationNotFoundMessage(options?.cwd));
   }
 
   return {

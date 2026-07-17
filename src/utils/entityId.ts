@@ -7,9 +7,10 @@
  *   agentteams_pln_ (plan) · agentteams_rpt_ (completionReport)
  *   agentteams_rev_ (codeReview) · agentteams_act_ (coAction)
  *   agentteams_cnv_ (convention) · agentteams_pmt_ (postMortem)
- *   agentteams_doc_ (document)
+ *   agentteams_doc_ (document) · agentteams_rvf_ (codeReviewFinding)
+ *   agentteams_tsk_ (planTask)
  */
-const ENTITY_ID_PREFIX = /^agentteams_(?:pln|rpt|rev|act|cnv|pmt|doc)_/;
+const ENTITY_ID_PREFIX = /^agentteams_(?:pln|rpt|rev|act|cnv|pmt|doc|rvf|tsk)_/;
 
 /**
  * Strip a known AgentTeams entity-id prefix from a value. Values without a

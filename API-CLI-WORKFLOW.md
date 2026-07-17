@@ -81,6 +81,34 @@ sequenceDiagram
 3. Project config: nearest `.agentteams/config.json` found by walking up from `cwd`
 4. Global config: `~/.agentteams/config.json`
 
+### 비-git 루트 + 하위 저장소 워크스페이스
+
+상위 폴더는 git 저장소가 아니고 바로 아래에 여러 독립 git 저장소가 있는 구성에서는, 상위 폴더를 AgentTeams 프로젝트 루트로 초기화한 뒤 `doctor`로 각 멤버 저장소에 설정을 실체화합니다.
+
+```text
+workspace/                 # 비-git 프로젝트 루트
+├─ .agentteams/
+├─ member-api/             # 독립 git 저장소
+└─ member-web/             # 독립 git 저장소
+```
+
+```bash
+cd workspace
+agentteams init
+agentteams doctor
+
+cd member-api
+agentteams plan list
+```
+
+`agentteams doctor`는 각 멤버 저장소의 `.agentteams`가 루트 `.agentteams`를 가리키도록 심볼릭 링크를 만들고, 관련 git exclude와 checkout hook을 준비합니다. 이후 CLI를 멤버 저장소 안에서 실행하면 링크를 통해 프로젝트 config를 찾는 동시에 해당 저장소의 git `origin`도 자동 감지합니다.
+
+git 저장소 안에서 config를 찾을 때는 저장소 최상위를 넘지 않습니다. 이 경계는 무관한 부모 프로젝트 또는 `$HOME`의 config를 조용히 가져오는 것을 막기 위한 안전장치입니다. 멤버 저장소에서 config를 찾지 못했지만 비-git 상위 워크스페이스의 config가 감지되면, 오류 메시지가 워크스페이스 루트에서 `agentteams doctor`를 실행하도록 안내합니다.
+
+`code-review create`에서 `--repository-remote-url`을 생략했는데 현재 위치에서 git `origin`을 감지하지 못하면 리뷰 생성은 계속되지만 stderr에 경고가 출력됩니다. 이 경우 멤버 저장소 안에서 다시 실행하거나 `--repository-remote-url <url>`을 명시하세요. 의도적으로 git 자동 감지를 끄려면 `--no-git`을 사용합니다.
+
+현재 AgentTeams Runner 데몬은 비-git 프로젝트 루트 아래에 worktree를 생성하지 않습니다. 위 절차는 멤버 저장소 안에서 직접 CLI를 사용하는 흐름을 지원하며, Runner 주도 worktree 흐름까지 지원한다는 의미는 아닙니다.
+
 지원 환경변수:
 
 - `AGENTTEAMS_API_KEY`
@@ -208,6 +236,21 @@ CLI supports `--api-url`, `--api-key`, `--team-id`, and `--project-id` overrides
 #### `report create` 입력 규칙
 
 - `--file <path>`: 보고서 내용을 로컬 파일에서 읽습니다 (필수).
+
+### Bitbucket PR 코드리뷰
+
+Bitbucket pull request는 `BITBUCKET_PR` 대상 유형으로 등록합니다. PR URL을 `BRANCH_DIFF`로 대신 등록할 필요가 없습니다.
+
+```bash
+agentteams code-review create \
+  --title "Review Bitbucket pull request" \
+  --target-type BITBUCKET_PR \
+  --target-ref "https://bitbucket.org/workspace/repository/pull-requests/456" \
+  --runner-type CODEX \
+  --model <model-id>
+```
+
+연결된 Bitbucket 저장소와 completion report의 PR 번호가 있으면 API도 해당 URL을 만들고 대상 유형을 `BITBUCKET_PR`로 파생합니다.
 
 ---
 

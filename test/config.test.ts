@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it } from '@jest/globals';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { findProjectConfig } from '../src/utils/config.js';
+import { findProjectConfig, getConfigurationNotFoundMessage } from '../src/utils/config.js';
 
 const tempDirs: string[] = [];
 
@@ -94,5 +94,39 @@ describe('findProjectConfig', () => {
     writeConfig(unrelatedConfigPath);
 
     expect(findProjectConfig(repositoryDir)).toBeNull();
+  });
+});
+
+describe('getConfigurationNotFoundMessage', () => {
+  const defaultMessage =
+    "Configuration not found. Run 'agentteams init' first or set AGENTTEAMS_* environment variables.";
+
+  it('adds a doctor hint when a member repository is below a configured non-git workspace', () => {
+    const workspaceDir = createTempDir();
+    writeConfig(join(workspaceDir, '.agentteams', 'config.json'));
+    const repositoryDir = createRepository(workspaceDir);
+
+    expect(getConfigurationNotFoundMessage(repositoryDir)).toBe(
+      `${defaultMessage} A parent workspace config was found outside this repository. Run 'agentteams doctor' from the workspace root to materialize .agentteams.`,
+    );
+  });
+
+  it('keeps the existing message when no configured non-git workspace exists', () => {
+    const tempDir = createTempDir();
+    const repositoryDir = createRepository(tempDir);
+
+    expect(getConfigurationNotFoundMessage(repositoryDir)).toBe(defaultMessage);
+  });
+
+  it('does not treat the global config as a parent workspace config when home is symlinked', () => {
+    const tempDir = createTempDir();
+    const physicalHome = join(tempDir, 'physical-home');
+    const symbolicHome = join(tempDir, 'symbolic-home');
+    const workspaceDir = join(physicalHome, 'workspace');
+    mkdirSync(physicalHome, { recursive: true });
+    symlinkSync(physicalHome, symbolicHome, 'dir');
+    writeConfig(join(physicalHome, '.agentteams', 'config.json'));
+    const repositoryDir = createRepository(workspaceDir);
+    expect(getConfigurationNotFoundMessage(repositoryDir, symbolicHome)).toBe(defaultMessage);
   });
 });
