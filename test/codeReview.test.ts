@@ -12,6 +12,7 @@ describe('code-review create with --findings-file', () => {
 
   let axiosPostSpy: jest.SpiedFunction<typeof axios.post>;
   let tempDir: string;
+  let originalCwd: string;
 
   const baseOptions = {
     title: 'Test review',
@@ -41,10 +42,46 @@ describe('code-review create with --findings-file', () => {
     jest.restoreAllMocks();
     axiosPostSpy = jest.spyOn(axios, 'post');
     tempDir = mkdtempSync(join(tmpdir(), 'cli-codereview-test-'));
+    originalCwd = process.cwd();
   });
 
   afterEach(() => {
+    process.chdir(originalCwd);
     rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it('warns on stderr when the repository remote URL cannot be auto-detected', async () => {
+    axiosPostSpy.mockResolvedValueOnce({
+      data: { data: { id: 'cdr_abc', status: 'PENDING' } },
+    } as any);
+    const stderrWriteSpy = jest.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    process.chdir(tempDir);
+
+    await executeCodeReviewCommand(apiUrl, projectId, headers, 'create', baseOptions);
+
+    expect(stderrWriteSpy).toHaveBeenCalledWith(
+      '[warn] Unable to auto-detect the repository remote URL. Run from a member repository or pass --repository-remote-url.\n',
+    );
+    const [, body] = axiosPostSpy.mock.calls[0];
+    expect(body).not.toHaveProperty('repositoryRemoteUrl');
+  });
+
+  it.each([
+    ['--no-git', { git: false }],
+    ['--repository-remote-url', { repositoryRemoteUrl: 'git@bitbucket.org:workspace/repo.git' }],
+  ])('does not warn when %s disables repository remote auto-detection', async (_label, options) => {
+    axiosPostSpy.mockResolvedValueOnce({
+      data: { data: { id: 'cdr_abc', status: 'PENDING' } },
+    } as any);
+    const stderrWriteSpy = jest.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    process.chdir(tempDir);
+
+    await executeCodeReviewCommand(apiUrl, projectId, headers, 'create', {
+      ...baseOptions,
+      ...options,
+    });
+
+    expect(stderrWriteSpy).not.toHaveBeenCalled();
   });
 
   it('forwards parsed findings array in the POST body', async () => {

@@ -538,7 +538,7 @@ program
   .option('--title <title>', 'Code review or generated plan title')
   .option(
     '--target-type <type>',
-    'Review target type (BRANCH_DIFF, GITHUB_PR, GITLAB_MR, LOCAL_DIFF, UPLOADED_DIFF, COMMIT_RANGE)',
+    'Review target type (BRANCH_DIFF, GITHUB_PR, GITLAB_MR, BITBUCKET_PR, LOCAL_DIFF, UPLOADED_DIFF, COMMIT_RANGE)',
   )
   .option('--target-ref <ref>', 'Target reference such as branch, PR URL, MR URL, or commit range')
   .option('--repository-remote-url <url>', 'Repository remote origin URL (create; defaults to git origin)')

@@ -16,7 +16,7 @@ import { executeSearchCommand } from './search.js';
 import { executeLinearCommand } from './linear.js';
 import { executeAttachmentCommand } from './attachment.js';
 import { executeTaskCommand } from './task.js';
-import { loadConfig } from '../utils/config.js';
+import { getConfigurationNotFoundMessage, loadConfig } from '../utils/config.js';
 import { normalizeCommandContext, withCommandContext } from '../utils/commandContext.js';
 import { normalizeEntityIdOptions } from '../utils/entityId.js';
 import { attachErrorContext } from '../utils/errors.js';
@@ -38,7 +38,7 @@ function buildConfigOverrides(options: Record<string, unknown>): Partial<Config>
 function loadRequiredConfig(overrides?: Partial<Config>): Config {
   const config = loadConfig(overrides);
   if (!config) {
-    throw new Error("Configuration not found. Run 'agentteams init' first or set AGENTTEAMS_* environment variables.");
+    throw new Error(getConfigurationNotFoundMessage());
   }
   return config;
 }

@@ -1,11 +1,11 @@
 import httpClient from '../utils/httpClient.js';
-import { loadConfig } from '../utils/config.js';
+import { getConfigurationNotFoundMessage, loadConfig } from '../utils/config.js';
 import { withoutJsonContentType } from '../utils/httpHeaders.js';
 
 function getConfigOrThrow() {
   const config = loadConfig();
   if (!config) {
-    throw new Error('Configuration not found. Run "agentteams init" first or set AGENTTEAMS_* environment variables.');
+    throw new Error(getConfigurationNotFoundMessage());
   }
   return config;
 }

@@ -9,6 +9,9 @@ const CONFIG_FILE = 'config.json';
 export const DEFAULT_API_URL = 'https://api.agentteams.run';
 export type PersistedConfig = Pick<Config, 'teamId' | 'projectId' | 'apiKey'> & Partial<Pick<Config, 'apiUrl'>>;
 
+const CONFIGURATION_NOT_FOUND_MESSAGE =
+  "Configuration not found. Run 'agentteams init' first or set AGENTTEAMS_* environment variables.";
+
 function readConfigFile(filePath: string): Partial<Config> | null {
   try {
     if (!existsSync(filePath)) return null;
@@ -77,6 +80,30 @@ export function findProjectConfig(startDir: string): string | null {
   }
 
   return null;
+}
+
+export function getConfigurationNotFoundMessage(
+  startDir: string = process.cwd(),
+  userHomeDir: string = homedir(),
+): string {
+  const repositoryRoot = resolveGitTopLevel(resolve(startDir));
+  if (!repositoryRoot) return CONFIGURATION_NOT_FOUND_MESSAGE;
+
+  const homeDir = realpathSync(resolve(userHomeDir));
+  let current = dirname(repositoryRoot);
+
+  while (current !== homeDir) {
+    const candidate = join(current, CONFIG_DIR, CONFIG_FILE);
+    if (existsSync(candidate) && resolveGitTopLevel(current) === null) {
+      return `${CONFIGURATION_NOT_FOUND_MESSAGE} A parent workspace config was found outside this repository. Run 'agentteams doctor' from the workspace root to materialize .agentteams.`;
+    }
+
+    const parent = dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+
+  return CONFIGURATION_NOT_FOUND_MESSAGE;
 }
 
 /**

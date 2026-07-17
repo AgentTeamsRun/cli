@@ -127,8 +127,14 @@ export async function executeCodeReviewCommand(
       const diffSummary = toNonEmptyString(options.diffSummary) ?? readOptionalFile(options.diffFile);
       const testSummary = toNonEmptyString(options.testSummary) ?? readOptionalFile(options.testFile);
       const findings = parseFindingsFile(options.findingsFile);
+      const explicitRepositoryRemoteUrl = toNonEmptyString(options.repositoryRemoteUrl);
       const repositoryRemoteUrl =
-        toNonEmptyString(options.repositoryRemoteUrl) ?? (options.git === false ? undefined : getGitRemoteOriginUrl());
+        explicitRepositoryRemoteUrl ?? (options.git === false ? undefined : getGitRemoteOriginUrl());
+      if (!explicitRepositoryRemoteUrl && options.git !== false && !repositoryRemoteUrl) {
+        process.stderr.write(
+          '[warn] Unable to auto-detect the repository remote URL. Run from a member repository or pass --repository-remote-url.\n',
+        );
+      }
 
       const body: Record<string, unknown> = {
         title,
