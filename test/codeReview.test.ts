@@ -252,6 +252,70 @@ describe('code-review update', () => {
   });
 });
 
+describe('code-review get', () => {
+  const apiUrl = 'http://localhost:3001';
+  const projectId = 'project_1';
+  const headers = { 'X-API-Key': 'key_test123', 'Content-Type': 'application/json' };
+
+  let axiosGetSpy: jest.SpiedFunction<typeof axios.get>;
+
+  beforeEach(() => {
+    jest.restoreAllMocks();
+    axiosGetSpy = jest.spyOn(axios, 'get');
+  });
+
+  it('fetches the whole review when only --id is provided', async () => {
+    axiosGetSpy.mockResolvedValueOnce({
+      data: { data: { id: 'review-1', status: 'OPEN' } },
+    } as any);
+
+    await executeCodeReviewCommand(apiUrl, projectId, headers, 'get', { id: 'review-1' });
+
+    expect(axiosGetSpy).toHaveBeenCalledTimes(1);
+    expect(axiosGetSpy).toHaveBeenCalledWith('http://localhost:3001/api/projects/project_1/code-reviews/review-1', {
+      headers,
+    });
+  });
+
+  it('focus-fetches a single finding via the findings endpoint when --finding-id is provided', async () => {
+    axiosGetSpy.mockResolvedValueOnce({
+      data: { data: { finding: { id: 'finding-1' }, review: { id: 'review-1' } } },
+    } as any);
+
+    await executeCodeReviewCommand(apiUrl, projectId, headers, 'get', { findingId: 'finding-1' });
+
+    expect(axiosGetSpy).toHaveBeenCalledTimes(1);
+    expect(axiosGetSpy).toHaveBeenCalledWith(
+      'http://localhost:3001/api/projects/project_1/code-reviews/findings/finding-1',
+      { headers },
+    );
+  });
+
+  it('narrows the single-finding fetch with codeReviewId when --id is also provided', async () => {
+    axiosGetSpy.mockResolvedValueOnce({
+      data: { data: { finding: { id: 'finding-1' }, review: { id: 'review-1' } } },
+    } as any);
+
+    await executeCodeReviewCommand(apiUrl, projectId, headers, 'get', {
+      id: 'review-1',
+      findingId: 'finding-1',
+    });
+
+    expect(axiosGetSpy).toHaveBeenCalledTimes(1);
+    expect(axiosGetSpy).toHaveBeenCalledWith(
+      'http://localhost:3001/api/projects/project_1/code-reviews/findings/finding-1',
+      { headers, params: { codeReviewId: 'review-1' } },
+    );
+  });
+
+  it('throws when neither --id nor --finding-id is provided', async () => {
+    await expect(executeCodeReviewCommand(apiUrl, projectId, headers, 'get', {})).rejects.toThrow(
+      /--id or --finding-id is required/,
+    );
+    expect(axiosGetSpy).not.toHaveBeenCalled();
+  });
+});
+
 describe('code-review resolve', () => {
   const apiUrl = 'http://localhost:3001';
   const projectId = 'project_1';

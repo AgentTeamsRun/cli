@@ -308,8 +308,8 @@ program
 program
   .command('task')
   .description('Manage plan tasks')
-  .argument('<action>', 'Action to perform (start, finish)')
-  .option('--plan-id <id>', 'Plan ID')
+  .argument('<action>', 'Action to perform (get, start, finish)')
+  .option('--plan-id <id>', 'Plan ID (optional for get: bare task-id focus; required for start/finish)')
   .option('--task-id <id>', 'Plan task ID')
   .option('--status <status>', 'Task finish status: DONE, BLOCKED, or SKIPPED')
   .option('--format <format>', 'Output format (json)')
@@ -534,7 +534,7 @@ program
     'Action to perform (list, get, show, create, update, create-plan, submit-result, cancel, delete, dismiss, resolve, undismiss)',
   )
   .option('--id <id>', 'Code review ID')
-  .option('--finding-id <id>', 'Finding ID for dismiss/resolve/undismiss')
+  .option('--finding-id <id>', 'Finding ID for get (single-finding focus), dismiss/resolve/undismiss')
   .option('--title <title>', 'Code review or generated plan title')
   .option(
     '--target-type <type>',

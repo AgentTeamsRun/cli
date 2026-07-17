@@ -7,6 +7,7 @@ import {
   deleteCodeReview,
   dismissCodeReviewFinding,
   getCodeReview,
+  getCodeReviewFinding,
   listCodeReviews,
   resolveCodeReviewFinding,
   submitCodeReviewResult,
@@ -111,7 +112,13 @@ export async function executeCodeReviewCommand(
     }
     case 'get':
     case 'show': {
-      if (!options.id) throw new Error('--id is required for code-review get');
+      // --finding-id가 있으면 리뷰 전체 대신 단일 finding(+부모 리뷰 헤더)만 포커스 조회한다.
+      // (agentteams_rvf_<id> / codeReview:R:F 서브 엔티티 핸드오프 경로.) --id는 이 분기에서 선택.
+      const findingId = toNonEmptyString(options.findingId);
+      if (findingId) {
+        return getCodeReviewFinding(apiUrl, projectId, headers, findingId, toNonEmptyString(options.id));
+      }
+      if (!options.id) throw new Error('--id or --finding-id is required for code-review get');
       return getCodeReview(apiUrl, projectId, headers, options.id);
     }
     case 'create': {
