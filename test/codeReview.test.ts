@@ -107,6 +107,42 @@ describe('code-review create with --findings-file', () => {
     });
   });
 
+  it('preserves automatic history match fields from the create response', async () => {
+    const relatedHistories = [
+      {
+        entityType: 'PLAN',
+        id: 'plan-history-1',
+        title: 'Earlier matching plan',
+        status: 'DONE',
+        qualityScore: null,
+        repositoryId: null,
+        matchedKeywords: ['history matcher'],
+        matchScore: 95,
+        createdAt: '2026-07-17T00:00:00.000Z',
+        webUrl: 'https://agentteams.run/go?type=plan&id=plan-history-1',
+      },
+    ];
+    axiosPostSpy.mockResolvedValueOnce({
+      data: {
+        data: {
+          id: 'cdr_history',
+          status: 'PENDING',
+          historyMatchStatus: 'MATCHED',
+          relatedHistories,
+        },
+      },
+    } as any);
+
+    const result = await executeCodeReviewCommand(apiUrl, projectId, headers, 'create', {
+      ...baseOptions,
+      git: false,
+      diffSummary: 'Update history matcher behavior',
+    });
+
+    expect(result.data.historyMatchStatus).toBe('MATCHED');
+    expect(result.data.relatedHistories).toEqual(relatedHistories);
+  });
+
   it('omits findings from the body when --findings-file is not provided', async () => {
     axiosPostSpy.mockResolvedValueOnce({
       data: { data: { id: 'cdr_abc', status: 'PENDING' } },
@@ -265,16 +301,39 @@ describe('code-review get', () => {
   });
 
   it('fetches the whole review when only --id is provided', async () => {
+    const relatedHistories = [
+      {
+        entityType: 'COMPLETION_REPORT',
+        id: 'report-history-1',
+        title: 'Earlier rollout report',
+        status: 'COMPLETED',
+        qualityScore: 92,
+        repositoryId: null,
+        matchedKeywords: ['rollout'],
+        matchScore: 88,
+        createdAt: '2026-07-16T00:00:00.000Z',
+        webUrl: 'https://agentteams.run/go?type=completion-report&id=report-history-1',
+      },
+    ];
     axiosGetSpy.mockResolvedValueOnce({
-      data: { data: { id: 'review-1', status: 'OPEN' } },
+      data: {
+        data: {
+          id: 'review-1',
+          status: 'OPEN',
+          historyMatchStatus: 'MATCHED',
+          relatedHistories,
+        },
+      },
     } as any);
 
-    await executeCodeReviewCommand(apiUrl, projectId, headers, 'get', { id: 'review-1' });
+    const result = await executeCodeReviewCommand(apiUrl, projectId, headers, 'get', { id: 'review-1' });
 
     expect(axiosGetSpy).toHaveBeenCalledTimes(1);
     expect(axiosGetSpy).toHaveBeenCalledWith('http://localhost:3001/api/projects/project_1/code-reviews/review-1', {
       headers,
     });
+    expect(result.data.historyMatchStatus).toBe('MATCHED');
+    expect(result.data.relatedHistories).toEqual(relatedHistories);
   });
 
   it('focus-fetches a single finding via the findings endpoint when --finding-id is provided', async () => {
