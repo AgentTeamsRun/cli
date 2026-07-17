@@ -37,6 +37,58 @@ export async function createComment(
   return response.data;
 }
 
+export async function listFindingComments(
+  apiUrl: string,
+  projectId: string,
+  headers: any,
+  findingId: string,
+  params?: Record<string, string | number>,
+): Promise<any> {
+  const baseUrl = `${apiUrl}/api/projects/${projectId}/code-reviews/findings/${findingId}/comments`;
+  const requestConfig = params && Object.keys(params).length > 0 ? { headers, params } : { headers };
+  const response = await httpClient.get(baseUrl, requestConfig);
+  return response.data;
+}
+
+export async function createFindingComment(
+  apiUrl: string,
+  projectId: string,
+  headers: any,
+  findingId: string,
+  body: { content: string },
+): Promise<any> {
+  const baseUrl = `${apiUrl}/api/projects/${projectId}/code-reviews/findings/${findingId}/comments`;
+  const response = await httpClient.post(baseUrl, body, { headers });
+  return response.data;
+}
+
+export async function listTaskComments(
+  apiUrl: string,
+  projectId: string,
+  headers: any,
+  taskId: string,
+  params?: Record<string, string | number>,
+): Promise<any> {
+  const baseUrl = `${apiUrl}/api/projects/${projectId}/plans/tasks/${taskId}/comments`;
+  const requestConfig = params && Object.keys(params).length > 0 ? { headers, params } : { headers };
+  const response = await httpClient.get(baseUrl, requestConfig);
+  return response.data;
+}
+
+export async function createTaskComment(
+  apiUrl: string,
+  projectId: string,
+  headers: any,
+  taskId: string,
+  body: { content: string },
+  planId?: string,
+): Promise<any> {
+  const baseUrl = `${apiUrl}/api/projects/${projectId}/plans/tasks/${taskId}/comments`;
+  const requestConfig = planId ? { headers, params: { planId } } : { headers };
+  const response = await httpClient.post(baseUrl, body, requestConfig);
+  return response.data;
+}
+
 export async function updateComment(
   apiUrl: string,
   projectId: string,

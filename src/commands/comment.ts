@@ -1,11 +1,15 @@
 import {
   createComment,
+  createFindingComment,
   createReply,
+  createTaskComment,
   deleteComment,
   deleteReply,
   getComment,
   listComments,
+  listFindingComments,
   listReplies,
+  listTaskComments,
   updateComment,
   updateReply,
 } from '../api/comment.js';
@@ -18,17 +22,38 @@ export async function executeCommentCommand(
   action: string,
   options: any,
 ): Promise<any> {
+  const targetKinds = [
+    options.findingId && 'finding',
+    options.taskId && 'task',
+    options.planId && !options.taskId && 'plan',
+  ].filter(Boolean);
+  const requireTarget = (actionName: string) => {
+    if (targetKinds.length === 0) {
+      throw new Error(`--plan-id, --finding-id, or --task-id is required for comment ${actionName}`);
+    }
+    if (targetKinds.length > 1) {
+      throw new Error('Use only one comment target: --plan-id, --finding-id, or --task-id');
+    }
+  };
+
   switch (action) {
     case 'list': {
-      if (!options.planId) throw new Error('--plan-id is required for comment list');
+      requireTarget('list');
       const params: Record<string, string | number> = {};
-      if (options.type) params.type = options.type;
+      if (options.planId && !options.taskId && options.type) params.type = options.type;
+      if (options.taskId && options.planId) params.planId = options.planId;
 
       const page = toPositiveInteger(options.page);
       const pageSize = toPositiveInteger(options.pageSize);
       if (page !== undefined) params.page = page;
       if (pageSize !== undefined) params.pageSize = pageSize;
 
+      if (options.findingId) {
+        return listFindingComments(apiUrl, projectId, headers, options.findingId, params);
+      }
+      if (options.taskId) {
+        return listTaskComments(apiUrl, projectId, headers, options.taskId, params);
+      }
       return listComments(apiUrl, projectId, headers, options.planId, params);
     }
     case 'get': {
@@ -36,9 +61,34 @@ export async function executeCommentCommand(
       return getComment(apiUrl, projectId, headers, options.id);
     }
     case 'create': {
-      if (!options.planId) throw new Error('--plan-id is required for comment create');
-      if (!options.type) throw new Error('--type is required for comment create');
+      requireTarget('create');
+      if (options.planId && !options.taskId && !options.type) {
+        throw new Error('--type is required for plan comment create');
+      }
       if (!options.content) throw new Error('--content is required for comment create');
+
+      if (options.findingId) {
+        if (options.type || options.affectedFiles) {
+          throw new Error('--type and --affected-files are only supported with --plan-id');
+        }
+        return createFindingComment(apiUrl, projectId, headers, options.findingId, {
+          content: options.content,
+        });
+      }
+
+      if (options.taskId) {
+        if (options.type || options.affectedFiles) {
+          throw new Error('--type and --affected-files are only supported with a plan comment target');
+        }
+        return createTaskComment(
+          apiUrl,
+          projectId,
+          headers,
+          options.taskId,
+          { content: options.content },
+          options.planId,
+        );
+      }
 
       const body: { type: string; content: string; affectedFiles?: string[] } = {
         type: options.type,

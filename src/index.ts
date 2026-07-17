@@ -344,7 +344,7 @@ program
 
 program
   .command('comment')
-  .description('Manage plan comments and their 1-depth replies')
+  .description('Manage plan, finding, and task comments with 1-depth replies')
   .argument(
     '<action>',
     'Action to perform (list, get, create, update, delete, reply-list, reply-create, reply-update, reply-delete)',
@@ -352,6 +352,8 @@ program
   .option('--id <id>', 'Comment ID (parent comment ID for reply-list/reply-create)')
   .option('--reply-id <id>', 'Reply ID (for reply-update/reply-delete)')
   .option('--plan-id <id>', 'Plan ID')
+  .option('--finding-id <id>', 'Code review finding ID')
+  .option('--task-id <id>', 'Plan task ID')
   .option('--type <type>', 'Comment type (RISK, MODIFICATION, GENERAL)')
   .option('--content <content>', 'Comment content')
   .option('--affected-files <files>', 'Comma-separated list of affected file paths (create/update)')
@@ -367,6 +369,8 @@ program
         id: options.id,
         replyId: options.replyId,
         planId: options.planId,
+        findingId: options.findingId,
+        taskId: options.taskId,
         type: options.type,
         content: options.content,
         affectedFiles: options.affectedFiles,
