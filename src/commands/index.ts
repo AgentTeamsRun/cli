@@ -11,6 +11,7 @@ import { executePostMortemCommand } from './postmortem.js';
 import { executeCoActionCommand } from './coaction.js';
 import { executeReportCommand } from './report.js';
 import { executeCodeReviewCommand } from './codeReview.js';
+import { executeChangeSetCommand } from './changeSetCommand.js';
 import { executeFeedbackCommand } from './feedback.js';
 import { executeSearchCommand } from './search.js';
 import { executeLinearCommand } from './linear.js';
@@ -141,6 +142,13 @@ async function executeCommandWithContext(
           ...options,
           projectId: config.projectId,
         }),
+      );
+    }
+    case 'change-set': {
+      const config = loadRequiredConfig(buildConfigOverrides(options));
+      const { apiUrl, headers } = resolveApiContext(config);
+      return withApiErrorContext(apiUrl, () =>
+        executeChangeSetCommand({ apiUrl, projectId: config.projectId, headers }, action, options),
       );
     }
     case 'postmortem': {

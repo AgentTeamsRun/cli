@@ -634,6 +634,52 @@ program
   });
 
 program
+  .command('change-set')
+  .description('Manage cross-repository change sets and merge order')
+  .argument('<action>', 'Action to perform (create, list, get, update, delete, add-item, remove-item)')
+  .option('--id <id>', 'Change set ID')
+  .option('--change-set-id <id>', 'Change set ID for item actions')
+  .option('--item-id <id>', 'Change set item ID')
+  .option('--title <title>', 'Change set title')
+  .option('--description <text>', 'Change set description')
+  .option('--status <status>', 'Status (OPEN, COMPLETED, CANCELLED)')
+  .option('--repository-id <id>', 'Project repository ID')
+  .option('--repository-remote-url <url>', 'Repository remote URL (add-item; defaults to git origin)')
+  .option('--no-git', 'Disable automatic git origin detection')
+  .option('--branch-name <name>', 'Branch name')
+  .option('--target-url <url>', 'Pull or merge request URL')
+  .option('--merge-order <number>', 'Merge order (positive integer)')
+  .option('--code-review-id <id>', 'Linked code review ID')
+  .option('--note <text>', 'Item note')
+  .option('--page <number>', 'Page number (list only)')
+  .option('--page-size <number>', 'Page size (list only)')
+  .option('--api-url <url>', 'Override API URL (optional)')
+  .option('--api-key <key>', 'Override API key (optional)')
+  .option('--project-id <id>', 'Override project ID (optional)')
+  .option('--team-id <id>', 'Override team ID (optional)')
+  .option('--format <format>', 'Output format (json)')
+  .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
+  .option('--verbose', 'Print full raw output to stdout; with --output-file, also echo it', false)
+  .addHelpText('after', CONVENTION_HINT)
+  .action(async (action, options) => {
+    try {
+      const result = await executeCommand('change-set', action, options);
+      printCommandResult({
+        result,
+        format: normalizeFormat(options.format),
+        outputFile: options.outputFile,
+        verbose: options.verbose,
+        resource: 'change-set',
+        action,
+        formatExplicit: typeof options.format === 'string',
+      });
+    } catch (error) {
+      console.error(handleError(error));
+      process.exit(1);
+    }
+  });
+
+program
   .command('postmortem')
   .description('Manage post mortems')
   .argument('<action>', 'Action to perform (list, get, create, update, delete)')
