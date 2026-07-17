@@ -9,18 +9,6 @@ export interface OutputPolicyContext {
   verbose?: boolean;
 }
 
-const summaryDefaultActions: Record<string, Set<string>> = {
-  plan: new Set(['create', 'update', 'start', 'finish']),
-  task: new Set(['start', 'finish']),
-  report: new Set(['create', 'update']),
-  postmortem: new Set(['create', 'update']),
-  coaction: new Set(['create', 'update']),
-  // document create/update echo the full body in their response; keep stdout
-  // meta-only by default so agents are not flooded with the document content.
-  document: new Set(['create', 'update']),
-  linear: new Set(['comment-create']),
-};
-
 const nextActionHints: Record<string, Record<string, string[]>> = {
   plan: {
     create: ['Next: agentteams plan start --id <id>'],
@@ -31,19 +19,7 @@ const nextActionHints: Record<string, Record<string, string[]>> = {
 export function shouldPrintSummary(context: OutputPolicyContext): boolean {
   if (context.verbose) return false;
 
-  if (typeof context.outputFile === 'string' && context.outputFile.trim().length > 0) {
-    return true;
-  }
-
-  if (!context.resource || !context.action) return false;
-
-  if (context.formatExplicit) {
-    return false;
-  }
-
-  const actions = summaryDefaultActions[context.resource];
-  if (!actions) return false;
-  return actions.has(context.action);
+  return typeof context.outputFile === 'string' && context.outputFile.trim().length > 0;
 }
 
 export function createSummaryLines(

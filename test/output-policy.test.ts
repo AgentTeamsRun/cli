@@ -2,35 +2,21 @@ import { describe, it, expect } from '@jest/globals';
 import { createSummaryLines, shouldPrintSummary } from '../src/utils/outputPolicy.js';
 
 describe('outputPolicy', () => {
-  it('prints summary by default for plan create', () => {
+  it.each([
+    ['plan', 'create'],
+    ['task', 'finish'],
+    ['report', 'update'],
+    ['postmortem', 'create'],
+    ['coaction', 'update'],
+    ['document', 'create'],
+    ['linear', 'comment-create'],
+  ])('keeps full JSON output by default for %s %s', (resource, action) => {
     expect(
       shouldPrintSummary({
-        resource: 'plan',
-        action: 'create',
+        resource,
+        action,
         format: 'json',
         formatExplicit: false,
-      }),
-    ).toBe(true);
-  });
-
-  it('keeps full output for plan list by default', () => {
-    expect(
-      shouldPrintSummary({
-        resource: 'plan',
-        action: 'list',
-        format: 'json',
-        formatExplicit: false,
-      }),
-    ).toBe(false);
-  });
-
-  it('keeps full output when json format is explicitly requested', () => {
-    expect(
-      shouldPrintSummary({
-        resource: 'plan',
-        action: 'update',
-        format: 'json',
-        formatExplicit: true,
       }),
     ).toBe(false);
   });
@@ -89,35 +75,6 @@ describe('outputPolicy', () => {
     );
 
     expect(lines.some((line) => line.includes('plan upload-html'))).toBe(false);
-  });
-
-  it('prints summary by default for report/postmortem/coaction update', () => {
-    expect(
-      shouldPrintSummary({
-        resource: 'report',
-        action: 'update',
-        format: 'json',
-        formatExplicit: false,
-      }),
-    ).toBe(true);
-
-    expect(
-      shouldPrintSummary({
-        resource: 'postmortem',
-        action: 'update',
-        format: 'json',
-        formatExplicit: false,
-      }),
-    ).toBe(true);
-
-    expect(
-      shouldPrintSummary({
-        resource: 'coaction',
-        action: 'update',
-        format: 'json',
-        formatExplicit: false,
-      }),
-    ).toBe(true);
   });
 
   it('adds webUrl to summary lines when present', () => {
@@ -211,38 +168,7 @@ describe('outputPolicy', () => {
     expect(lines.some((line) => line.includes('plan upload-html'))).toBe(false);
   });
 
-  it('prints summary by default for linear comment create', () => {
-    expect(
-      shouldPrintSummary({
-        resource: 'linear',
-        action: 'comment-create',
-        format: 'json',
-        formatExplicit: false,
-      }),
-    ).toBe(true);
-  });
-
-  it('prints summary by default for document create/update (no body echo)', () => {
-    expect(
-      shouldPrintSummary({
-        resource: 'document',
-        action: 'create',
-        format: 'json',
-        formatExplicit: false,
-      }),
-    ).toBe(true);
-
-    expect(
-      shouldPrintSummary({
-        resource: 'document',
-        action: 'update',
-        format: 'json',
-        formatExplicit: false,
-      }),
-    ).toBe(true);
-  });
-
-  it('does not echo the document body in default summary lines', () => {
+  it('does not echo the document body in output-file summary lines', () => {
     const lines = createSummaryLines(
       {
         message: 'Document updated',

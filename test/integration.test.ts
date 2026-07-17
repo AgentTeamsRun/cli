@@ -2613,6 +2613,8 @@ describe('CLI Integration Tests', () => {
 
     it('CLI definitions: should include new options and remove legacy options', () => {
       const cliIndex = readFileSync(join(process.cwd(), 'src/index.ts'), 'utf-8');
+      const attachmentDefinition = cliIndex.match(/\.command\('attachment'\)[\s\S]*?\.action/)?.[0];
+      const feedbackDefinition = cliIndex.match(/\.command\('feedback'\)[\s\S]*?\.action/)?.[0];
 
       expect(cliIndex).toContain('--task <text>');
       expect(cliIndex).toContain('--type <type>');
@@ -2650,6 +2652,12 @@ describe('CLI Integration Tests', () => {
       expect(cliIndex).toContain(
         'Plan status for list/update/set-status; ignored by create because new plans start as BACKLOG',
       );
+      expect(attachmentDefinition).toBeDefined();
+      expect(feedbackDefinition).toBeDefined();
+      expect(attachmentDefinition).not.toContain(".option('--format <format>', 'Output format (json)', 'json')");
+      expect(feedbackDefinition).not.toContain(".option('--format <format>', 'Output format (json)', 'json')");
+      expect(cliIndex).not.toContain('Print full output to stdout (useful with --output-file)');
+      expect(cliIndex).toContain('Print full raw output to stdout; with --output-file, also echo it');
     });
 
     it('should throw for unknown resource command', async () => {

@@ -1,7 +1,11 @@
 import { describe, expect, it, jest } from '@jest/globals';
-import { executeValidatedInteractiveCommand } from '../src/utils/interactiveCommand.js';
+import { executeValidatedInteractiveCommand, normalizeInteractiveFormat } from '../src/utils/interactiveCommand.js';
 
 describe('executeValidatedInteractiveCommand', () => {
+  it('keeps the shared init, sync, and doctor default human-readable', () => {
+    expect(normalizeInteractiveFormat(undefined)).toBe('human');
+  });
+
   it('rejects an unsupported format before invoking the mutating executor', async () => {
     const execute = jest.fn(async () => ({ changedCount: 1 }));
 
