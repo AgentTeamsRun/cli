@@ -1,6 +1,6 @@
 {
   "name": "@agentteams/cli",
-  "version": "0.1.73",
+  "version": "0.1.74",
   "description": "CLI tool for AgentTeams API",
   "type": "module",
   "main": "dist/index.js",
@@ -15,7 +15,7 @@
     "typecheck": "tsc --noEmit",
     "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",
     "test:watch": "node --experimental-vm-modules node_modules/jest/bin/jest.js --watch",
-    "lint": "eslint \"src/**/*.ts\" \"test/**/*.ts\"",
+    "lint": "eslint \"src/**/*.ts\" \"test/**/*.ts\" --cache --cache-location .eslintcache --cache-strategy content",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "prepublishOnly": "npm run build"

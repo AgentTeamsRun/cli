@@ -22,10 +22,11 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '24'
-          cache: npm
 
+      # 공개 미러는 lockfile 없는 독립 패키지이므로 npm install 사용
+      # (setup-node의 cache: npm / npm ci는 lockfile을 요구해 실패한다)
       - name: Install dependencies
-        run: npm ci
+        run: npm install
 
       - name: Verify dist artifact
         run: test -f dist/index.js
