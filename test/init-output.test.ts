@@ -75,6 +75,54 @@ describe('printInitResult', () => {
       expect(output).toContain('-example');
     });
 
+    it('post-checkout 훅 설치 성공 시 워크트리 자동 부트스트랩 안내를 출력한다', () => {
+      printInitResult(
+        {
+          ...MOCK_INIT_RESULT,
+          postCheckoutHook: { status: 'ready', changed: true, hookPath: '/project/.git/hooks/post-checkout' },
+        },
+        'human',
+      );
+
+      const output = captureOutput(logSpy);
+      expect(output).toContain('Worktree bootstrap hook installed');
+    });
+
+    it('post-checkout 훅 설치 실패 시 수동 init 안내를 경고로 출력한다', () => {
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+      printInitResult(
+        {
+          ...MOCK_INIT_RESULT,
+          postCheckoutHook: {
+            status: 'blocked',
+            changed: false,
+            hookPath: '/project/.git/hooks/post-checkout',
+            issue: {
+              code: 'hook-custom',
+              path: '/project/.git/hooks/post-checkout',
+              message: 'An unmanaged post-checkout hook exists',
+            },
+          },
+        },
+        'human',
+      );
+
+      const warnings = captureOutput(warnSpy);
+      expect(warnings).toContain('Worktree bootstrap hook not installed');
+      expect(warnings).toContain('An unmanaged post-checkout hook exists');
+      expect(warnings).toContain("'agentteams init' run manually");
+
+      warnSpy.mockRestore();
+    });
+
+    it('post-checkout 훅 필드가 없으면 훅 관련 출력을 하지 않는다', () => {
+      printInitResult(MOCK_INIT_RESULT, 'human');
+
+      const output = captureOutput(logSpy);
+      expect(output).not.toContain('Worktree bootstrap hook');
+    });
+
     it('seed plan ID를 agentteams_ 네임스페이스 prefix로 출력한다', () => {
       printInitResult({ ...MOCK_INIT_RESULT, seedPlanId: '123e4567-e89b-12d3-a456-426614174000' }, 'human');
 
