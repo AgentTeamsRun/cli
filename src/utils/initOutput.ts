@@ -1,6 +1,7 @@
 import chalk from 'chalk';
 import { formatOutput } from './formatter.js';
 import type { AgentFileEntry, WorktreeInitResult } from '../commands/init.js';
+import type { EnsurePostCheckoutHookResult } from './conventionLink.js';
 
 export type InitOutputFormat = 'human' | 'json';
 
@@ -12,6 +13,7 @@ interface InitResultShape {
   agentFiles?: AgentFileEntry[];
   seedPlanId?: string | null;
   seedPlanWebUrl?: string | null;
+  postCheckoutHook?: EnsurePostCheckoutHookResult;
 }
 
 function isInitResult(result: unknown): result is InitResultShape {
@@ -96,6 +98,16 @@ export function printInitResult(result: unknown, format: InitOutputFormat): void
   console.log(`✓ Config saved:      ${result.configPath}`);
   console.log(`✓ Convention saved:  ${result.conventionPath}`);
   console.log(`✓ Conventions synced to .agentteams/`);
+
+  const hook = result.postCheckoutHook;
+  if (hook) {
+    if (hook.status === 'ready') {
+      console.log(`✓ Worktree bootstrap hook installed: new git worktrees auto-run 'agentteams init'`);
+    } else {
+      console.warn(`⚠ Worktree bootstrap hook not installed: ${hook.issue?.message ?? 'unknown reason'}`);
+      console.warn(`  New worktrees will need 'agentteams init' run manually.`);
+    }
+  }
 
   if (result.agentFiles && result.agentFiles.length > 0) {
     for (const file of result.agentFiles) {

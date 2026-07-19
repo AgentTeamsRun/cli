@@ -26,10 +26,12 @@ import {
   DEFAULT_CONVENTION_REFERENCE,
   ensureConventionEntryPoints,
   ensureLocalExclude,
+  ensurePostCheckoutHook,
   isReadableRegularFile,
   toAnchoredExcludePattern,
   type ConventionEntryPointState,
   type ConventionIssue,
+  type EnsurePostCheckoutHookResult,
 } from '../utils/conventionLink.js';
 
 const AUTH_BASE_URL = process.env.AGENTTEAMS_WEB_URL || 'https://agentteams.run';
@@ -74,6 +76,7 @@ type OAuthInitResult = {
   agentFiles: AgentFileEntry[];
   seedPlanId: string | null;
   seedPlanWebUrl: string | null;
+  postCheckoutHook?: EnsurePostCheckoutHookResult;
 };
 
 export type WorktreeEntryPointState = ConventionEntryPointState;
@@ -556,6 +559,16 @@ async function executeInitCommandWithContext(options?: InitOptions): Promise<Ini
     const seedPlanId = authResult.seedPlanId ?? null;
     const seedPlanWebUrl = seedPlanId ? `${AUTH_BASE_URL.replace(/\/+$/, '')}/go?type=plan&id=${seedPlanId}` : null;
 
+    // A git-root project shares one hooks directory with all its worktrees, so
+    // installing the managed post-checkout hook here lets future `git worktree
+    // add` runs bootstrap conventions automatically (via `agentteams init`).
+    // Non-git roots (a parent folder grouping member repos) have no git-common
+    // dir; `agentteams doctor` owns their per-member hooks instead, so skip.
+    let postCheckoutHook: EnsurePostCheckoutHookResult | undefined;
+    if (resolveGitTopLevel(cwd) !== null) {
+      postCheckoutHook = ensurePostCheckoutHook(cwd);
+    }
+
     return {
       success: true,
       authUrl,
@@ -567,6 +580,7 @@ async function executeInitCommandWithContext(options?: InitOptions): Promise<Ini
       agentFiles,
       seedPlanId,
       seedPlanWebUrl,
+      postCheckoutHook,
     };
   } catch (error) {
     authSpinner?.fail();
