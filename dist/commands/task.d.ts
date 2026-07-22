@@ -1,0 +1,2 @@
+export declare function executeTaskCommand(apiUrl: string, projectId: string, headers: Record<string, string>, action: string, options: Record<string, unknown>): Promise<unknown>;
+//# sourceMappingURL=task.d.ts.map
