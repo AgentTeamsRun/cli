@@ -18,6 +18,7 @@ import { executeLinearCommand } from './linear.js';
 import { executeAttachmentCommand } from './attachment.js';
 import { executeTaskCommand } from './task.js';
 import { getConfigurationNotFoundMessage, loadConfig } from '../utils/config.js';
+import { executeWorktreeCommand } from './worktree.js';
 import { normalizeCommandContext, withCommandContext } from '../utils/commandContext.js';
 import { normalizeEntityIdOptions } from '../utils/entityId.js';
 import { attachErrorContext } from '../utils/errors.js';
@@ -82,6 +83,8 @@ async function executeCommandWithContext(
   switch (resource) {
     case 'init':
       return executeInitCommand(options);
+    case 'worktree':
+      return executeWorktreeCommand(action, options);
     // Local diagnosis/repair resource: must stay routable without loading the
     // project config or API context first.
     case 'doctor':

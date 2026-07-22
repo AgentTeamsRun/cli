@@ -156,6 +156,36 @@ program
   });
 
 program
+  .command('worktree')
+  .description('Report Orca worktree lifecycle events')
+  .argument('<action>', 'Action to perform (notify-created, notify-deleted)')
+  .option('--repository-id <id>', 'AgentTeams repository ID (optional when remote origin matches)')
+  .option('--local-key <key>', 'Opaque worktree identity (defaults to a Git-derived key)')
+  .option('--event-id <id>', 'Stable event ID for retries')
+  .option('--occurred-at <timestamp>', 'Event timestamp in ISO 8601 format')
+  .option('--after-removal', 'Send a deleted event only after the worktree path disappears', false)
+  .option('--format <format>', 'Output format (json)', 'json')
+  .option('--quiet', 'Do not print a successful result', false)
+  .action(async (action, options) => {
+    try {
+      const result = await executeCommand('worktree', action, {
+        cwd: process.cwd(),
+        repositoryId: options.repositoryId,
+        localKey: options.localKey,
+        eventId: options.eventId,
+        occurredAt: options.occurredAt,
+        afterRemoval: options.afterRemoval,
+      });
+      if (!options.quiet) {
+        printCommandResult({ result, format: normalizeFormat(options.format), resource: 'worktree', action });
+      }
+    } catch (error) {
+      console.error(handleError(error));
+      process.exit(1);
+    }
+  });
+
+program
   .command('plan')
   .description('Manage plans')
   .argument(
