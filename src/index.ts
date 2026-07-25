@@ -1115,6 +1115,35 @@ program
     }
   });
 
+program
+  .command('mcp')
+  .description('Run an MCP server over stdio, exposing AgentTeams reads to MCP-capable coding agents')
+  .option('--api-url <url>', 'Override API URL (optional)')
+  .option('--api-key <key>', 'Override API key (optional)')
+  .option('--project-id <id>', 'Override project ID (optional)')
+  .option('--team-id <id>', 'Override team ID (optional)')
+  .addHelpText('after', CONVENTION_HINT)
+  .action(async (options) => {
+    try {
+      // Loaded lazily so the MCP SDK — which requires a newer Node than some of
+      // the CLI's other commands need — never enters the other command paths.
+      const { startMcpServer } = await import('./commands/mcp.js');
+
+      // stdout carries JSON-RPC frames only: this action deliberately bypasses
+      // executeCommand()/printCommandResult() and never writes to stdout.
+      startMcpServer({
+        apiUrl: options.apiUrl,
+        apiKey: options.apiKey,
+        projectId: options.projectId,
+        teamId: options.teamId,
+      });
+    } catch (error) {
+      // Staying alive without credentials would make the client retry forever.
+      console.error(handleError(error));
+      process.exit(1);
+    }
+  });
+
 const linearCommand = program
   .command('linear')
   .description('Read Linear issues and add comments through the AgentTeams API')

@@ -1,24 +1,7 @@
 import { searchEntities } from '../api/search.js';
-import { splitCsv, toPositiveInteger } from '../utils/parsers.js';
+import { toPositiveInteger } from '../utils/parsers.js';
+import { buildSearchParams, parseSearchTypes } from '../utils/searchParams.js';
 import { withSpinner } from '../utils/spinner.js';
-
-const VALID_TYPES = [
-  'PLAN',
-  'CO_ACTION',
-  'COMPLETION_REPORT',
-  'POST_MORTEM',
-  'CONVENTION',
-  'COMMENT',
-  'CODE_REVIEW',
-  'DOCUMENT',
-  'GITHUB_ISSUE',
-  'GITHUB_PR',
-  'GITLAB_ISSUE',
-  'GITLAB_MERGE_REQUEST',
-  'BITBUCKET_ISSUE',
-  'BITBUCKET_PR',
-  'LINEAR_ISSUE',
-] as const;
 
 export async function executeSearchCommand(
   apiUrl: string,
@@ -31,24 +14,12 @@ export async function executeSearchCommand(
     throw new Error('--query is required');
   }
 
-  const params: Record<string, string | number | string[]> = {
-    q: query.trim(),
-  };
-
-  if (typeof options.types === 'string') {
-    const types = splitCsv(options.types).map((t) => t.toUpperCase());
-    const invalid = types.filter((t) => !VALID_TYPES.includes(t as any));
-    if (invalid.length > 0) {
-      throw new Error(`Invalid type(s): ${invalid.join(', ')}. Valid types: ${VALID_TYPES.join(', ')}`);
-    }
-    params.types = types;
-  }
-
-  const limit = toPositiveInteger(options.limit);
-  if (limit !== undefined) params.limit = limit;
-
-  const maxTokens = toPositiveInteger(options.maxTokens);
-  if (maxTokens !== undefined) params.maxTokens = maxTokens;
+  const params = buildSearchParams({
+    query: query.trim(),
+    types: typeof options.types === 'string' ? parseSearchTypes(options.types) : undefined,
+    limit: toPositiveInteger(options.limit),
+    maxTokens: toPositiveInteger(options.maxTokens),
+  });
 
   return withSpinner('Searching...', () => searchEntities(apiUrl, projectId, headers, params), 'Search complete');
 }
