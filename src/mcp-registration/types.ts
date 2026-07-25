@@ -1,0 +1,125 @@
+/** Client ids accepted by `--client`. Orca is not a client and GEMINI is a deprecated runner type, so neither appears here. */
+export const MCP_CLIENT_IDS = [
+  'claude-code',
+  'codex',
+  'copilot-cli',
+  'opencode',
+  'amp',
+  'cursor-cli',
+  'kimi-cli',
+  'antigravity',
+] as const;
+
+export type McpClientId = (typeof MCP_CLIENT_IDS)[number];
+
+export type McpScope = 'user' | 'project';
+
+/** Syntax the client uses to inherit a secret from its parent process. */
+export type McpSecretReference = 'dollarBraces' | 'opencodeEnv' | 'codexEnvVars';
+
+/** How the AgentTeams entry reaches the client's configuration. */
+export type McpInstallStrategy =
+  /** The client owns the format; we shell out to its documented non-interactive command. */
+  | 'vendorCommand'
+  /** We own the merge: surgical JSONC upsert with backup and atomic rename. */
+  | 'jsonMerge'
+  /** No automated path we can prove safe — `install` prints the snippet instead of writing. */
+  | 'configOnly';
+
+/** What the vendor command does when the server name is already registered. */
+export type VendorRerunBehavior = 'update' | 'refuse';
+
+/** Serialized shape of a single server entry in the client's config. */
+export type McpEntryShape =
+  /** `{ type: "stdio", command, args, env }` */
+  | 'stdio'
+  /** `{ command, args, env }` */
+  | 'plain'
+  /** `{ type: "local", command: [...], environment, enabled }` */
+  | 'opencode';
+
+export interface McpPathContext {
+  homeDir: string;
+  cwd: string;
+  env: NodeJS.ProcessEnv;
+}
+
+export interface McpServerSpec {
+  command: string;
+  args: string[];
+  env: Record<string, string>;
+}
+
+export interface VendorCommandPlan {
+  executable: string;
+  args: string[];
+}
+
+export interface McpScopeDefinition {
+  /** Absolute path of the config file this scope writes to. */
+  configPath: (context: McpPathContext) => string;
+  format: 'json' | 'jsonc' | 'toml';
+  /** Top-level key holding the server map. Absent for TOML. */
+  containerKey?: string;
+  entryShape?: McpEntryShape;
+  strategy: McpInstallStrategy;
+  /** Present when `strategy === 'vendorCommand'`. */
+  vendor?: {
+    buildArgs: (spec: McpServerSpec, serverName: string) => string[];
+    rerunBehavior: VendorRerunBehavior;
+    /** Patterns that mean "already registered", not "failed". */
+    alreadyRegisteredPatterns?: RegExp[];
+  };
+  /** Present when `strategy === 'configOnly'`; explains why nothing is written. */
+  configOnlyReason?: string;
+}
+
+export interface McpClientDefinition {
+  id: McpClientId;
+  /** RunnerType key in packages/core-constants. Enforced by a monorepo drift test. */
+  runnerType: string;
+  label: string;
+  /** Executable names looked up on PATH. */
+  executables: string[];
+  secretReference: McpSecretReference;
+  /** Extra directories to probe when the client installs outside PATH (e.g. Kimi). */
+  extraBinDirs?: (context: McpPathContext) => string[];
+  /** Files/directories whose presence proves the client has been configured on this machine. */
+  configSignals: (context: McpPathContext) => string[];
+  /** Official documentation for the config contract encoded above. */
+  docsUrl: string;
+  /** Date the contract above was verified against the vendor's docs and a local install. */
+  verifiedAt: string;
+  scopes: Record<McpScope, McpScopeDefinition>;
+}
+
+export type InstallOutcome =
+  | 'INSTALLED'
+  | 'ALREADY_REGISTERED'
+  | 'SKIPPED_CONFIG_ONLY'
+  | 'SKIPPED_NOT_DETECTED'
+  | 'FAILED';
+
+export interface InstallResult {
+  clientId: McpClientId;
+  scope: McpScope;
+  outcome: InstallOutcome;
+  strategy: McpInstallStrategy;
+  /** The config file the outcome refers to. */
+  configPath: string;
+  /** Redacted, user-facing explanation. Never contains credentials. */
+  detail: string;
+  backupPath?: string;
+  /** Manual fallback, always present for non-INSTALLED outcomes. */
+  manualSnippet?: string;
+}
+
+export interface DetectionSignal {
+  clientId: McpClientId;
+  label: string;
+  /** Why the client is considered present: config traces, an executable, or both. */
+  evidence: 'configured' | 'executable' | 'both' | 'none';
+  executablePath: string | null;
+  configPaths: string[];
+  detected: boolean;
+}

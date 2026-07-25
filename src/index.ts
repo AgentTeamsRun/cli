@@ -13,6 +13,7 @@ import { printDoctorResult, resolveDoctorExitCode } from './utils/doctorOutput.j
 import type { DoctorResult } from './commands/doctor.js';
 import { executeValidatedInteractiveCommand, normalizeInteractiveFormat } from './utils/interactiveCommand.js';
 import { startUpdateCheck, readCache, compareVersions, formatUpdateMessage } from './utils/updateCheck.js';
+import { MCP_CLIENT_IDS } from './mcp-registration/types.js';
 
 const require = createRequire(import.meta.url);
 const pkg = require('../package.json') as { version: string };
@@ -1115,7 +1116,7 @@ program
     }
   });
 
-program
+const mcpCommand = program
   .command('mcp')
   .description('Run an MCP server over stdio, exposing AgentTeams reads to MCP-capable coding agents')
   .option('--api-url <url>', 'Override API URL (optional)')
@@ -1143,6 +1144,66 @@ program
       process.exit(1);
     }
   });
+
+const MCP_CLIENT_CHOICES = MCP_CLIENT_IDS.join(', ');
+
+function addMcpRegistrationOptions(command: Command): Command {
+  return command
+    .option('--client <id>', `Target client (${MCP_CLIENT_CHOICES})`)
+    .option('--scope <scope>', 'Configuration scope (user, project)', 'user')
+    .option(
+      '--server-entry <path>',
+      'Use a local `cli/dist/index.js` instead of the published package (for pre-release testing)',
+    )
+    .option('--json', 'Print the machine-readable result instead of the human-readable report', false)
+    .option('--api-url <url>', 'Override API URL (optional)')
+    .option('--api-key <key>', 'Override API key (optional)')
+    .option('--project-id <id>', 'Override project ID (optional)')
+    .option('--team-id <id>', 'Override team ID (optional)');
+}
+
+/**
+ * The registration surface is loaded lazily for the same reason the server is:
+ * `agentteams mcp` must stay a thin stdio entry point, and no other command
+ * should pay for the client registry.
+ */
+async function runMcpRegistration(
+  action: 'config' | 'install',
+  options: Record<string, unknown>,
+  command: Command,
+): Promise<void> {
+  try {
+    const parentOptions = command.parent?.opts() ?? {};
+    const merged = { ...parentOptions, ...options } as Record<string, unknown>;
+    const { runMcpConfigCommand, runMcpInstallCommand } = await import('./mcp-registration/index.js');
+    const output = action === 'config' ? runMcpConfigCommand(merged) : runMcpInstallCommand(merged);
+
+    console.log(options.json ? formatOutput(output.json) : output.text);
+    process.exitCode = output.exitCode;
+  } catch (error) {
+    console.error(handleError(error));
+    process.exit(1);
+  }
+}
+
+addMcpRegistrationOptions(
+  mcpCommand
+    .command('config')
+    .description('Print the MCP configuration snippet for a coding agent. Never writes files or credentials.'),
+)
+  .addHelpText('after', CONVENTION_HINT)
+  .action((options, command: Command) => runMcpRegistration('config', options, command));
+
+addMcpRegistrationOptions(
+  mcpCommand
+    .command('install')
+    .description(
+      'Register AgentTeams with local MCP clients. Without --client it only prints a detection plan; --yes applies it at user scope.',
+    ),
+)
+  .option('--yes', 'Apply the detected user-scope plan instead of only printing it', false)
+  .addHelpText('after', CONVENTION_HINT)
+  .action((options, command: Command) => runMcpRegistration('install', options, command));
 
 const linearCommand = program
   .command('linear')
