@@ -10,6 +10,10 @@ export default {
       'ts-jest',
       {
         useESM: true,
+        // tsconfig.json's rootDir is src/ (build layout); tests live in test/
+        // and may import shared helpers from test/helpers/, which needs the
+        // test-scoped rootDir.
+        tsconfig: 'tsconfig.test.json',
       },
     ],
   },
