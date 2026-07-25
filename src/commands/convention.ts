@@ -4,6 +4,7 @@ import { atomicWriteFileSync } from '../utils/atomicWrite.js';
 import { basename, join, relative, resolve, sep } from 'node:path';
 import httpClient from '../utils/httpClient.js';
 import { isAxiosError } from 'axios';
+import { downloadAllConventions, listConventions } from '../api/convention.js';
 import matter from 'gray-matter';
 import { diffLines, createTwoFilesPatch } from 'diff';
 import { loadConfig, findProjectConfig, getConfigurationNotFoundMessage } from '../utils/config.js';
@@ -252,19 +253,16 @@ async function fetchAllConventions(
   const items: ConventionListItem[] = [];
 
   while (true) {
-    const response = await httpClient.get(`${apiUrl}/api/projects/${projectId}/conventions`, {
-      headers,
-      params: { page, pageSize },
-    });
+    const envelope = await listConventions(apiUrl, projectId, headers, { page, pageSize });
 
-    const data = response.data?.data;
+    const data = envelope?.data;
     if (!Array.isArray(data)) {
       break;
     }
 
     items.push(...data);
 
-    const meta = response.data?.meta;
+    const meta = envelope?.meta;
     if (typeof meta?.totalPages === 'number') {
       totalPages = meta.totalPages;
     }
@@ -288,9 +286,9 @@ async function fetchConventionsWithContent(
   projectId: string,
   headers: Record<string, string>,
 ): Promise<ConventionDownloadItem[]> {
-  const response = await httpClient.get(`${apiUrl}/api/projects/${projectId}/conventions/download-all`, { headers });
+  const envelope = await downloadAllConventions(apiUrl, projectId, headers);
 
-  const data = response.data?.data;
+  const data = envelope?.data;
   if (!Array.isArray(data)) {
     throw new Error('Invalid download-all response format');
   }

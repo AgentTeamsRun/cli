@@ -22,20 +22,8 @@ import { executeWorktreeCommand } from './worktree.js';
 import { normalizeCommandContext, withCommandContext } from '../utils/commandContext.js';
 import { normalizeEntityIdOptions } from '../utils/entityId.js';
 import { attachErrorContext } from '../utils/errors.js';
+import { buildConfigOverrides, resolveApiContext } from '../utils/apiContext.js';
 import type { Config } from '../types/index.js';
-
-const CONFIG_OVERRIDE_KEYS = ['apiKey', 'apiUrl', 'teamId', 'projectId'] as const;
-
-function buildConfigOverrides(options: Record<string, unknown>): Partial<Config> {
-  const overrides: Record<string, string> = {};
-  for (const key of CONFIG_OVERRIDE_KEYS) {
-    const value = options[key];
-    if (typeof value === 'string' && value.length > 0) {
-      overrides[key] = value;
-    }
-  }
-  return overrides;
-}
 
 function loadRequiredConfig(overrides?: Partial<Config>): Config {
   const config = loadConfig(overrides);
@@ -43,15 +31,6 @@ function loadRequiredConfig(overrides?: Partial<Config>): Config {
     throw new Error(getConfigurationNotFoundMessage());
   }
   return config;
-}
-
-function resolveApiContext(config: Config): { apiUrl: string; headers: Record<string, string> } {
-  const apiUrl = config.apiUrl.endsWith('/') ? config.apiUrl.slice(0, -1) : config.apiUrl;
-  const headers = {
-    'X-API-Key': config.apiKey,
-    'Content-Type': 'application/json',
-  };
-  return { apiUrl, headers };
 }
 
 async function withApiErrorContext<T>(apiUrl: string, operation: () => Promise<T>): Promise<T> {
