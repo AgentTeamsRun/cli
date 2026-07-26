@@ -38,7 +38,7 @@ describe('mcp convention tools', () => {
     jest.restoreAllMocks();
   });
 
-  it('exposes exactly 9 tools including the two convention tools', async () => {
+  it('exposes the complete read tool catalog including the two convention tools', async () => {
     const { client, handle } = connect();
     openHandle = handle;
 
@@ -46,7 +46,7 @@ describe('mcp convention tools', () => {
     const list = await client.request('tools/list', { _meta: MODERN_META });
     const names = (list.result?.tools ?? []).map((tool: { name: string }) => tool.name);
 
-    expect(names).toHaveLength(9);
+    expect(names).toHaveLength(18);
     expect(names).toEqual(
       expect.arrayContaining([
         'agentteams_search',
