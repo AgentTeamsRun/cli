@@ -22,6 +22,12 @@ function readConfigFile(filePath: string): Partial<Config> | null {
   }
 }
 
+/** Read only the repository/worktree config, without environment or global fallbacks. */
+export function loadProjectConfig(startDir: string = process.cwd()): Partial<Config> | null {
+  const projectPath = findProjectConfig(startDir);
+  return projectPath ? readConfigFile(projectPath) : null;
+}
+
 /**
  * Load config values from environment variables.
  * Only includes fields that have corresponding env vars set.
@@ -122,8 +128,7 @@ export function loadConfig(options?: Partial<Config>): Config | null {
   const globalPath = join(homedir(), CONFIG_DIR, CONFIG_FILE);
   const globalConfig = readConfigFile(globalPath) ?? {};
 
-  const projectPath = findProjectConfig(process.cwd());
-  const projectConfig = projectPath ? (readConfigFile(projectPath) ?? {}) : {};
+  const projectConfig = loadProjectConfig() ?? {};
 
   const envConfig = loadEnvConfig();
   const cliOptions = options ?? {};

@@ -71,7 +71,7 @@ function resolvePathContext(overrides?: Partial<McpPathContext>): McpPathContext
 }
 
 function parseScope(value: unknown): McpScope {
-  if (value === undefined || value === null || value === '') return 'user';
+  if (value === undefined || value === null || value === '') return 'project';
   if (value === 'user' || value === 'project') return value;
   throw new Error(`Unsupported scope: ${String(value)}. Use "user" or "project".`);
 }
@@ -207,7 +207,7 @@ export function runMcpInstallCommand(
     };
   }
 
-  if (scope === 'project') {
+  if (scope === 'project' && options.yes) {
     throw new Error(
       'Batch install does not support --scope project: project files are repository state and must be chosen per client. Re-run with --client <id> --scope project.',
     );
@@ -217,15 +217,16 @@ export function runMcpInstallCommand(
     const plan = buildBatchPlan({
       context,
       credentials,
+      scope,
       detectionDependencies: dependencies?.detectionDependencies,
     });
 
     const lines = [
       'AgentTeams MCP install — dry run (no files were changed)',
-      `Plan: register "${MCP_SERVER_NAME}" at user scope for project ${plan.binding.projectId}, team ${plan.binding.teamId}`,
-      USER_SCOPE_BINDING_WARNING,
+      `Plan: register "${MCP_SERVER_NAME}" at ${scope} scope for project ${plan.binding.projectId}, team ${plan.binding.teamId}`,
       '',
     ];
+    if (scope === 'user') lines.splice(2, 0, USER_SCOPE_BINDING_WARNING);
 
     for (const entry of plan.entries) {
       lines.push(`- ${entry.clientId} [${entry.applicable ? 'will apply' : 'skip'}] ${formatDetectionEvidence(entry)}`);
@@ -234,9 +235,13 @@ export function runMcpInstallCommand(
     }
 
     lines.push('');
-    lines.push('Re-run with --yes to apply, or use `agentteams mcp config --client <id>` for a manual snippet.');
+    lines.push(
+      scope === 'user'
+        ? 'Re-run with --yes to apply, or use `agentteams mcp config --client <id> --scope user` for a manual snippet.'
+        : 'Choose one client and run `agentteams mcp install --client <id> --scope project`, or use `agentteams mcp config --client <id> --scope project` for a manual snippet.',
+    );
 
-    return { text: lines.join('\n'), json: { scope: 'user', dryRun: true, plan }, exitCode: 0 };
+    return { text: lines.join('\n'), json: { scope, dryRun: true, plan }, exitCode: 0 };
   }
 
   const { plan, results } = runBatchInstall({

@@ -123,7 +123,7 @@ describe('mcp client detection', () => {
       writeFileSync(join(cwd, 'seed.txt'), 'seed\n');
       const before = { ...snapshotTree(home), ...snapshotTree(cwd) };
 
-      const result = run({});
+      const result = run({ scope: 'user' });
 
       expect(result.exitCode).toBe(0);
       expect(result.text).toContain('dry run (no files were changed)');
@@ -138,7 +138,7 @@ describe('mcp client detection', () => {
     });
 
     it('applies only detected clients and reports skips separately when --yes is given', () => {
-      const result = run({ yes: true }, () => ({ status: 0, stdout: 'added', stderr: '' }));
+      const result = run({ yes: true, scope: 'user' }, () => ({ status: 0, stdout: 'added', stderr: '' }));
 
       expect(result.exitCode).toBe(0);
       expect(result.text).toContain('claude-code [INSTALLED]');
@@ -160,7 +160,7 @@ describe('mcp client detection', () => {
         return { status: 0, stdout: 'added', stderr: '' };
       };
 
-      const result = run({ yes: true }, runner);
+      const result = run({ yes: true, scope: 'user' }, runner);
 
       expect(result.exitCode).toBe(1);
       expect(result.text).toContain('claude-code [FAILED]');
@@ -169,17 +169,26 @@ describe('mcp client detection', () => {
       expect(result.text).toContain('Summary: 1 registered, 6 skipped, 1 failed.');
     });
 
-    it('refuses --scope project in batch mode without touching anything', () => {
+    it('plans --scope project in batch mode without touching anything and refuses --yes', () => {
       const before = { ...snapshotTree(home), ...snapshotTree(cwd) };
 
       expect(() => run({ yes: true, scope: 'project' })).toThrow(/does not support --scope project/);
-      expect(() => run({ scope: 'project' })).toThrow(/does not support --scope project/);
+      const result = run({ scope: 'project' }) as {
+        text: string;
+        json: { scope: string; dryRun: boolean; plan: { entries: { scope: string }[] } };
+      };
+
+      expect(result.json.scope).toBe('project');
+      expect(result.json.dryRun).toBe(true);
+      expect(result.json.plan.entries.every((entry) => entry.scope === 'project')).toBe(true);
+      expect(result.text).toContain('project scope');
+      expect(result.text).toContain('no files were changed');
       expect({ ...snapshotTree(home), ...snapshotTree(cwd) }).toEqual(before);
     });
 
     it('never prints the API key in a plan or an applied summary', () => {
       const plan = run({});
-      const applied = run({ yes: true }, () => ({ status: 0, stdout: '', stderr: '' }));
+      const applied = run({ yes: true, scope: 'user' }, () => ({ status: 0, stdout: '', stderr: '' }));
 
       for (const output of [plan, applied]) {
         expect(output.text).not.toContain(credentials.apiKey);

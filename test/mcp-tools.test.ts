@@ -4,6 +4,8 @@ import type { StdioServerHandle } from '@modelcontextprotocol/server/stdio';
 import { connect, discover, initializeLegacy, MODERN_META, TEST_TOOL_CONTEXT } from './helpers/mcp.js';
 
 const { apiUrl, projectId } = TEST_TOOL_CONTEXT;
+const KMA_PROJECT_ID = '78a24ae4-1816-4a04-8466-809686af9113';
+const KMA_COACTION_ID = '019f7d79-29eb-76ae-ac47-fcbb90c66486';
 
 // Shaped after the plan runbook endpoint: `{ data: { plan, tasks, progress } }`
 // with contentMarkdown, V2 task dependencies and progress counters.
@@ -136,6 +138,27 @@ describe('mcp entity read tools', () => {
       expect(JSON.parse(bare.result?.content[0].text)).toEqual(testCase.response);
     },
   );
+
+  it('binds coaction_get to the KMA project URL from its MCP context', async () => {
+    const response = { data: { id: KMA_COACTION_ID, projectId: KMA_PROJECT_ID } };
+    const getSpy = jest.spyOn(axios, 'get').mockResolvedValue({ data: response } as never);
+    const context = { ...TEST_TOOL_CONTEXT, projectId: KMA_PROJECT_ID };
+    const { client, handle } = connect(context);
+    openHandle = handle;
+
+    await discover(client);
+    const call = await client.request('tools/call', {
+      name: 'agentteams_coaction_get',
+      arguments: { id: KMA_COACTION_ID },
+      _meta: MODERN_META,
+    });
+
+    expect(call.result?.isError).toBeFalsy();
+    expect(getSpy).toHaveBeenCalledWith(`${apiUrl}/api/projects/${KMA_PROJECT_ID}/co-actions/${KMA_COACTION_ID}`, {
+      headers: context.headers,
+    });
+    expect(JSON.parse(call.result?.content[0].text)).toEqual(response);
+  });
 
   it('preserves V2 task dependencies and progress in plan_get responses', async () => {
     jest.spyOn(axios, 'get').mockResolvedValue({ data: planRunbookResponse } as never);
