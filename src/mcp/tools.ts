@@ -5,6 +5,7 @@ import {
   type ContextToolSpec,
 } from '@agentteams/context-tools';
 import { getCoAction } from '../api/coaction.js';
+import { getCodeReview } from '../api/codeReview.js';
 import { getConvention, listConventions } from '../api/convention.js';
 import { getDocument } from '../api/document.js';
 import { getPlanRunbook } from '../api/plan.js';
@@ -31,6 +32,7 @@ export function createCliContextToolsClient(context: McpToolContext): ContextToo
     getDocument: (id) => getDocument(apiUrl, projectId, headers, id),
     listConventions: (params) => listConventions(apiUrl, projectId, headers, params),
     getConvention: (id) => getConvention(apiUrl, projectId, headers, id),
+    getCodeReview: (id) => getCodeReview(apiUrl, projectId, headers, id),
   };
 }
 

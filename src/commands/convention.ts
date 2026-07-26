@@ -12,6 +12,7 @@ import { withSpinner } from '../utils/spinner.js';
 import { withoutJsonContentType } from '../utils/httpHeaders.js';
 import { compareVersions, getLatestCliVersion } from '../utils/updateCheck.js';
 import type { Config } from '../types/index.js';
+import { buildAuthHeaders } from '../utils/apiContext.js';
 
 const require = createRequire(import.meta.url);
 const pkg = require('../../package.json') as { version: string };
@@ -118,7 +119,7 @@ function getApiConfigOrThrow(options?: ConventionCommandOptions) {
     config,
     apiUrl: getApiBaseUrl(config.apiUrl),
     headers: {
-      'X-API-Key': config.apiKey,
+      ...buildAuthHeaders(config.apiKey),
       'Content-Type': 'application/json',
     },
   };
@@ -580,7 +581,7 @@ export async function conventionStatus(options?: ConventionCommandOptions): Prom
 
   const apiUrl = getApiBaseUrl(config.apiUrl);
   const headers = {
-    'X-API-Key': config.apiKey,
+    ...buildAuthHeaders(config.apiKey),
     'Content-Type': 'application/json',
   };
 

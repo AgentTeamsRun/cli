@@ -19,10 +19,25 @@ export function buildConfigOverrides(options: Record<string, unknown>): Partial<
   return overrides;
 }
 
+/** Agent API keys are the only credential the server accepts on `X-API-Key`. */
+const AGENT_API_KEY_PREFIX = 'key_';
+
+/**
+ * Pick the header that matches the credential kind.
+ *
+ * The server gates `X-API-Key` on the `key_` prefix and rejects anything else
+ * before it looks the credential up, so a desktop personal access token
+ * (`atp_`) sent that way always fails as "Invalid API key". Personal tokens —
+ * and any other bearer credential — authenticate through `Authorization`.
+ */
+export function buildAuthHeaders(apiKey: string): Record<string, string> {
+  return apiKey.startsWith(AGENT_API_KEY_PREFIX) ? { 'X-API-Key': apiKey } : { Authorization: `Bearer ${apiKey}` };
+}
+
 export function resolveApiContext(config: Config): { apiUrl: string; headers: Record<string, string> } {
   const apiUrl = config.apiUrl.endsWith('/') ? config.apiUrl.slice(0, -1) : config.apiUrl;
   const headers = {
-    'X-API-Key': config.apiKey,
+    ...buildAuthHeaders(config.apiKey),
     'Content-Type': 'application/json',
   };
   return { apiUrl, headers };

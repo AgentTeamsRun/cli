@@ -69,6 +69,13 @@ const ENTITY_GET_CASES = [
     url: `${apiUrl}/api/projects/${projectId}/documents/55555555-5555-7555-8555-555555555555`,
     response: documentResponse,
   },
+  {
+    tool: 'agentteams_codereview_get',
+    prefixedId: 'agentteams_rev_66666666-6666-7666-8666-666666666666',
+    bareId: '66666666-6666-7666-8666-666666666666',
+    url: `${apiUrl}/api/projects/${projectId}/code-reviews/66666666-6666-7666-8666-666666666666`,
+    response: { data: { id: 'code-review-1', title: 'full code review' } },
+  },
 ] as const;
 
 describe('mcp entity read tools', () => {

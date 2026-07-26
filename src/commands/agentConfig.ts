@@ -1,6 +1,7 @@
 import httpClient from '../utils/httpClient.js';
 import { getConfigurationNotFoundMessage, loadConfig } from '../utils/config.js';
 import { withoutJsonContentType } from '../utils/httpHeaders.js';
+import { buildAuthHeaders } from '../utils/apiContext.js';
 
 function getConfigOrThrow() {
   const config = loadConfig();
@@ -12,7 +13,7 @@ function getConfigOrThrow() {
 
 function getHeaders(apiKey: string) {
   return {
-    'X-API-Key': apiKey,
+    ...buildAuthHeaders(apiKey),
     'Content-Type': 'application/json',
   };
 }

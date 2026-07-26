@@ -17,10 +17,11 @@ const expectedContract = [
     properties: ['archived', 'category', 'createdByMemberId', 'page', 'pageSize', 'scope', 'search'],
   },
   { name: 'agentteams_convention_get', required: ['id'], properties: ['id'] },
+  { name: 'agentteams_codereview_get', required: ['id'], properties: ['id'] },
 ];
 
 describe('shared context-tools contract', () => {
-  it('keeps the eight pre-extraction tool names and input shapes unchanged', () => {
+  it('keeps the published tool names and input shapes unchanged', () => {
     const actual = getContextToolSpecs().map((spec) => {
       const schema = z.toJSONSchema(spec.inputSchema) as {
         properties?: Record<string, unknown>;

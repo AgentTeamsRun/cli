@@ -22,6 +22,7 @@ import { withCommandContext } from '../utils/commandContext.js';
 import { conventionDownload } from './convention.js';
 import type { Config } from '../types/index.js';
 import { resolveGitTopLevel, resolveMainCheckoutRoot } from '../utils/git.js';
+import { buildAuthHeaders } from '../utils/apiContext.js';
 import {
   DEFAULT_CONVENTION_REFERENCE,
   ensureConventionEntryPoints,
@@ -232,7 +233,7 @@ async function fetchConventionTemplate(authResult: {
     `${apiUrl}/api/projects/${authResult.projectId}/agent-configs/${authResult.configId}/convention`,
     {
       headers: {
-        'X-API-Key': authResult.apiKey,
+        ...buildAuthHeaders(authResult.apiKey),
         'Content-Type': 'application/json',
       },
     },
