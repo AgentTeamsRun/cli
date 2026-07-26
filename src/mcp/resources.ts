@@ -1,5 +1,5 @@
 import type { McpToolContext } from './context.js';
-import { getToolSpecs, type McpToolSpec } from './tools.js';
+import { createCliContextToolsClient, getToolSpecs, type McpToolSpec } from './tools.js';
 
 /**
  * SDK-agnostic resource-template description. The handler receives the URI
@@ -41,7 +41,7 @@ function createEntityResourceSpec(options: {
     uriTemplate: options.uriTemplate,
     title: options.title,
     description: options.description,
-    handler: (variables, context) => toolSpec.handler({ id: variables.id }, context),
+    handler: (variables, context) => toolSpec.handler({ id: variables.id }, createCliContextToolsClient(context)),
   };
 }
 

@@ -1,28 +1,13 @@
+import { CONTEXT_TOOL_SEARCH_TYPES, type ContextToolSearchType } from '@agentteams/context-tools';
 import { splitCsv } from './parsers.js';
 
 /**
  * Entity types accepted by `GET /api/projects/:projectId/search`.
- * Mirrors the backend's `SearchEntityType` — keep the two in step.
+ * Runtime catalog is owned by `@agentteams/context-tools`.
  */
-export const VALID_TYPES = [
-  'PLAN',
-  'CO_ACTION',
-  'COMPLETION_REPORT',
-  'POST_MORTEM',
-  'CONVENTION',
-  'COMMENT',
-  'CODE_REVIEW',
-  'DOCUMENT',
-  'GITHUB_ISSUE',
-  'GITHUB_PR',
-  'GITLAB_ISSUE',
-  'GITLAB_MERGE_REQUEST',
-  'BITBUCKET_ISSUE',
-  'BITBUCKET_PR',
-  'LINEAR_ISSUE',
-] as const;
+export { CONTEXT_TOOL_SEARCH_TYPES as VALID_TYPES } from '@agentteams/context-tools';
 
-export type SearchEntityType = (typeof VALID_TYPES)[number];
+export type SearchEntityType = ContextToolSearchType;
 
 export interface SearchParamsInput {
   query: string;
@@ -34,9 +19,9 @@ export interface SearchParamsInput {
 /** Parse and validate a comma-separated `--types` value. */
 export function parseSearchTypes(raw: string): string[] {
   const types = splitCsv(raw).map((type) => type.toUpperCase());
-  const invalid = types.filter((type) => !VALID_TYPES.includes(type as SearchEntityType));
+  const invalid = types.filter((type) => !CONTEXT_TOOL_SEARCH_TYPES.includes(type as SearchEntityType));
   if (invalid.length > 0) {
-    throw new Error(`Invalid type(s): ${invalid.join(', ')}. Valid types: ${VALID_TYPES.join(', ')}`);
+    throw new Error(`Invalid type(s): ${invalid.join(', ')}. Valid types: ${CONTEXT_TOOL_SEARCH_TYPES.join(', ')}`);
   }
   return types;
 }

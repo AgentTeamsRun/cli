@@ -6,7 +6,7 @@ const getBaseUrl = (apiUrl: string, projectId: string) => {
   return `${normalizedApiUrl}/api/projects/${projectId}/documents`;
 };
 
-const withParams = (headers: Record<string, string>, params?: Record<string, string | number>) => {
+const withParams = (headers: Record<string, string>, params?: Record<string, string | number | boolean>) => {
   return params && Object.keys(params).length > 0 ? { headers, params } : { headers };
 };
 
@@ -55,7 +55,7 @@ export async function listDocuments(
   apiUrl: string,
   projectId: string,
   headers: Record<string, string>,
-  params?: Record<string, string | number>,
+  params?: Record<string, string | number | boolean>,
 ) {
   const response = await httpClient.get(getBaseUrl(apiUrl, projectId), withParams(headers, params));
   return response.data;

@@ -4,7 +4,7 @@ import { serveStdio, type StdioServerHandle } from '@modelcontextprotocol/server
 import { handleError } from '../utils/errors.js';
 import { resolveMcpToolContext, type McpToolContext } from './context.js';
 import { getResourceSpecs } from './resources.js';
-import { getToolSpecs } from './tools.js';
+import { createCliContextToolsClient, getToolSpecs } from './tools.js';
 
 const require = createRequire(import.meta.url);
 const pkg = require('../../package.json') as { version: string };
@@ -31,6 +31,7 @@ export function createMcpServer(context: McpToolContext, version: string = pkg.v
 
 /** The single `registerTool` loop — tool envelopes are assembled only here. */
 function registerTools(server: McpServer, context: McpToolContext): void {
+  const client = createCliContextToolsClient(context);
   for (const spec of getToolSpecs()) {
     server.registerTool(
       spec.name,
@@ -43,7 +44,7 @@ function registerTools(server: McpServer, context: McpToolContext): void {
         try {
           // The SDK has already validated `args` against `spec.inputSchema`
           // before this callback runs, so the record cast is safe.
-          const result = await spec.handler(args as Record<string, unknown>, context);
+          const result = await spec.handler(args as Record<string, unknown>, client);
           return { content: [{ type: 'text' as const, text: JSON.stringify(result) }] };
         } catch (error) {
           // API failures are reported as a tool error so the connection survives.

@@ -1,3 +1,5 @@
+import { stripContextEntityIdPrefix } from '@agentteams/context-tools';
+
 /**
  * AgentTeams web UI entity references embed a type prefix in the id
  * (e.g. `agentteams_pln_<uuid>`). The CLI and API only accept the bare id,
@@ -10,15 +12,12 @@
  *   agentteams_doc_ (document) · agentteams_rvf_ (codeReviewFinding)
  *   agentteams_tsk_ (planTask)
  */
-const ENTITY_ID_PREFIX = /^agentteams_(?:pln|rpt|rev|act|cnv|pmt|doc|rvf|tsk)_/;
-
 /**
  * Strip a known AgentTeams entity-id prefix from a value. Values without a
  * recognized prefix (bare ids, undefined, non-strings) are returned unchanged.
  */
 export function stripEntityIdPrefix<T>(value: T): T {
-  if (typeof value !== 'string') return value;
-  return value.replace(ENTITY_ID_PREFIX, '') as unknown as T;
+  return stripContextEntityIdPrefix(value);
 }
 
 /**

@@ -1,6 +1,6 @@
 {
   "name": "@agentteams/cli",
-  "version": "0.1.77",
+  "version": "0.1.78",
   "description": "CLI tool for AgentTeams API",
   "type": "module",
   "main": "dist/index.js",
@@ -15,6 +15,9 @@
     "typecheck": "tsc --noEmit",
     "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",
     "test:watch": "node --experimental-vm-modules node_modules/jest/bin/jest.js --watch",
+    "test:file": "node --experimental-vm-modules node_modules/jest/bin/jest.js --runTestsByPath",
+    "test:related": "node --experimental-vm-modules node_modules/jest/bin/jest.js --findRelatedTests",
+    "test:changed": "node --experimental-vm-modules node_modules/jest/bin/jest.js --onlyChanged",
     "lint": "eslint \"src/**/*.ts\" \"test/**/*.ts\" --cache --cache-location .eslintcache --cache-strategy content",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
@@ -39,6 +42,7 @@
     "node": ">=20.12.0"
   },
   "dependencies": {
+    "@agentteams/context-tools": "0.1.0",
     "@clack/prompts": "^1.4.0",
     "@modelcontextprotocol/server": "2.0.0-beta.5",
     "axios": "^1.16.1",
