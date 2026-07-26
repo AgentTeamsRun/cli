@@ -1,13 +1,99 @@
 import { describe, it, expect, jest } from '@jest/globals';
+import { assertMcpProjectBinding } from '../src/mcp/context.js';
+
+const KMA_PROJECT_ID = '78a24ae4-1816-4a04-8466-809686af9113';
+const AGENTTEAMS_PROJECT_ID = '118b8612-2343-424c-a8fb-fa97c618323c';
+
+describe('mcp project binding', () => {
+  it('rejects a user-scoped binding that differs from the local project before tools start', () => {
+    expect(() =>
+      assertMcpProjectBinding({
+        localProjectId: KMA_PROJECT_ID,
+        boundProjectId: AGENTTEAMS_PROJECT_ID,
+        bindingSource: 'user',
+      }),
+    ).toThrow(/project binding mismatch/i);
+  });
+
+  it('accepts a matching project binding and an explicit Desktop binding', () => {
+    expect(() =>
+      assertMcpProjectBinding({
+        localProjectId: KMA_PROJECT_ID,
+        boundProjectId: KMA_PROJECT_ID,
+        bindingSource: 'user',
+      }),
+    ).not.toThrow();
+    expect(() =>
+      assertMcpProjectBinding({
+        localProjectId: AGENTTEAMS_PROJECT_ID,
+        boundProjectId: KMA_PROJECT_ID,
+        bindingSource: 'desktop',
+      }),
+    ).not.toThrow();
+  });
+});
 
 // The config module is mocked so the credential-resolution contract is asserted
 // independently of the machine's project/global `.agentteams/config.json`.
 describe('mcp credential resolution', () => {
+  it('rejects a bound project that differs from the raw repository config', async () => {
+    jest.resetModules();
+    jest.unstable_mockModule('../src/utils/config.js', () => ({
+      __esModule: true,
+      loadConfig: () => ({
+        apiUrl: 'http://localhost:3001',
+        apiKey: 'key_valid',
+        teamId: 'team-agentteams',
+        projectId: AGENTTEAMS_PROJECT_ID,
+      }),
+      loadProjectConfig: () => ({
+        teamId: 'team-kma',
+        projectId: KMA_PROJECT_ID,
+        apiKey: 'key_local',
+      }),
+      getConfigurationNotFoundMessage: () => 'Configuration not found.',
+    }));
+
+    const { resolveMcpToolContext } = await import('../src/commands/mcp.js');
+
+    expect(() => resolveMcpToolContext({})).toThrow(/project binding mismatch/i);
+  });
+
+  it('accepts an explicit Desktop binding even when the Desktop process cwd belongs to another project', async () => {
+    jest.resetModules();
+    jest.unstable_mockModule('../src/utils/config.js', () => ({
+      __esModule: true,
+      loadConfig: () => ({
+        apiUrl: 'http://localhost:3001',
+        apiKey: 'key_valid',
+        teamId: 'team-kma',
+        projectId: KMA_PROJECT_ID,
+      }),
+      loadProjectConfig: () => ({
+        teamId: 'team-agentteams',
+        projectId: AGENTTEAMS_PROJECT_ID,
+        apiKey: 'key_local',
+      }),
+      getConfigurationNotFoundMessage: () => 'Configuration not found.',
+    }));
+    const previousSource = process.env.AGENTTEAMS_MCP_BINDING_SOURCE;
+    process.env.AGENTTEAMS_MCP_BINDING_SOURCE = 'desktop';
+
+    try {
+      const { resolveMcpToolContext } = await import('../src/commands/mcp.js');
+      expect(resolveMcpToolContext({}).projectId).toBe(KMA_PROJECT_ID);
+    } finally {
+      if (previousSource === undefined) delete process.env.AGENTTEAMS_MCP_BINDING_SOURCE;
+      else process.env.AGENTTEAMS_MCP_BINDING_SOURCE = previousSource;
+    }
+  });
+
   it('throws the configuration-not-found message when no credentials resolve', async () => {
     jest.resetModules();
     jest.unstable_mockModule('../src/utils/config.js', () => ({
       __esModule: true,
       loadConfig: () => null,
+      loadProjectConfig: () => null,
       getConfigurationNotFoundMessage: () => 'Configuration not found.',
     }));
 
@@ -27,6 +113,7 @@ describe('mcp credential resolution', () => {
     jest.unstable_mockModule('../src/utils/config.js', () => ({
       __esModule: true,
       loadConfig,
+      loadProjectConfig: () => null,
       getConfigurationNotFoundMessage: () => 'Configuration not found.',
     }));
 
@@ -69,6 +156,7 @@ describe('mcp credential resolution', () => {
         projectId: 'project-1',
         ...overrides,
       }),
+      loadProjectConfig: () => null,
       getConfigurationNotFoundMessage: () => 'Configuration not found.',
     }));
 
@@ -88,6 +176,7 @@ describe('mcp credential resolution', () => {
         teamId: 'team-1',
         projectId: 'project-1',
       }),
+      loadProjectConfig: () => null,
       getConfigurationNotFoundMessage: () => 'Configuration not found.',
     }));
 

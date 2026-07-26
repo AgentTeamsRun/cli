@@ -100,6 +100,13 @@ describe('mcp config output', () => {
   const run = (options: Record<string, unknown> = {}, context = { homeDir: home, cwd, env: {} as NodeJS.ProcessEnv }) =>
     runMcpConfigCommand(options, { credentials, context });
 
+  it('defaults omitted scope to project', () => {
+    const output = run() as { json: { scope: string; clients: { scope: string }[] } };
+
+    expect(output.json.scope).toBe('project');
+    expect(output.json.clients.every((client) => client.scope === 'project')).toBe(true);
+  });
+
   it.each(['user', 'project'] as McpScope[])(
     'renders all three required environment variables for every client at %s scope',
     (scope) => {
@@ -190,10 +197,10 @@ describe('mcp config output', () => {
       env: { CODEX_HOME: codexHome, COPILOT_HOME: copilotHome } as NodeJS.ProcessEnv,
     };
 
-    expect(run({ client: 'codex' }, context).json).toMatchObject({
+    expect(run({ client: 'codex', scope: 'user' }, context).json).toMatchObject({
       clients: [{ configPath: join(codexHome, 'config.toml') }],
     });
-    expect(run({ client: 'copilot-cli' }, context).json).toMatchObject({
+    expect(run({ client: 'copilot-cli', scope: 'user' }, context).json).toMatchObject({
       clients: [{ configPath: join(copilotHome, 'mcp-config.json') }],
     });
   });

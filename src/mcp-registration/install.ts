@@ -228,6 +228,7 @@ export interface BatchPlan {
 export interface BuildBatchPlanOptions {
   context: McpPathContext;
   credentials: McpCredentials;
+  scope?: McpScope;
   detection?: DetectionSignal[];
   detectionDependencies?: Omit<DetectionDependencies, 'context'>;
 }
@@ -237,12 +238,13 @@ export interface BuildBatchPlanOptions {
  * filesystem — the caller prints it and stops unless `--yes` was passed.
  */
 export function buildBatchPlan(options: BuildBatchPlanOptions): BatchPlan {
+  const scope = options.scope ?? 'user';
   const detection =
     options.detection ?? detectClients({ context: options.context, ...(options.detectionDependencies ?? {}) });
 
   const entries = MCP_CLIENTS.map((client) => {
     const signal = detection.find((candidate) => candidate.clientId === client.id);
-    const definition = client.scopes.user;
+    const definition = client.scopes[scope];
     const detected = signal?.detected ?? false;
     const applicable = detected && definition.strategy !== 'configOnly';
 
@@ -256,7 +258,7 @@ export function buildBatchPlan(options: BuildBatchPlanOptions): BatchPlan {
       evidence: signal?.evidence ?? 'none',
       executablePath: signal?.executablePath ?? null,
       configPaths: signal?.configPaths ?? [],
-      scope: 'user' as const,
+      scope,
       strategy: definition.strategy,
       targetPath: definition.configPath(options.context),
       applicable,
@@ -265,7 +267,7 @@ export function buildBatchPlan(options: BuildBatchPlanOptions): BatchPlan {
   });
 
   return {
-    scope: 'user',
+    scope,
     entries,
     binding: { projectId: options.credentials.projectId, teamId: options.credentials.teamId },
   };
@@ -283,7 +285,7 @@ export interface RunBatchInstallOptions extends BuildBatchPlanOptions {
  * the collected outcomes.
  */
 export function runBatchInstall(options: RunBatchInstallOptions): { plan: BatchPlan; results: InstallResult[] } {
-  const plan = buildBatchPlan(options);
+  const plan = buildBatchPlan({ ...options, scope: 'user' });
   const results: InstallResult[] = [];
 
   for (const entry of plan.entries) {

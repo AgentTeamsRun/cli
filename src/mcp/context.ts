@@ -1,4 +1,4 @@
-import { getConfigurationNotFoundMessage, loadConfig } from '../utils/config.js';
+import { getConfigurationNotFoundMessage, loadConfig, loadProjectConfig } from '../utils/config.js';
 import { buildConfigOverrides, resolveApiContext } from '../utils/apiContext.js';
 
 /** Everything a tool handler needs to reach the AgentTeams API. */
@@ -22,6 +22,23 @@ const CREDENTIAL_ENV_HINTS: Record<string, string> = {
   projectId: 'AGENTTEAMS_PROJECT_ID',
   teamId: 'AGENTTEAMS_TEAM_ID',
 };
+
+export const MCP_BINDING_SOURCE_ENV = 'AGENTTEAMS_MCP_BINDING_SOURCE';
+export type McpBindingSource = 'user' | 'explicit' | 'desktop';
+
+export function assertMcpProjectBinding(input: {
+  localProjectId?: string;
+  boundProjectId: string;
+  bindingSource: McpBindingSource;
+}): void {
+  if (!input.localProjectId || input.bindingSource === 'explicit' || input.bindingSource === 'desktop') return;
+  if (input.localProjectId === input.boundProjectId) return;
+
+  throw new Error(
+    `AgentTeams MCP project binding mismatch: local project ${input.localProjectId}, bound project ${input.boundProjectId}. ` +
+      'No tools were started. Re-register this client with project scope from the current repository, or use an explicit project binding.',
+  );
+}
 
 function assertNoUnresolvedPlaceholders(credentials: Record<string, string>): void {
   const offending = Object.entries(credentials)
@@ -55,6 +72,19 @@ export function resolveMcpToolContext(options: Record<string, unknown> = {}): Mc
     apiKey: config.apiKey,
     projectId: config.projectId,
     teamId: config.teamId,
+  });
+
+  const bindingSource: McpBindingSource =
+    typeof options.projectId === 'string'
+      ? 'explicit'
+      : process.env[MCP_BINDING_SOURCE_ENV] === 'desktop'
+        ? 'desktop'
+        : 'user';
+  const localProjectId = loadProjectConfig()?.projectId;
+  assertMcpProjectBinding({
+    localProjectId: typeof localProjectId === 'string' ? localProjectId : undefined,
+    boundProjectId: config.projectId,
+    bindingSource,
   });
 
   const { apiUrl, headers } = resolveApiContext(config);

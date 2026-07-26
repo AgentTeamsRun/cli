@@ -1150,7 +1150,7 @@ const MCP_CLIENT_CHOICES = MCP_CLIENT_IDS.join(', ');
 function addMcpRegistrationOptions(command: Command): Command {
   return command
     .option('--client <id>', `Target client (${MCP_CLIENT_CHOICES})`)
-    .option('--scope <scope>', 'Configuration scope (user, project)', 'user')
+    .option('--scope <scope>', 'Configuration scope (user, project)', 'project')
     .option(
       '--server-entry <path>',
       'Use a local `cli/dist/index.js` instead of the published package (for pre-release testing)',
@@ -1198,10 +1198,10 @@ addMcpRegistrationOptions(
   mcpCommand
     .command('install')
     .description(
-      'Register AgentTeams with local MCP clients. Without --client it only prints a detection plan; --yes applies it at user scope.',
+      'Register AgentTeams with local MCP clients. Without --client it only prints a detection plan; batch apply requires --scope user --yes.',
     ),
 )
-  .option('--yes', 'Apply the detected user-scope plan instead of only printing it', false)
+  .option('--yes', 'Apply an explicitly selected user-scope batch plan instead of only printing it', false)
   .addHelpText('after', CONVENTION_HINT)
   .action((options, command: Command) => runMcpRegistration('install', options, command));
 

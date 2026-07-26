@@ -194,6 +194,19 @@ describe('shared context-tools contract', () => {
     expect(specs.find(({ name }) => name === 'agentteams_search')?.description).toContain('exact filtered count');
   });
 
+  it('describes one shared project binding for every search, list, and get tool', () => {
+    const readSpecs = getContextToolSpecs().filter(
+      ({ name }) => name === 'agentteams_search' || name.endsWith('_list') || name.endsWith('_get'),
+    );
+
+    expect(readSpecs).toHaveLength(18);
+    for (const spec of readSpecs) {
+      expect(spec.description).toContain('project bound to the current MCP server or context client');
+      expect(spec.description).toContain('cannot read another project');
+      expect(spec.description).not.toContain('projectId configured for this CLI');
+    }
+  });
+
   it('matches enum, date, boolean, tag, and pagination boundaries from the API query schemas', () => {
     const schemas = Object.fromEntries(
       getContextToolSpecs().map((spec) => [spec.name, z.toJSONSchema(spec.inputSchema)]),

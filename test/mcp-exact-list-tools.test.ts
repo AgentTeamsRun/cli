@@ -5,6 +5,7 @@ import { connect, discover, MODERN_META, TEST_TOOL_CONTEXT } from './helpers/mcp
 
 const { apiUrl, projectId } = TEST_TOOL_CONTEXT;
 const projectUrl = `${apiUrl}/api/projects/${projectId}`;
+const KMA_PROJECT_ID = '78a24ae4-1816-4a04-8466-809686af9113';
 const listEnvelope = {
   data: [{ id: 'item-1', title: 'metadata only' }],
   meta: { total: 21, page: 2, pageSize: 20, totalPages: 2 },
@@ -224,6 +225,26 @@ describe('mcp exact list and missing detail tools', () => {
       params: 'expectedParams' in testCase ? testCase.expectedParams : testCase.arguments,
     });
     expect(JSON.parse(call.result?.content[0].text)).toEqual(listEnvelope);
+  });
+
+  it('binds coaction_list to the KMA project URL from its MCP context', async () => {
+    const getSpy = jest.spyOn(axios, 'get').mockResolvedValue({ data: listEnvelope } as never);
+    const context = { ...TEST_TOOL_CONTEXT, projectId: KMA_PROJECT_ID };
+    const { client, handle } = connect(context);
+    openHandle = handle;
+
+    await discover(client);
+    const call = await client.request('tools/call', {
+      name: 'agentteams_coaction_list',
+      arguments: { status: 'OPEN', source: 'MANUAL' },
+      _meta: MODERN_META,
+    });
+
+    expect(call.result?.isError).toBeFalsy();
+    expect(getSpy).toHaveBeenCalledWith(`${apiUrl}/api/projects/${KMA_PROJECT_ID}/co-actions`, {
+      headers: context.headers,
+      params: { status: 'OPEN', source: 'MANUAL' },
+    });
   });
 
   it('routes plan, finding, and task comments to their parent-scoped endpoints', async () => {

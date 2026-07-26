@@ -261,6 +261,15 @@ describe('mcp install', () => {
     });
   });
 
+  it('defaults an omitted single-client scope to the project config', () => {
+    const result = install({ client: 'cursor-cli' });
+
+    expect(result.json).toMatchObject({ scope: 'project' });
+    expect(existsSync(join(cwd, '.cursor', 'mcp.json'))).toBe(true);
+    expect(existsSync(join(home, '.cursor', 'mcp.json'))).toBe(false);
+    expect(result.text).not.toContain('machine-wide');
+  });
+
   it('surfaces the user-scope project binding warning', () => {
     const result = install({ client: 'cursor-cli', scope: 'user' });
     expect(result.text).toContain('machine-wide');
