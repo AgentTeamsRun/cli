@@ -112,7 +112,7 @@ const expectedContract = [
   {
     name: 'agentteams_comment_list',
     required: [],
-    properties: ['findingId', 'order', 'page', 'pageSize', 'planId', 'taskId', 'type'],
+    properties: ['documentId', 'findingId', 'order', 'page', 'pageSize', 'planId', 'taskId', 'type'],
   },
   { name: 'agentteams_comment_get', required: ['id'], properties: ['id'] },
   {
@@ -287,10 +287,12 @@ describe('shared context-tools contract', () => {
     const listComments = jest.fn();
     const listFindingComments = jest.fn();
     const listTaskComments = jest.fn(async () => ({ data: [] }));
+    const listDocumentComments = jest.fn();
     const client = {
       listComments,
       listFindingComments,
       listTaskComments,
+      listDocumentComments,
     } as unknown as ContextToolsClient;
 
     await expect(executeContextTool('agentteams_comment_list', {}, client)).rejects.toThrow();
@@ -311,10 +313,40 @@ describe('shared context-tools contract', () => {
 
     expect(listComments).not.toHaveBeenCalled();
     expect(listFindingComments).not.toHaveBeenCalled();
+    expect(listDocumentComments).not.toHaveBeenCalled();
     expect(listTaskComments).toHaveBeenCalledWith('task-1', {
       planId: 'plan-1',
       order: 'desc',
       page: 0,
+    });
+  });
+
+  // 문서 코멘트는 별도 라우트라 부모 분기가 없으면 MCP-first 에이전트가 답글은커녕 코멘트도 못 읽는다.
+  it('routes documentId to the document comment list and rejects mixing it with other parents', async () => {
+    const listComments = jest.fn();
+    const listTaskComments = jest.fn();
+    const listDocumentComments = jest.fn(async () => ({ data: [] }));
+    const client = {
+      listComments,
+      listTaskComments,
+      listDocumentComments,
+    } as unknown as ContextToolsClient;
+
+    await expect(
+      executeContextTool('agentteams_comment_list', { documentId: 'document-1', planId: 'plan-1' }, client),
+    ).rejects.toThrow();
+
+    await executeContextTool(
+      'agentteams_comment_list',
+      { documentId: 'agentteams_doc_document-1', order: 'asc', pageSize: 50 },
+      client,
+    );
+
+    expect(listComments).not.toHaveBeenCalled();
+    expect(listTaskComments).not.toHaveBeenCalled();
+    expect(listDocumentComments).toHaveBeenCalledWith('document-1', {
+      order: 'asc',
+      pageSize: 50,
     });
   });
 

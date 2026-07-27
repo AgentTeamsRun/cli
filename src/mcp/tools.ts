@@ -9,7 +9,7 @@ import { getCoAction, listCoActions } from '../api/coaction.js';
 import { getCodeReview, getCodeReviewFinding, listCodeReviews } from '../api/codeReview.js';
 import { getComment, listComments, listFindingComments, listTaskComments } from '../api/comment.js';
 import { getConvention, listConventions } from '../api/convention.js';
-import { getDocument, listDocuments } from '../api/document.js';
+import { getDocument, listDocumentComments, listDocuments } from '../api/document.js';
 import { getPlanRunbook, listPlans } from '../api/plan.js';
 import { getPostMortem, listPostMortems } from '../api/postmortem.js';
 import { getReport, listReports } from '../api/report.js';
@@ -59,6 +59,8 @@ export function createCliContextToolsClient(context: McpToolContext): ContextToo
       listFindingComments(apiUrl, projectId, headers, findingId, scalarListParams(params)),
     listTaskComments: (taskId, params) =>
       listTaskComments(apiUrl, projectId, headers, taskId, scalarListParams(params)),
+    listDocumentComments: (documentId, params) =>
+      listDocumentComments(apiUrl, projectId, headers, documentId, scalarListParams(params)),
     getComment: (id) => getComment(apiUrl, projectId, headers, id),
     getCodeReviewFinding: (id, codeReviewId) => getCodeReviewFinding(apiUrl, projectId, headers, id, codeReviewId),
   };

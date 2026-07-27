@@ -247,7 +247,7 @@ describe('mcp exact list and missing detail tools', () => {
     });
   });
 
-  it('routes plan, finding, and task comments to their parent-scoped endpoints', async () => {
+  it('routes plan, finding, task, and document comments to their parent-scoped endpoints', async () => {
     const getSpy = jest.spyOn(axios, 'get').mockResolvedValue({ data: listEnvelope } as never);
     const { client, handle } = connect();
     openHandle = handle;
@@ -286,6 +286,16 @@ describe('mcp exact list and missing detail tools', () => {
         url: `${projectUrl}/plans/tasks/task-1/comments`,
         params: { planId: 'plan-1', order: 'desc', page: 2, pageSize: 20 },
       },
+      {
+        arguments: {
+          documentId: 'agentteams_doc_document-1',
+          order: 'asc',
+          page: 1,
+          pageSize: 20,
+        },
+        url: `${projectUrl}/documents/document-1/comments`,
+        params: { order: 'asc', page: 1, pageSize: 20 },
+      },
     ];
 
     for (const testCase of calls) {
@@ -309,6 +319,10 @@ describe('mcp exact list and missing detail tools', () => {
     expect(getSpy).toHaveBeenNthCalledWith(3, calls[2].url, {
       headers: TEST_TOOL_CONTEXT.headers,
       params: calls[2].params,
+    });
+    expect(getSpy).toHaveBeenNthCalledWith(4, calls[3].url, {
+      headers: TEST_TOOL_CONTEXT.headers,
+      params: calls[3].params,
     });
   });
 
