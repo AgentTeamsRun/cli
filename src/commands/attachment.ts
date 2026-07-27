@@ -45,20 +45,24 @@ const resolveContentType = (fileName: string): string => {
 
 const resolveTarget = (
   options: Record<string, unknown>,
-): { targetType: 'codeReview' | 'completionReport'; targetId: string } => {
+): { targetType: 'codeReview' | 'completionReport' | 'document'; targetId: string } => {
   const codeReviewId = optionalString(options.codeReviewId);
   const completionReportId = optionalString(options.completionReportId);
+  const documentId = optionalString(options.documentId);
+  const targets = [
+    codeReviewId ? { targetType: 'codeReview' as const, targetId: codeReviewId } : null,
+    completionReportId ? { targetType: 'completionReport' as const, targetId: completionReportId } : null,
+    documentId ? { targetType: 'document' as const, targetId: documentId } : null,
+  ].filter((target): target is NonNullable<typeof target> => target !== null);
 
-  if (codeReviewId && completionReportId) {
-    throw new Error('Use only one of --code-review-id or --completion-report-id.');
+  if (targets.length > 1) {
+    throw new Error('Use only one of --code-review-id, --completion-report-id, or --document-id.');
   }
-  if (codeReviewId) {
-    return { targetType: 'codeReview', targetId: codeReviewId };
+  const target = targets[0];
+  if (target) {
+    return target;
   }
-  if (completionReportId) {
-    return { targetType: 'completionReport', targetId: completionReportId };
-  }
-  throw new Error('Exactly one of --code-review-id or --completion-report-id is required.');
+  throw new Error('Exactly one of --code-review-id, --completion-report-id, or --document-id is required.');
 };
 
 export async function executeAttachmentCommand(
@@ -68,8 +72,18 @@ export async function executeAttachmentCommand(
   options: Record<string, unknown>,
 ): Promise<unknown> {
   if (action === 'list') {
-    const triggerId = requireString(options.triggerId, '--trigger-id');
-    const response = await axios.get(`${apiUrl}/api/daemon-triggers/${triggerId}/attachments`, { headers });
+    const triggerId = optionalString(options.triggerId);
+    const documentId = optionalString(options.documentId);
+    if (triggerId && documentId) {
+      throw new Error('Use only one of --trigger-id or --document-id.');
+    }
+    if (!triggerId && !documentId) {
+      throw new Error('Exactly one of --trigger-id or --document-id is required.');
+    }
+    const path = documentId
+      ? `/api/documents/${documentId}/attachments`
+      : `/api/daemon-triggers/${triggerId}/attachments`;
+    const response = await axios.get(`${apiUrl}${path}`, { headers });
     return response.data;
   }
 

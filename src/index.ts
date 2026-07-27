@@ -423,9 +423,10 @@ program
 
 program
   .command('attachment')
-  .description('Manage attachments (list trigger attachments, create evidence attachments)')
+  .description('Manage trigger, document, and evidence attachments')
   .argument('<action>', 'Action to perform (list, create)')
   .option('--trigger-id <id>', 'Daemon trigger ID (list)')
+  .option('--document-id <id>', 'Document ID (list or create)')
   .option('--file <path>', 'Local file to upload (create)')
   .option('--code-review-id <id>', 'Attach to this code review (create)')
   .option('--completion-report-id <id>', 'Attach to this completion report (create)')
@@ -442,6 +443,7 @@ program
       const normalizedFormat = normalizeFormat(options.format);
       const result = await executeCommand('attachment', action, {
         triggerId: options.triggerId,
+        documentId: options.documentId,
         file: options.file,
         codeReviewId: options.codeReviewId,
         completionReportId: options.completionReportId,

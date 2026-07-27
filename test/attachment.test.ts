@@ -34,8 +34,24 @@ describe('attachment command', () => {
     expect(result).toEqual({ data: [], meta: { total: 0 } });
   });
 
-  it('list rejects when --trigger-id is missing', async () => {
-    await expect(executeAttachmentCommand(apiUrl, headers, 'list', {})).rejects.toThrow('--trigger-id is required');
+  it('list hits GET /api/documents/:id/attachments', async () => {
+    axiosGetSpy.mockResolvedValueOnce({ data: { data: [], meta: { total: 0 } } } as any);
+
+    const result = await executeAttachmentCommand(apiUrl, headers, 'list', { documentId: 'doc-1' });
+
+    expect(axiosGetSpy).toHaveBeenCalledWith('http://localhost:3001/api/documents/doc-1/attachments', {
+      headers,
+    });
+    expect(result).toEqual({ data: [], meta: { total: 0 } });
+  });
+
+  it('list requires exactly one supported target', async () => {
+    await expect(executeAttachmentCommand(apiUrl, headers, 'list', {})).rejects.toThrow(
+      'Exactly one of --trigger-id or --document-id is required.',
+    );
+    await expect(
+      executeAttachmentCommand(apiUrl, headers, 'list', { triggerId: 'trig-1', documentId: 'doc-1' }),
+    ).rejects.toThrow(/only one/i);
   });
 
   it('create uploads the file to R2 and registers it against a code review', async () => {
@@ -89,6 +105,52 @@ describe('attachment command', () => {
         completionReportId: 'rpt-1',
       }),
     ).rejects.toThrow(/only one/i);
+    await expect(
+      executeAttachmentCommand(apiUrl, headers, 'create', {
+        file: filePath,
+        codeReviewId: 'rev-1',
+        documentId: 'doc-1',
+      }),
+    ).rejects.toThrow(/only one/i);
+  });
+
+  it('create uploads the file to R2 and registers it against a document', async () => {
+    const filePath = writeTempFile('document.md', '# document');
+    const postSpy = jest.spyOn(axios, 'post');
+    const putSpy = jest.spyOn(axios, 'put');
+
+    postSpy.mockResolvedValueOnce({
+      data: { data: { uploadUrl: 'https://r2.example/document?sig=1', key: 'drafts/member-1/document.md' } },
+    } as any);
+    putSpy.mockResolvedValueOnce({ status: 200 } as any);
+    postSpy.mockResolvedValueOnce({ data: { data: { id: 'att-doc-1', documentId: 'doc-1' } } } as any);
+
+    const result = await executeAttachmentCommand(apiUrl, headers, 'create', {
+      file: filePath,
+      documentId: 'doc-1',
+    });
+
+    expect(postSpy).toHaveBeenNthCalledWith(
+      1,
+      'http://localhost:3001/api/attachments/draft-upload-url',
+      { fileName: 'document.md', contentType: 'text/markdown', size: 10 },
+      { headers },
+    );
+    expect(putSpy).toHaveBeenCalledWith('https://r2.example/document?sig=1', expect.any(Buffer), {
+      headers: { 'Content-Type': 'text/markdown' },
+    });
+    expect(postSpy).toHaveBeenNthCalledWith(
+      2,
+      'http://localhost:3001/api/attachments',
+      {
+        targetType: 'document',
+        targetId: 'doc-1',
+        key: 'drafts/member-1/document.md',
+        originalName: 'document.md',
+      },
+      { headers },
+    );
+    expect(result).toEqual({ data: { id: 'att-doc-1', documentId: 'doc-1' } });
   });
 
   it('create requires --file', async () => {
