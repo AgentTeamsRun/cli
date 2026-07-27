@@ -77,6 +77,7 @@ export type ConventionIssueCode =
   | 'link-wrong-target'
   | 'link-occupied'
   | 'link-create-failed'
+  | 'link-backup-retained'
   | 'exclude-read-failed'
   | 'exclude-write-failed'
   | 'exclude-unsafe-path'
@@ -152,7 +153,7 @@ function runGit(args: string[], cwd: string): string | null {
   }
 }
 
-function resolveGitCommonDir(repoDir: string): string | null {
+export function resolveGitCommonDir(repoDir: string): string | null {
   const commonDir = runGit(['rev-parse', '--git-common-dir'], repoDir);
   if (!commonDir) return null;
   return isAbsolute(commonDir) ? resolve(commonDir) : resolve(repoDir, commonDir);
@@ -585,11 +586,35 @@ export function ensureLocalExclude(repoDir: string, patterns: string[]): EnsureL
 }
 
 /**
+ * Decide whether a configured `core.hooksPath` is just the directory git would
+ * have used anyway. A repository that spells its default hooks directory out
+ * explicitly still runs `git-common-dir/hooks`, so treating any non-empty value
+ * as user-managed infrastructure would refuse the install for no reason.
+ *
+ * Relative values resolve against the working tree top level, which is where
+ * git runs hooks from.
+ */
+function isDefaultHooksPath(repoDir: string, commonDir: string, hooksPath: string): boolean {
+  const topLevel = runGit(['rev-parse', '--show-toplevel'], repoDir) ?? repoDir;
+  const configured = isAbsolute(hooksPath) ? resolve(hooksPath) : resolve(topLevel, hooksPath);
+  const defaultPath = join(commonDir, 'hooks');
+
+  if (configured === defaultPath) return true;
+
+  try {
+    return realpathSync(configured) === realpathSync(defaultPath);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Install or refresh the managed `post-checkout` hook in
  * `git-common-dir/hooks`. A hook is only written when no hook exists or the
  * existing hook carries the exact managed marker on its second line. A
- * non-empty `core.hooksPath` or an unmanaged hook blocks installation —
- * silently redirecting user-managed hook infrastructure is never safe.
+ * `core.hooksPath` pointing somewhere other than the default hooks directory,
+ * or an unmanaged hook, blocks installation — silently redirecting
+ * user-managed hook infrastructure is never safe.
  */
 export function ensurePostCheckoutHook(repoDir: string): EnsurePostCheckoutHookResult {
   const commonDir = resolveGitCommonDir(repoDir);
@@ -607,7 +632,7 @@ export function ensurePostCheckoutHook(repoDir: string): EnsurePostCheckoutHookR
   }
 
   const hooksPathConfig = runGit(['config', '--get', 'core.hooksPath'], repoDir);
-  if (hooksPathConfig) {
+  if (hooksPathConfig && !isDefaultHooksPath(repoDir, commonDir, hooksPathConfig)) {
     return {
       status: 'blocked',
       changed: false,
@@ -615,7 +640,7 @@ export function ensurePostCheckoutHook(repoDir: string): EnsurePostCheckoutHookR
       issue: {
         code: 'hook-hookspath',
         path: hooksPathConfig,
-        message: `core.hooksPath is set (${hooksPathConfig}); the managed post-checkout hook cannot take effect.`,
+        message: `core.hooksPath points to ${hooksPathConfig} instead of the default hooks directory; the managed post-checkout hook cannot take effect.`,
       },
     };
   }

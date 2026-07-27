@@ -14,6 +14,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { executeDoctorCommand } from '../src/commands/doctor.js';
+import { resolveDoctorExitCode } from '../src/utils/doctorOutput.js';
 
 const tempDirs: string[] = [];
 
@@ -73,6 +74,7 @@ describe('doctor on a non-git root project', () => {
     const first = await executeDoctorCommand({ cwd: nestedCwd });
 
     expect(first.status).toBe('READY');
+    expect(first.layout).toBe('non-git-root');
     expect(first.applicable).toBe(true);
     expect(realpathSync(first.rootDir!)).toBe(realpathSync(rootDir));
     expect(first.rootEntryPoints).toEqual(['CLAUDE.md', 'AGENTS.md']);
@@ -301,39 +303,137 @@ describe('doctor root preflight failures', () => {
   });
 });
 
-describe('doctor on non-applicable layouts', () => {
-  it('returns NOT_APPLICABLE for a regular git root project and leaves it untouched', async () => {
-    const tempDir = createTempDir();
-    const repoDir = join(tempDir, 'repo');
-    mkdirSync(repoDir, { recursive: true });
-    execFileSync('git', ['init', '-b', 'main'], { cwd: repoDir });
-    writeFileSync(join(repoDir, 'README.md'), '# repo\n', 'utf-8');
-    execFileSync('git', ['add', 'README.md'], { cwd: repoDir });
-    execFileSync(
-      'git',
-      ['-c', 'user.name=AgentTeams Test', '-c', 'user.email=test@agentteams.run', 'commit', '-m', 'initial'],
-      { cwd: repoDir },
-    );
-    mkdirSync(join(repoDir, '.agentteams'), { recursive: true });
-    writeFileSync(
-      join(repoDir, '.agentteams', 'config.json'),
-      JSON.stringify({ teamId: 'team-1', projectId: 'project-1', apiKey: 'api-key-1' }),
-      'utf-8',
-    );
+function createGitRootProject(): string {
+  const repoDir = join(createTempDir(), 'repo');
+  mkdirSync(repoDir, { recursive: true });
+  execFileSync('git', ['init', '-b', 'main'], { cwd: repoDir });
+  writeFileSync(join(repoDir, 'README.md'), '# repo\n', 'utf-8');
+  execFileSync('git', ['add', 'README.md'], { cwd: repoDir });
+  execFileSync(
+    'git',
+    ['-c', 'user.name=AgentTeams Test', '-c', 'user.email=test@agentteams.run', 'commit', '-m', 'initial'],
+    { cwd: repoDir },
+  );
+  mkdirSync(join(repoDir, '.agentteams'), { recursive: true });
+  writeFileSync(
+    join(repoDir, '.agentteams', 'config.json'),
+    JSON.stringify({ teamId: 'team-1', projectId: 'project-1', apiKey: 'api-key-1' }),
+    'utf-8',
+  );
+  writeFileSync(join(repoDir, '.agentteams', 'convention.md'), '# Root convention\n', 'utf-8');
+  return repoDir;
+}
+
+describe('doctor on a git root project', () => {
+  // A git root project has no member repos, so the doctor's only job here is
+  // the worktree bootstrap hook. Without it the hook can only be installed by
+  // re-running the interactive OAuth init, which leaves existing projects
+  // permanently without worktree convention bootstrap.
+  it('installs the worktree bootstrap hook and reports zero changes on the second run', async () => {
+    const repoDir = createGitRootProject();
+
+    const first = await executeDoctorCommand({ cwd: repoDir });
+
+    expect(first.applicable).toBe(true);
+    expect(first.layout).toBe('git-root');
+    expect(first.status).toBe('READY');
+    expect(first.changedCount).toBeGreaterThan(0);
+    const hookPath = join(repoDir, '.git', 'hooks', 'post-checkout');
+    expect(existsSync(hookPath)).toBe(true);
+    expect(readFileSync(hookPath, 'utf-8').split(/\r?\n/)[1]).toBe('# AgentTeams managed post-checkout hook');
+
+    const second = await executeDoctorCommand({ cwd: repoDir });
+
+    expect(second.status).toBe('READY');
+    expect(second.changedCount).toBe(0);
+  });
+
+  it('leaves member repo management alone for a git root project', async () => {
+    const repoDir = createGitRootProject();
     const excludeBefore = readFileSync(join(repoDir, '.git', 'info', 'exclude'), 'utf-8');
 
     const result = await executeDoctorCommand({ cwd: repoDir });
 
-    expect(result.status).toBe('NOT_APPLICABLE');
-    expect(result.applicable).toBe(false);
-    expect(result.changedCount).toBe(0);
     expect(result.repositories).toEqual([]);
-    expect(result.issues.map((issue) => issue.code)).toContain('git-root-project');
     expect(readFileSync(join(repoDir, '.git', 'info', 'exclude'), 'utf-8')).toBe(excludeBefore);
-    expect(existsSync(join(repoDir, '.git', 'hooks', 'post-checkout'))).toBe(false);
     expect(lstatSync(join(repoDir, '.agentteams')).isDirectory()).toBe(true);
   });
 
+  // A user's own hook infrastructure is not a project defect: the doctor
+  // reports the manual fallback and keeps the exit code a git root project has
+  // always returned, so scripts and CI that call it do not turn permanently red.
+  it('never overwrites an unmanaged post-checkout hook and still exits 0', async () => {
+    const repoDir = createGitRootProject();
+    const hookPath = join(repoDir, '.git', 'hooks', 'post-checkout');
+    const customHook = '#!/bin/sh\n# my own hook\nexit 0\n';
+    writeFileSync(hookPath, customHook, 'utf-8');
+
+    const result = await executeDoctorCommand({ cwd: repoDir });
+
+    expect(readFileSync(hookPath, 'utf-8')).toBe(customHook);
+    expect(result.status).toBe('READY');
+    expect(result.rootHook).toBe('blocked');
+    expect(resolveDoctorExitCode(result)).toBe(0);
+    const issue = result.issues.find((candidate) => candidate.code === 'hook-custom');
+    expect(issue?.severity).toBe('info');
+    expect(issue?.message).toContain('agentteams init');
+  });
+
+  it('exits 0 and points at the manual fallback when core.hooksPath is user managed', async () => {
+    const repoDir = createGitRootProject();
+    const customHooksDir = join(repoDir, '.husky');
+    mkdirSync(customHooksDir);
+    execFileSync('git', ['config', 'core.hooksPath', customHooksDir], { cwd: repoDir });
+
+    const result = await executeDoctorCommand({ cwd: repoDir });
+
+    expect(result.status).toBe('READY');
+    expect(result.rootHook).toBe('blocked');
+    expect(resolveDoctorExitCode(result)).toBe(0);
+    expect(result.issues.find((candidate) => candidate.code === 'hook-hookspath')?.severity).toBe('info');
+    expect(existsSync(join(repoDir, '.git', 'hooks', 'post-checkout'))).toBe(false);
+    expect(existsSync(join(customHooksDir, 'post-checkout'))).toBe(false);
+  });
+
+  // core.hooksPath set to the directory git would have used anyway — spelling
+  // the default out changes nothing about where hooks run, so refusing the
+  // install would deny the feature for no reason. This repository itself has
+  // that configuration.
+  it('installs the hook when core.hooksPath is the default hooks directory', async () => {
+    const repoDir = createGitRootProject();
+    const hookPath = join(repoDir, '.git', 'hooks', 'post-checkout');
+    execFileSync('git', ['config', 'core.hooksPath', join(repoDir, '.git', 'hooks')], { cwd: repoDir });
+
+    const absolute = await executeDoctorCommand({ cwd: repoDir });
+
+    expect(absolute.status).toBe('READY');
+    expect(absolute.rootHook).toBe('ready');
+    expect(readFileSync(hookPath, 'utf-8').split(/\r?\n/)[1]).toBe('# AgentTeams managed post-checkout hook');
+
+    rmSync(hookPath);
+    execFileSync('git', ['config', 'core.hooksPath', '.git/hooks'], { cwd: repoDir });
+
+    const relative = await executeDoctorCommand({ cwd: repoDir });
+
+    expect(relative.status).toBe('READY');
+    expect(relative.rootHook).toBe('ready');
+    expect(existsSync(hookPath)).toBe(true);
+  });
+
+  it('reports the git root layout when the diagnosis stops at preflight', async () => {
+    const repoDir = createGitRootProject();
+    writeFileSync(join(repoDir, '.agentteams', 'config.json'), 'not json', 'utf-8');
+
+    const result = await executeDoctorCommand({ cwd: repoDir });
+
+    expect(result.layout).toBe('git-root');
+    expect(result.status).toBe('DEGRADED');
+    expect(result.rootHook).toBe('skipped');
+    expect(result.issues.map((issue) => issue.code)).toContain('root-config-invalid');
+  });
+});
+
+describe('doctor on non-applicable layouts', () => {
   it('returns NOT_APPLICABLE when no project config exists', async () => {
     const plainDir = createTempDir();
 
