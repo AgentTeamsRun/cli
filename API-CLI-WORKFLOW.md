@@ -103,6 +103,12 @@ agentteams plan list
 
 `agentteams doctor`는 각 멤버 저장소의 `.agentteams`가 루트 `.agentteams`를 가리키도록 심볼릭 링크를 만들고, 관련 git exclude와 checkout hook을 준비합니다. 이후 CLI를 멤버 저장소 안에서 실행하면 링크를 통해 프로젝트 config를 찾는 동시에 해당 저장소의 git `origin`도 자동 감지합니다.
 
+### git 루트 프로젝트에서의 doctor
+
+프로젝트 루트 자체가 git 저장소인 구성에서는 멤버 저장소가 없으므로, `agentteams doctor`는 워크트리 부트스트랩 훅(`post-checkout`)을 점검하고 없으면 **설치**합니다. 즉 진단 전용 읽기 명령이 아니라 git 메타데이터에 쓰는 명령입니다. 훅이 준비되면 이후 `git worktree add`로 만든 워크트리가 자동으로 `agentteams init`을 실행해 컨벤션을 연결합니다.
+
+훅을 설치할 수 없는 경우(이미 사용자 소유 `post-checkout` 훅이 있거나 `core.hooksPath`가 기본 훅 디렉터리가 아닌 곳을 가리킬 때)는 사용자의 훅 설정이므로 결함으로 보지 않습니다. 안내 메시지와 함께 종료 코드 0을 유지하며, 각 워크트리에서 `agentteams init`을 직접 실행하는 폴백을 사용하세요. 루트 config/컨벤션 자체가 깨진 경우에만 `DEGRADED`(종료 코드 1)로 보고합니다.
+
 git 저장소 안에서 config를 찾을 때는 저장소 최상위를 넘지 않습니다. 이 경계는 무관한 부모 프로젝트 또는 `$HOME`의 config를 조용히 가져오는 것을 막기 위한 안전장치입니다. 멤버 저장소에서 config를 찾지 못했지만 비-git 상위 워크스페이스의 config가 감지되면, 오류 메시지가 워크스페이스 루트에서 `agentteams doctor`를 실행하도록 안내합니다.
 
 `code-review create`에서 `--repository-remote-url`을 생략했는데 현재 위치에서 git `origin`을 감지하지 못하면 리뷰 생성은 계속되지만 stderr에 경고가 출력됩니다. 이 경우 멤버 저장소 안에서 다시 실행하거나 `--repository-remote-url <url>`을 명시하세요. 의도적으로 git 자동 감지를 끄려면 `--no-git`을 사용합니다.

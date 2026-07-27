@@ -107,7 +107,7 @@ program
 
 program
   .command('doctor')
-  .description('Diagnose and prepare convention reachability for non-git root projects')
+  .description('Diagnose convention reachability and install the worktree bootstrap hook')
   .option('--format <format>', 'Output format (json; defaults to human-readable view)')
   .addHelpText('after', CONVENTION_HINT)
   .action(async (options) => {

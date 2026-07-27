@@ -8,6 +8,7 @@ function captureOutput(spy: ReturnType<typeof jest.spyOn>): string {
 
 const READY_RESULT: DoctorResult = {
   status: 'READY',
+  layout: 'non-git-root',
   applicable: true,
   changedCount: 3,
   rootDir: '/projects/kma',
@@ -25,6 +26,7 @@ const READY_RESULT: DoctorResult = {
       issues: [],
     },
   ],
+  rootHook: 'skipped',
   issues: [
     {
       code: 'daemon-worktree-unsupported',
@@ -70,18 +72,80 @@ const DEGRADED_RESULT: DoctorResult = {
 
 const NOT_APPLICABLE_RESULT: DoctorResult = {
   status: 'NOT_APPLICABLE',
+  layout: 'unknown',
   applicable: false,
   changedCount: 0,
+  rootDir: null,
+  rootEntryPoints: [],
+  missingRecommendedEntryPoints: [],
+  repositories: [],
+  rootHook: 'skipped',
+  issues: [
+    {
+      code: 'no-project-config',
+      path: '/projects/plain-dir',
+      message: "No .agentteams/config.json was found from /projects/plain-dir. Run 'agentteams init' first.",
+      severity: 'info',
+    },
+  ],
+};
+
+const GIT_ROOT_READY_RESULT: DoctorResult = {
+  status: 'READY',
+  layout: 'git-root',
+  applicable: true,
+  changedCount: 1,
   rootDir: '/projects/regular-repo',
   rootEntryPoints: [],
   missingRecommendedEntryPoints: [],
   repositories: [],
+  rootHook: 'ready',
+  issues: [],
+};
+
+const GIT_ROOT_USER_HOOK_RESULT: DoctorResult = {
+  ...GIT_ROOT_READY_RESULT,
+  changedCount: 0,
+  rootHook: 'blocked',
   issues: [
     {
-      code: 'git-root-project',
-      path: '/projects/regular-repo',
-      message: '/projects/regular-repo is a git repository root project.',
+      code: 'hook-custom',
+      path: '/projects/regular-repo/.git/hooks/post-checkout',
+      message:
+        "An unmanaged post-checkout hook exists; not overwriting it. Run 'agentteams init' from the root of each new worktree instead.",
       severity: 'info',
+    },
+  ],
+};
+
+const GIT_ROOT_BLOCKED_RESULT: DoctorResult = {
+  ...GIT_ROOT_READY_RESULT,
+  status: 'DEGRADED',
+  changedCount: 0,
+  rootHook: 'blocked',
+  issues: [
+    {
+      code: 'hook-write-failed',
+      path: '/projects/regular-repo/.git/hooks/post-checkout',
+      message: 'Could not install /projects/regular-repo/.git/hooks/post-checkout: EACCES',
+      severity: 'error',
+    },
+  ],
+};
+
+// Preflight stopped before the hook was reached, so `rootHook` says nothing
+// about the layout — the member repository view must still stay out of it.
+const GIT_ROOT_PREFLIGHT_FAILURE_RESULT: DoctorResult = {
+  ...GIT_ROOT_READY_RESULT,
+  status: 'DEGRADED',
+  changedCount: 0,
+  rootHook: 'skipped',
+  issues: [
+    {
+      code: 'root-config-invalid',
+      path: '/projects/regular-repo/.agentteams/config.json',
+      message: 'The root config at /projects/regular-repo/.agentteams/config.json is not valid JSON.',
+      severity: 'error',
     },
   ],
 };
@@ -144,7 +208,36 @@ describe('printDoctorResult', () => {
 
       const output = captureOutput(logSpy);
       expect(output).toContain('Status: NOT_APPLICABLE');
-      expect(output).toContain('[git-root-project]');
+      expect(output).toContain('[no-project-config]');
+    });
+
+    it('reports the bootstrap hook instead of member repositories for a git root project', () => {
+      printDoctorResult(GIT_ROOT_READY_RESULT, 'human');
+
+      const output = captureOutput(logSpy);
+      expect(output).toContain('Status: READY');
+      expect(output).toContain('Worktree bootstrap hook: ready');
+      expect(output).not.toContain('Member repositories');
+      expect(output).not.toContain('Root entry points');
+    });
+
+    it('reports a hook that could not be installed with its issue code and the manual fallback', () => {
+      printDoctorResult(GIT_ROOT_USER_HOOK_RESULT, 'human');
+
+      const output = captureOutput(logSpy);
+      expect(output).toContain('Worktree bootstrap hook: not installed');
+      expect(output).toContain("run 'agentteams init' inside each new worktree");
+      expect(output).toContain('[hook-custom]');
+    });
+
+    it('keeps the git root view when the diagnosis stopped at preflight', () => {
+      printDoctorResult(GIT_ROOT_PREFLIGHT_FAILURE_RESULT, 'human');
+
+      const output = captureOutput(logSpy);
+      expect(output).toContain('[root-config-invalid]');
+      expect(output).not.toContain('Worktree bootstrap hook');
+      expect(output).not.toContain('Member repositories');
+      expect(output).not.toContain('Root entry points');
     });
   });
 });
@@ -154,5 +247,18 @@ describe('resolveDoctorExitCode', () => {
     expect(resolveDoctorExitCode(READY_RESULT)).toBe(0);
     expect(resolveDoctorExitCode(NOT_APPLICABLE_RESULT)).toBe(0);
     expect(resolveDoctorExitCode(DEGRADED_RESULT)).toBe(1);
+  });
+
+  // A git root project used to always exit 0 via NOT_APPLICABLE. It still does
+  // whenever the doctor simply has nothing to install — only a genuine defect
+  // (an unwritable hook path, an invalid root config) turns the exit code to 1.
+  it('exits 0 for a ready git root project and for a user-managed hook setup', () => {
+    expect(resolveDoctorExitCode(GIT_ROOT_READY_RESULT)).toBe(0);
+    expect(resolveDoctorExitCode(GIT_ROOT_USER_HOOK_RESULT)).toBe(0);
+  });
+
+  it('exits 1 when a git root project cannot be diagnosed or its hook cannot be written', () => {
+    expect(resolveDoctorExitCode(GIT_ROOT_BLOCKED_RESULT)).toBe(1);
+    expect(resolveDoctorExitCode(GIT_ROOT_PREFLIGHT_FAILURE_RESULT)).toBe(1);
   });
 });

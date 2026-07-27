@@ -38,6 +38,7 @@ function isWorktreeInitResult(result: unknown): result is WorktreeInitResult {
     typeof r.targetPath === 'string' &&
     (r.materialization === 'symlink' ||
       r.materialization === 'copy' ||
+      r.materialization === 'relinked' ||
       r.materialization === 'existing' ||
       r.materialization === 'blocked')
   );
@@ -58,6 +59,8 @@ export function printInitResult(result: unknown, format: InitOutputFormat): void
       console.warn(`⚠ .agentteams was not created because local exclude is blocked: ${result.targetPath}`);
     } else if (result.materialization === 'existing') {
       console.log(`✓ .agentteams already exists: ${result.targetPath}`);
+    } else if (result.materialization === 'relinked') {
+      console.log(`✓ Replaced a copied .agentteams with a link to the main checkout: ${result.targetPath}`);
     } else if (result.materialization === 'copy') {
       console.log(`✓ Copied .agentteams into the worktree: ${result.targetPath}`);
     } else {

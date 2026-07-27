@@ -24,7 +24,18 @@ const CONVENTION_FILE = 'convention.md';
 const ENTRY_POINT_ALLOWLIST = ['CLAUDE.md', 'AGENTS.md', 'GEMINI.md', '.cursor/rules/agentteams.mdc'] as const;
 const RECOMMENDED_ENTRY_POINTS = ['CLAUDE.md', 'AGENTS.md'] as const;
 
+// Hook installation blocked by the user's own hook setup, not by a defect the
+// doctor can or should repair.
+const USER_HOOK_CONFIG_CODES = new Set<string>(['hook-hookspath', 'hook-custom']);
+
 export type DoctorStatus = 'READY' | 'DEGRADED' | 'NOT_APPLICABLE';
+
+/**
+ * Which project layout the diagnosis ran against. Output and readiness rules
+ * differ per layout, so this — not a derived field such as `rootHook` — is what
+ * consumers branch on.
+ */
+export type DoctorLayout = 'git-root' | 'non-git-root' | 'unknown';
 
 export interface DoctorIssue {
   code: string;
@@ -51,12 +62,20 @@ export interface DoctorRepositoryResult {
 
 export interface DoctorResult {
   status: DoctorStatus;
+  layout: DoctorLayout;
   applicable: boolean;
   changedCount: number;
   rootDir: string | null;
   rootEntryPoints: string[];
   missingRecommendedEntryPoints: string[];
   repositories: DoctorRepositoryResult[];
+  /**
+   * State of the worktree bootstrap hook on the convention root itself. Only a
+   * git root project has one — a non-git root has no git-common dir and its
+   * hooks live per member repo (`DoctorRepositoryResult.hook`), so it reports
+   * `skipped`.
+   */
+  rootHook: 'ready' | 'blocked' | 'skipped';
   issues: DoctorIssue[];
 }
 
@@ -76,13 +95,73 @@ function pathEntryExists(path: string): boolean {
 function notApplicableResult(rootDir: string | null, issue: DoctorIssue): DoctorResult {
   return {
     status: 'NOT_APPLICABLE',
+    layout: 'unknown',
     applicable: false,
     changedCount: 0,
     rootDir,
     rootEntryPoints: [],
     missingRecommendedEntryPoints: [],
     repositories: [],
+    rootHook: 'skipped',
     issues: [issue],
+  };
+}
+
+/**
+ * A git root project has no member repos to manage, but it does own the
+ * worktree bootstrap hook that makes `git worktree add` materialize
+ * conventions. That hook was previously reachable only from the interactive
+ * OAuth `init`, so any project configured before it existed had no way to get
+ * one. Installing it here is the doctor's whole job for this layout — member
+ * repo management (exclude, link, entry points) stays out of it.
+ *
+ * A project whose hook infrastructure the CLI must not touch is not a broken
+ * project: it keeps exit 0 (the code a git root project has always returned)
+ * and is told to use the manual per-worktree `agentteams init` fallback.
+ */
+function runGitRootDoctor(rootDir: string): DoctorResult {
+  const preflightIssues = validateRootPreflight(rootDir);
+  if (preflightIssues.length > 0) {
+    return {
+      status: 'DEGRADED',
+      layout: 'git-root',
+      applicable: true,
+      changedCount: 0,
+      rootDir,
+      rootEntryPoints: [],
+      missingRecommendedEntryPoints: [],
+      repositories: [],
+      rootHook: 'skipped',
+      issues: preflightIssues,
+    };
+  }
+
+  const hookResult = ensurePostCheckoutHook(rootDir);
+  const blockedByUserHookConfig =
+    hookResult.status === 'blocked' && USER_HOOK_CONFIG_CODES.has(hookResult.issue?.code ?? '');
+  const issues: DoctorIssue[] = hookResult.issue
+    ? [
+        blockedByUserHookConfig
+          ? {
+              ...hookResult.issue,
+              message: `${hookResult.issue.message} Run 'agentteams init' from the root of each new worktree instead.`,
+              severity: 'info' as const,
+            }
+          : { ...hookResult.issue, severity: 'error' as const },
+      ]
+    : [];
+
+  return {
+    status: hookResult.status === 'ready' || blockedByUserHookConfig ? 'READY' : 'DEGRADED',
+    layout: 'git-root',
+    applicable: true,
+    changedCount: hookResult.changed ? 1 : 0,
+    rootDir,
+    rootEntryPoints: [],
+    missingRecommendedEntryPoints: [],
+    repositories: [],
+    rootHook: hookResult.status,
+    issues,
   };
 }
 
@@ -241,12 +320,7 @@ function runDoctor(options?: DoctorOptions): DoctorResult {
   }
 
   if (!isNonGitRootProject(rootDir)) {
-    return notApplicableResult(rootDir, {
-      code: 'git-root-project',
-      path: rootDir,
-      message: `${rootDir} is a git repository root project; the doctor only manages non-git root projects.`,
-      severity: 'info',
-    });
+    return runGitRootDoctor(rootDir);
   }
 
   const issues: DoctorIssue[] = [];
@@ -255,12 +329,14 @@ function runDoctor(options?: DoctorOptions): DoctorResult {
   if (preflightIssues.length > 0) {
     return {
       status: 'DEGRADED',
+      layout: 'non-git-root',
       applicable: true,
       changedCount: 0,
       rootDir,
       rootEntryPoints: [],
       missingRecommendedEntryPoints: [],
       repositories: [],
+      rootHook: 'skipped',
       issues: preflightIssues,
     };
   }
@@ -312,12 +388,15 @@ function runDoctor(options?: DoctorOptions): DoctorResult {
 
   return {
     status: degraded ? 'DEGRADED' : 'READY',
+    layout: 'non-git-root',
     applicable: true,
     changedCount: repositories.reduce((sum, repo) => sum + repo.changedCount, 0),
     rootDir,
     rootEntryPoints: [...rootEntryPoints],
     missingRecommendedEntryPoints: [...missingRecommendedEntryPoints],
     repositories,
+    // Hooks for this layout are installed per member repo, not on the root.
+    rootHook: 'skipped',
     issues,
   };
 }
