@@ -11,6 +11,7 @@ import type { McpPathContext } from '../src/mcp-registration/types.js';
 import type { VendorCommandResult, VendorRunner } from '../src/mcp-registration/vendorCommand.js';
 
 const CANARY_API_KEY = 'key_canary_2b91f4ad6c07e358_never_print_me';
+const isPosix = process.platform !== 'win32';
 
 const credentials: McpCredentials = {
   apiKey: CANARY_API_KEY,
@@ -83,8 +84,10 @@ describe('mcp install', () => {
       expect(readFileSync(cursorUserConfig(), 'utf-8')).toEqual(afterFirst);
       expect(Object.keys(servers())).toHaveLength(2);
 
-      expect(statSync(cursorUserConfig()).mode & 0o777).toBe(0o600);
-      expect(statSync(`${cursorUserConfig()}${BACKUP_SUFFIX}`).mode & 0o777).toBe(0o644);
+      if (isPosix) {
+        expect(statSync(cursorUserConfig()).mode & 0o777).toBe(0o600);
+        expect(statSync(`${cursorUserConfig()}${BACKUP_SUFFIX}`).mode & 0o777).toBe(0o644);
+      }
       expect(existsSync(`${cursorUserConfig()}${BACKUP_SUFFIX}`)).toBe(true);
     });
 
@@ -92,7 +95,10 @@ describe('mcp install', () => {
       const result = install({ client: 'cursor-cli', scope: 'user' });
 
       expect(result.text).toContain('[INSTALLED]');
-      expect(statSync(cursorUserConfig()).mode & 0o777).toBe(0o600);
+      if (isPosix) {
+        expect(statSync(cursorUserConfig()).mode & 0o777).toBe(0o600);
+      }
+      expect(readFileSync(cursorUserConfig(), 'utf-8')).toContain(CANARY_API_KEY);
       expect(existsSync(`${cursorUserConfig()}${BACKUP_SUFFIX}`)).toBe(false);
       expect(result.text).not.toContain('Backup:');
     });
@@ -155,7 +161,7 @@ describe('mcp install', () => {
       expect(existsSync(`${cursorUserConfig()}${BACKUP_SUFFIX}`)).toBe(false);
     });
 
-    it('leaves the original intact when the target directory is read-only', () => {
+    (isPosix ? it : it.skip)('leaves the original intact when a POSIX target directory is read-only', () => {
       const directory = join(home, '.cursor');
       mkdirSync(directory, { recursive: true });
       writeFileSync(cursorUserConfig(), '{\n  "mcpServers": {}\n}\n', 'utf-8');

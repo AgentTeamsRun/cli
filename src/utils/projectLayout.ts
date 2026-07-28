@@ -1,6 +1,7 @@
-import { existsSync, readdirSync, realpathSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { resolveGitTopLevel } from './git.js';
+import { canonicalizePath } from './path.js';
 
 const CONFIG_DIR = '.agentteams';
 const CONFIG_FILE = 'config.json';
@@ -53,7 +54,7 @@ export function findMemberRepos(rootDir: string): string[] {
 
     let canonical: string;
     try {
-      canonical = realpathSync(candidate);
+      canonical = canonicalizePath(candidate);
     } catch {
       continue;
     }
@@ -62,7 +63,7 @@ export function findMemberRepos(rootDir: string): string[] {
     // inside some other repository's work tree.
     if (canonical !== topLevel) continue;
 
-    members.push(candidate);
+    members.push(canonical);
   }
 
   return members.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));

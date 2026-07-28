@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { findMemberRepos, isNonGitRootProject } from '../src/utils/projectLayout.js';
+import { canonicalizePath } from '../src/utils/path.js';
 
 const tempDirs: string[] = [];
 
@@ -86,7 +87,8 @@ describe('findMemberRepos', () => {
     createGitRepository(join(rootDir, '.hidden-repo'));
     createGitRepository(join(rootDir, 'node_modules'));
 
-    expect(findMemberRepos(rootDir)).toEqual([join(rootDir, 'alpha'), join(rootDir, 'beta')]);
+    const canonicalRoot = canonicalizePath(rootDir);
+    expect(findMemberRepos(rootDir)).toEqual([join(canonicalRoot, 'alpha'), join(canonicalRoot, 'beta')]);
   });
 
   it('does not scan recursively below depth 1', () => {

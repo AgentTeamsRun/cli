@@ -1,5 +1,6 @@
 import * as childProcess from 'node:child_process';
 import { basename, dirname, isAbsolute, resolve } from 'node:path';
+import { canonicalizePath } from './path.js';
 
 export interface GitMetrics {
   commitHash?: string;
@@ -59,7 +60,11 @@ export function resolveMainCheckoutRoot(
   const absoluteGitDir = isAbsolute(gitDir) ? resolve(gitDir) : resolve(cwd, gitDir);
   if (absoluteCommonDir === absoluteGitDir || basename(absoluteCommonDir) !== '.git') return null;
 
-  return dirname(absoluteCommonDir);
+  try {
+    return canonicalizePath(dirname(absoluteCommonDir));
+  } catch {
+    return dirname(absoluteCommonDir);
+  }
 }
 
 export function resolveGitTopLevel(
@@ -69,7 +74,11 @@ export function resolveGitTopLevel(
   const topLevel = runGit(execFileSyncImpl, ['rev-parse', '--show-toplevel'], cwd);
   if (!topLevel) return null;
 
-  return isAbsolute(topLevel) ? resolve(topLevel) : resolve(cwd, topLevel);
+  try {
+    return canonicalizePath(isAbsolute(topLevel) ? topLevel : resolve(cwd, topLevel));
+  } catch {
+    return isAbsolute(topLevel) ? resolve(topLevel) : resolve(cwd, topLevel);
+  }
 }
 
 function runGit(execFileSyncImpl: ExecFileSyncFn, args: string[], cwd?: string): string | undefined {

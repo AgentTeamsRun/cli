@@ -17,6 +17,7 @@ import {
 } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { isSamePath } from './path.js';
 
 const CONFIG_DIR = '.agentteams';
 
@@ -416,13 +417,7 @@ export function inspectConventionLink(rootDir: string, repoDir: string): Convent
   if (!stats.isSymbolicLink()) return 'occupied';
   if (!existsSync(linkPath)) return 'broken';
 
-  try {
-    const canonicalTarget = realpathSync(linkPath);
-    const canonicalRoot = realpathSync(join(rootDir, CONFIG_DIR));
-    return canonicalTarget === canonicalRoot ? 'ready' : 'wrong-target';
-  } catch {
-    return 'broken';
-  }
+  return isSamePath(linkPath, join(rootDir, CONFIG_DIR)) ? 'ready' : 'wrong-target';
 }
 
 /**
@@ -599,13 +594,7 @@ function isDefaultHooksPath(repoDir: string, commonDir: string, hooksPath: strin
   const configured = isAbsolute(hooksPath) ? resolve(hooksPath) : resolve(topLevel, hooksPath);
   const defaultPath = join(commonDir, 'hooks');
 
-  if (configured === defaultPath) return true;
-
-  try {
-    return realpathSync(configured) === realpathSync(defaultPath);
-  } catch {
-    return false;
-  }
+  return configured === defaultPath || isSamePath(configured, defaultPath);
 }
 
 /**
