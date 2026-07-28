@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from '@jest/globals';
 import { execFileSync } from 'node:child_process';
 import {
+  chmodSync,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -8,12 +9,14 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { executeDoctorCommand } from '../src/commands/doctor.js';
+import { CONFIG_FILE_MODE } from '../src/utils/config.js';
 import { resolveDoctorExitCode } from '../src/utils/doctorOutput.js';
 import { canonicalizePath, isSamePath } from '../src/utils/path.js';
 
@@ -31,7 +34,9 @@ function createRoot(options?: { entryPoints?: string[]; configBody?: string; ski
   writeFileSync(
     join(rootDir, '.agentteams', 'config.json'),
     options?.configBody ?? JSON.stringify({ teamId: 'team-1', projectId: 'project-1', apiKey: 'secret-api-key-1' }),
-    'utf-8',
+    // Matches what `saveConfig` now writes, so change counts stay about the
+    // layout work these tests are actually asserting.
+    { encoding: 'utf-8', mode: CONFIG_FILE_MODE },
   );
   if (!options?.skipConvention) {
     writeFileSync(join(rootDir, '.agentteams', 'convention.md'), '# Root convention\n', 'utf-8');
@@ -319,7 +324,7 @@ function createGitRootProject(): string {
   writeFileSync(
     join(repoDir, '.agentteams', 'config.json'),
     JSON.stringify({ teamId: 'team-1', projectId: 'project-1', apiKey: 'api-key-1' }),
-    'utf-8',
+    { encoding: 'utf-8', mode: CONFIG_FILE_MODE },
   );
   writeFileSync(join(repoDir, '.agentteams', 'convention.md'), '# Root convention\n', 'utf-8');
   return repoDir;
@@ -431,6 +436,66 @@ describe('doctor on a git root project', () => {
     expect(result.status).toBe('DEGRADED');
     expect(result.rootHook).toBe('skipped');
     expect(result.issues.map((issue) => issue.code)).toContain('root-config-invalid');
+  });
+});
+
+describe('doctor config file permissions', () => {
+  // POSIX permission bits are the thing under test; Windows has no equivalent.
+  const posixIt = process.platform === 'win32' ? it.skip : it;
+
+  posixIt('narrows a world-readable config written before saveConfig enforced 0600', async () => {
+    const repoDir = createGitRootProject();
+    const configPath = join(repoDir, '.agentteams', 'config.json');
+    chmodSync(configPath, 0o644);
+
+    const result = await executeDoctorCommand({ cwd: repoDir });
+
+    const issue = result.issues.find((candidate) => candidate.code === 'config-permissions-narrowed');
+    expect(isSamePath(issue!.path!, configPath)).toBe(true);
+    expect(issue?.severity).toBe('info');
+    expect(statSync(configPath).mode & 0o777).toBe(0o600);
+    // A repairable permission is not a broken project.
+    expect(result.status).toBe('READY');
+    expect(resolveDoctorExitCode(result)).toBe(0);
+  });
+
+  posixIt('also narrows a leftover config backup holding the same key', async () => {
+    const repoDir = createGitRootProject();
+    const backupPath = join(repoDir, '.agentteams', 'config.json.agentteams-backup');
+    writeFileSync(backupPath, '{"apiKey":"secret-api-key-1"}', { encoding: 'utf-8', mode: 0o600 });
+    chmodSync(backupPath, 0o644);
+
+    const result = await executeDoctorCommand({ cwd: repoDir });
+
+    const narrowed = result.issues.filter((issue) => issue.code === 'config-permissions-narrowed');
+    expect(narrowed).toHaveLength(1);
+    expect(isSamePath(narrowed[0].path!, backupPath)).toBe(true);
+    expect(statSync(backupPath).mode & 0o777).toBe(0o600);
+  });
+
+  posixIt('reports nothing and changes nothing when the config is already owner-only', async () => {
+    const repoDir = createGitRootProject();
+
+    const first = await executeDoctorCommand({ cwd: repoDir });
+    const second = await executeDoctorCommand({ cwd: repoDir });
+
+    expect(first.issues.map((issue) => issue.code)).not.toContain('config-permissions-narrowed');
+    expect(second.changedCount).toBe(0);
+  });
+
+  posixIt('still repairs permissions when the layout diagnosis stops at preflight', async () => {
+    const repoDir = createGitRootProject();
+    const configPath = join(repoDir, '.agentteams', 'config.json');
+    writeFileSync(configPath, 'not json', { encoding: 'utf-8', mode: 0o644 });
+    chmodSync(configPath, 0o644);
+
+    const result = await executeDoctorCommand({ cwd: repoDir });
+
+    expect(result.issues.map((issue) => issue.code)).toEqual(
+      expect.arrayContaining(['root-config-invalid', 'config-permissions-narrowed']),
+    );
+    expect(statSync(configPath).mode & 0o777).toBe(0o600);
+    expect(result.status).toBe('DEGRADED');
   });
 });
 

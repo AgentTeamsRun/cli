@@ -19,7 +19,7 @@ import { constants, createCipheriv, publicEncrypt, randomBytes } from 'node:cryp
 import { multiselect, isCancel, cancel } from '@clack/prompts';
 import httpClient from '../utils/httpClient.js';
 import open from 'open';
-import { startLocalAuthServer } from '../utils/authServer.js';
+import { createAuthState, startLocalAuthServer } from '../utils/authServer.js';
 import { DEFAULT_API_URL, type PersistedConfig, saveConfig } from '../utils/config.js';
 import { createSpinner, withSpinner } from '../utils/spinner.js';
 import { withCommandContext } from '../utils/commandContext.js';
@@ -158,7 +158,13 @@ export function detectOsType(): 'MACOS' | 'LINUX' | 'WINDOWS' | undefined {
   return undefined;
 }
 
-export function buildAuthorizeUrl(port: number, projectName: string, authPathEnc?: string, osType?: string): string {
+export function buildAuthorizeUrl(
+  port: number,
+  projectName: string,
+  authPathEnc?: string,
+  osType?: string,
+  state?: string,
+): string {
   const params = new URLSearchParams({
     port: String(port),
     projectName,
@@ -168,6 +174,11 @@ export function buildAuthorizeUrl(port: number, projectName: string, authPathEnc
   }
   if (osType && osType.length > 0) {
     params.set('ot', osType);
+  }
+  // The web page echoes this back through the callback; without it the local
+  // server cannot tell this login apart from one someone else started.
+  if (state && state.length > 0) {
+    params.set('state', state);
   }
   return `${AUTH_BASE_URL}/cli/authorize?${params.toString()}`;
 }
@@ -207,35 +218,46 @@ function normalizeApiUrl(apiUrl: string): string {
   return apiUrl.replace(/\/+$/, '');
 }
 
-function toConfig(authResult: {
-  teamId: string;
-  projectId: string;
-  agentName: string;
-  apiKey: string;
-  apiUrl?: string;
-}): PersistedConfig {
+/**
+ * Where the CLI talks to is the CLI's own decision. It used to come from the
+ * browser callback payload, so anything that reached the local callback port
+ * could redirect every later request — including the convention download whose
+ * content becomes always-on agent rules.
+ */
+function resolveApiUrl(): string {
+  return normalizeApiUrl(process.env.AGENTTEAMS_API_URL || DEFAULT_API_URL);
+}
+
+function toConfig(
+  authResult: {
+    teamId: string;
+    projectId: string;
+    agentName: string;
+    apiKey: string;
+  },
+  apiUrl: string,
+): PersistedConfig {
   const config: PersistedConfig = {
     teamId: authResult.teamId,
     projectId: authResult.projectId,
     apiKey: authResult.apiKey,
   };
 
-  const apiUrl = authResult.apiUrl ? normalizeApiUrl(authResult.apiUrl) : undefined;
-  if (apiUrl && apiUrl !== DEFAULT_API_URL) {
+  if (apiUrl !== DEFAULT_API_URL) {
     config.apiUrl = apiUrl;
   }
 
   return config;
 }
 
-async function fetchConventionTemplate(authResult: {
-  projectId: string;
-  apiKey: string;
-  apiUrl?: string;
-  configId: string;
-}): Promise<string> {
-  const apiUrl = normalizeApiUrl(authResult.apiUrl || DEFAULT_API_URL);
-
+async function fetchConventionTemplate(
+  authResult: {
+    projectId: string;
+    apiKey: string;
+    configId: string;
+  },
+  apiUrl: string,
+): Promise<string> {
   const response = await httpClient.get(
     `${apiUrl}/api/projects/${authResult.projectId}/agent-configs/${authResult.configId}/convention`,
     {
@@ -714,7 +736,7 @@ async function executeInitCommandWithContext(options?: InitOptions): Promise<Ini
   let authContext;
 
   try {
-    authContext = await startLocalAuthServer();
+    authContext = await startLocalAuthServer({ state: createAuthState() });
   } catch (error) {
     throw new Error(`Failed to start local OAuth server: ${error instanceof Error ? error.message : String(error)}`);
   }
@@ -726,7 +748,7 @@ async function executeInitCommandWithContext(options?: InitOptions): Promise<Ini
     authPathEnc = undefined;
   }
 
-  const authUrl = buildAuthorizeUrl(authContext.port, projectName, authPathEnc, detectOsType());
+  const authUrl = buildAuthorizeUrl(authContext.port, projectName, authPathEnc, detectOsType(), authContext.state);
   await tryOpenBrowser(authUrl);
 
   const authSpinner = createSpinner('Waiting for authentication... (Ctrl+C to cancel)');
@@ -774,13 +796,14 @@ async function executeInitCommandWithContext(options?: InitOptions): Promise<Ini
     });
 
     authSpinner?.succeed();
-    const config = toConfig(authResult);
+    const apiUrl = resolveApiUrl();
+    const config = toConfig(authResult, apiUrl);
     const runtimeConfig: Config = {
       ...config,
-      apiUrl: authResult.apiUrl || DEFAULT_API_URL,
+      apiUrl,
     };
     const conventionContent = await withSpinner('Fetching convention template...', () =>
-      fetchConventionTemplate(authResult),
+      fetchConventionTemplate(authResult, apiUrl),
     );
 
     saveConfig(configPath, config);

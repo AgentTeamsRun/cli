@@ -351,9 +351,10 @@ Configuration is merged in this priority order (highest first):
 }
 ```
 
-`apiUrl` is omitted for the default API. When `init` is completed against a non-default API
-such as dev, self-hosted, or localhost, the CLI persists that `apiUrl` so later commands keep
-using the same API.
+`apiUrl` is omitted for the default API. When `AGENTTEAMS_API_URL` points somewhere else — a
+local API or the dev environment — `init` persists that value so later commands keep using the
+same API. The API destination comes from the CLI's own environment only; the browser callback
+never supplies it.
 
 ### Environment Variable Example
 

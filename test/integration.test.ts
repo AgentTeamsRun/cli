@@ -121,6 +121,7 @@ describe('CLI Integration Tests', () => {
         } as any,
         waitForCallback: async () => callbackPayload,
         port: 7779,
+        state: 'test-login-state',
       });
 
       if (typeof (jest as any).resetModules === 'function') {
@@ -132,6 +133,7 @@ describe('CLI Integration Tests', () => {
       }));
       (jest as any).unstable_mockModule('../src/utils/authServer.js', () => ({
         startLocalAuthServer: mockStartLocalAuthServer,
+        createAuthState: () => 'test-login-state',
       }));
       (jest as any).unstable_mockModule('open', () => ({
         default: jest.fn().mockImplementation(async () => undefined),
@@ -156,6 +158,7 @@ describe('CLI Integration Tests', () => {
       }
       const parsedAuthUrl = new URL(result.authUrl);
       expect(parsedAuthUrl.searchParams.get('ap')).toBeTruthy();
+      expect(parsedAuthUrl.searchParams.get('state')).toBe('test-login-state');
       expect(result.authUrl).not.toContain(tempCwd);
 
       const savedConfig = JSON.parse(readFileSync(result.configPath, 'utf-8'));
@@ -190,7 +193,7 @@ describe('CLI Integration Tests', () => {
       rmSync(tempCwd, { recursive: true, force: true });
     });
 
-    it('init start: should omit apiUrl from saved config when callback uses default API URL', async () => {
+    it('init start: should ignore a callback-supplied apiUrl and use the CLI default', async () => {
       if (typeof (jest as any).unstable_mockModule !== 'function') {
         return;
       }
@@ -198,12 +201,15 @@ describe('CLI Integration Tests', () => {
       const defaultApiUrl = 'https://api.agentteams.run';
       const tempCwd = mkdtempSync(join(tmpdir(), 'agentteams-init-default-api-'));
       const closeSpy = jest.fn();
+      // The API destination now comes from the CLI's own environment/config only.
+      delete process.env.AGENTTEAMS_API_URL;
       const callbackPayload = {
         teamId: 'team_1',
         projectId: PROJECT_ID,
         agentName: 'test-agent',
         apiKey: 'key_oauth_123',
-        apiUrl: `${defaultApiUrl}/`,
+        // An injected destination must not reach the config or any request.
+        apiUrl: 'https://attacker.example',
         configId: '7',
       };
 
@@ -230,6 +236,7 @@ describe('CLI Integration Tests', () => {
         } as any,
         waitForCallback: async () => callbackPayload,
         port: 7779,
+        state: 'test-login-state',
       });
 
       if (typeof (jest as any).resetModules === 'function') {
@@ -241,6 +248,7 @@ describe('CLI Integration Tests', () => {
       }));
       (jest as any).unstable_mockModule('../src/utils/authServer.js', () => ({
         startLocalAuthServer: mockStartLocalAuthServer,
+        createAuthState: () => 'test-login-state',
       }));
       (jest as any).unstable_mockModule('open', () => ({
         default: jest.fn().mockImplementation(async () => undefined),
@@ -266,6 +274,9 @@ describe('CLI Integration Tests', () => {
             'Content-Type': 'application/json',
           },
         },
+      );
+      expect(axiosGetSpy.mock.calls.some(([url]) => typeof url === 'string' && url.includes('attacker.example'))).toBe(
+        false,
       );
 
       rmSync(tempCwd, { recursive: true, force: true });

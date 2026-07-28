@@ -1,16 +1,24 @@
+import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'node:http';
 
-const DEFAULT_OAUTH_PORT = 7777;
-const OAUTH_PORT_MIN = 7777;
-const OAUTH_PORT_MAX = 7790;
 const CALLBACK_TIMEOUT_MS = 60_000;
+const DEFAULT_WEB_URL = 'https://agentteams.run';
+/** 24 random bytes → 32 base64url characters, comfortably above the 16-character floor. */
+const AUTH_STATE_BYTES = 24;
+
+// Only a web build older than this CLI omits the state, so a plain "try again"
+// would loop the user forever. Say what is actually wrong and give the two exits
+// that work: wait for the deploy, or install a CLI that matches the live web.
+const WEB_UPDATE_HINT =
+  'The AgentTeams web page did not echo the login state, so it is older than this CLI. ' +
+  'Hard-refresh /cli/authorize and retry; if it keeps failing, the web deploy has not caught up yet — ' +
+  'retry in a few minutes or install a CLI version matching the deployed web.';
 
 export type AuthResult = {
   teamId: string;
   projectId: string;
   agentName: string;
   apiKey: string;
-  apiUrl?: string;
   configId: string;
   seedPlanId?: string | null;
 };
@@ -19,57 +27,44 @@ type AuthServerResult = {
   server: Server;
   waitForCallback: () => Promise<AuthResult>;
   port: number;
+  /** Echo this back through the authorize URL; the callback is rejected without it. */
+  state: string;
 };
 
-function parsePort(value: string | undefined): number | null {
-  if (!value) {
-    return null;
-  }
+type StartLocalAuthServerOptions = {
+  state?: string;
+};
 
-  const parsedPort = Number.parseInt(value, 10);
-  if (Number.isNaN(parsedPort) || parsedPort < 1 || parsedPort > 65535) {
-    return null;
-  }
-
-  return parsedPort;
+/** Unguessable value that proves a callback belongs to the login this process started. */
+export function createAuthState(): string {
+  return randomBytes(AUTH_STATE_BYTES).toString('base64url');
 }
 
-function buildCandidatePorts(): number[] {
-  const requestedPort = parsePort(process.env.AGENTTEAMS_OAUTH_PORT) ?? DEFAULT_OAUTH_PORT;
-  const rangePorts: number[] = [];
-
-  for (let port = OAUTH_PORT_MIN; port <= OAUTH_PORT_MAX; port += 1) {
-    rangePorts.push(port);
-  }
-
-  const uniquePorts = new Set<number>();
-  uniquePorts.add(requestedPort);
-
-  for (const port of rangePorts) {
-    uniquePorts.add(port);
-  }
-
-  return Array.from(uniquePorts.values());
-}
-
-function listenOnPort(server: Server, port: number): Promise<void> {
+function listenOnEphemeralPort(server: Server): Promise<number> {
   return new Promise((resolve, reject) => {
     const onListening = (): void => {
       server.removeListener('error', onError);
-      resolve();
+      const address = server.address();
+      if (!address || typeof address === 'string') {
+        reject(new Error('The local OAuth callback server did not report a TCP port.'));
+        return;
+      }
+      resolve(address.port);
     };
-    const onError = (error: Error & { code?: string }): void => {
+    const onError = (error: Error): void => {
       server.removeListener('listening', onListening);
       reject(error);
     };
 
     server.once('listening', onListening);
     server.once('error', onError);
-    server.listen(port, 'localhost');
+    // Port 0 asks the OS for a free port: nothing for another local process to
+    // squat on ahead of time, and no fixed range to exhaust.
+    server.listen(0, 'localhost');
   });
 }
 
-function isAuthResult(value: unknown): value is AuthResult {
+function isAuthResult(value: unknown): value is AuthResult & Record<string, unknown> {
   if (!value || typeof value !== 'object') {
     return false;
   }
@@ -83,10 +78,40 @@ function isAuthResult(value: unknown): value is AuthResult {
     typeof candidate.projectId === 'string' &&
     typeof candidate.agentName === 'string' &&
     typeof candidate.apiKey === 'string' &&
-    (candidate.apiUrl === undefined || typeof candidate.apiUrl === 'string') &&
     typeof candidate.configId === 'string' &&
     seedPlanIdValid
   );
+}
+
+/**
+ * Copy only the fields the CLI trusts. Anything else in the payload — notably an
+ * `apiUrl` pointing every later request at an attacker's server — is dropped here.
+ */
+function toAuthResult(payload: AuthResult & Record<string, unknown>): AuthResult {
+  const result: AuthResult = {
+    teamId: payload.teamId,
+    projectId: payload.projectId,
+    agentName: payload.agentName,
+    apiKey: payload.apiKey,
+    configId: payload.configId,
+  };
+
+  if (payload.seedPlanId !== undefined) {
+    result.seedPlanId = payload.seedPlanId;
+  }
+
+  return result;
+}
+
+function statesMatch(expected: string, received: string): boolean {
+  const expectedBytes = Buffer.from(expected, 'utf-8');
+  const receivedBytes = Buffer.from(received, 'utf-8');
+
+  if (expectedBytes.length !== receivedBytes.length) {
+    return false;
+  }
+
+  return timingSafeEqual(expectedBytes, receivedBytes);
 }
 
 function readRequestBody(request: IncomingMessage): Promise<string> {
@@ -98,30 +123,55 @@ function readRequestBody(request: IncomingMessage): Promise<string> {
   });
 }
 
-function getAllowedOrigins(): string[] {
-  const webUrl = process.env.AGENTTEAMS_WEB_URL || 'https://agentteams.run';
-  return [webUrl.replace(/\/+$/, '')];
+function normalizeOrigin(value: string): string | null {
+  try {
+    return new URL(value).origin;
+  } catch {
+    return null;
+  }
 }
 
-function isAllowedOrigin(origin: string): boolean {
-  const allowedOrigins = getAllowedOrigins();
+/**
+ * Only the configured web origin may post a callback. There is deliberately no
+ * blanket `http://localhost:*` allowance: any page served from any local port
+ * used to qualify. Local development and the dev environment opt in explicitly
+ * instead, through `AGENTTEAMS_WEB_URL` or `AGENTTEAMS_OAUTH_ALLOWED_ORIGINS`.
+ */
+function getAllowedOrigins(): string[] {
+  const origins = new Set<string>();
 
-  if (allowedOrigins.includes(origin)) {
-    return true;
+  const webOrigin = normalizeOrigin(process.env.AGENTTEAMS_WEB_URL || DEFAULT_WEB_URL);
+  if (webOrigin) {
+    origins.add(webOrigin);
   }
 
-  // Allow localhost with any port for dev
-  if (/^http:\/\/localhost(:\d+)?$/.test(origin)) {
-    return true;
+  for (const entry of (process.env.AGENTTEAMS_OAUTH_ALLOWED_ORIGINS ?? '').split(',')) {
+    const trimmed = entry.trim();
+    if (trimmed.length === 0) {
+      continue;
+    }
+
+    const origin = normalizeOrigin(trimmed);
+    if (origin) {
+      origins.add(origin);
+    }
   }
 
-  return false;
+  return Array.from(origins.values());
+}
+
+function isAllowedOrigin(origin: string | undefined): origin is string {
+  if (!origin) {
+    return false;
+  }
+
+  return getAllowedOrigins().includes(origin);
 }
 
 function setCorsHeaders(response: ServerResponse, request?: IncomingMessage): void {
   const origin = request?.headers.origin;
 
-  if (origin && isAllowedOrigin(origin)) {
+  if (isAllowedOrigin(origin)) {
     response.setHeader('Access-Control-Allow-Origin', origin);
     response.setHeader('Vary', 'Origin');
   }
@@ -140,7 +190,9 @@ function sendJson(response: ServerResponse, statusCode: number, payload: unknown
   response.end(body);
 }
 
-export async function startLocalAuthServer(): Promise<AuthServerResult> {
+export async function startLocalAuthServer(options?: StartLocalAuthServerOptions): Promise<AuthServerResult> {
+  const expectedState = options?.state ?? createAuthState();
+
   let settled = false;
   let timeoutHandle: NodeJS.Timeout | null = null;
   let isWaiting = false;
@@ -205,6 +257,13 @@ export async function startLocalAuthServer(): Promise<AuthServerResult> {
       return;
     }
 
+    // CORS headers only tell a browser what to do with a response; the body was
+    // accepted long before that. Refuse the request itself instead.
+    if (!isAllowedOrigin(request.headers.origin)) {
+      sendJson(response, 403, { message: 'OAuth callback origin is not allowed.' }, request);
+      return;
+    }
+
     if (settled) {
       sendJson(response, 409, { message: 'OAuth callback already processed.' }, request);
       return;
@@ -219,45 +278,34 @@ export async function startLocalAuthServer(): Promise<AuthServerResult> {
         return;
       }
 
+      const receivedState = payload.state;
+      if (typeof receivedState !== 'string' || receivedState.length === 0) {
+        sendJson(response, 400, { message: `Missing OAuth callback state. ${WEB_UPDATE_HINT}` }, request);
+        return;
+      }
+
+      // A mismatch must not consume `settled`: the login this process started is
+      // still outstanding, and burning it here would hand a forged callback a
+      // trivial denial of service.
+      if (!statesMatch(expectedState, receivedState)) {
+        sendJson(response, 400, { message: 'OAuth callback state does not match this login.' }, request);
+        return;
+      }
+
       sendJson(response, 200, { success: true }, request);
 
       setTimeout(() => {
-        resolveAuth(payload);
+        resolveAuth(toAuthResult(payload));
       }, 100);
     } catch {
       sendJson(response, 400, { message: 'Invalid JSON body.' }, request);
     }
   });
 
-  let port: number | null = null;
-  for (const candidatePort of buildCandidatePorts()) {
-    try {
-      await listenOnPort(server, candidatePort);
-      port = candidatePort;
-      break;
-    } catch (error) {
-      const errorCode =
-        typeof error === 'object' && error !== null && 'code' in error ? (error as { code?: unknown }).code : undefined;
-      if (errorCode !== 'EADDRINUSE') {
-        throw error;
-      }
-    }
-  }
+  const port = await listenOnEphemeralPort(server);
 
-  if (port === null) {
-    throw new Error(
-      `No available OAuth callback port found in ${OAUTH_PORT_MIN}-${OAUTH_PORT_MAX} and requested AGENTTEAMS_OAUTH_PORT.`,
-    );
-  }
-
-  server.on('error', (error: Error & { code?: string }) => {
-    rejectAuth(
-      new Error(
-        error.code === 'EADDRINUSE'
-          ? `OAuth callback port ${port} is already in use.`
-          : `OAuth callback server failed: ${error.message}`,
-      ),
-    );
+  server.on('error', (error: Error) => {
+    rejectAuth(new Error(`OAuth callback server failed: ${error.message}`));
   });
 
   server.once('close', () => {
@@ -287,5 +335,6 @@ export async function startLocalAuthServer(): Promise<AuthServerResult> {
     server,
     waitForCallback,
     port,
+    state: expectedState,
   };
 }

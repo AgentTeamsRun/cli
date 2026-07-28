@@ -1,0 +1,4 @@
+{
+  "$comment": "Web behaviour this CLI cannot log in without. The release gate in .github/workflows/sync-cli-public.yml refuses to publish the CLI until the deployed web reports every entry in its build-info.json capabilities list (published from web/scripts/write-build-info.mjs). Add an entry in the same PR that makes the CLI depend on new web behaviour.",
+  "requiredWebCapabilities": ["cli-callback-state"]
+}
