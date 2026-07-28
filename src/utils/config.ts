@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import type { Config } from '../types/index.js';
@@ -8,6 +8,9 @@ import { canonicalizePath } from './path.js';
 const CONFIG_DIR = '.agentteams';
 const CONFIG_FILE = 'config.json';
 export const DEFAULT_API_URL = 'https://api.agentteams.run';
+
+/** The config file holds a long-lived API key, so it must not be group- or world-readable. */
+export const CONFIG_FILE_MODE = 0o600;
 export type PersistedConfig = Pick<Config, 'teamId' | 'projectId' | 'apiKey'> & Partial<Pick<Config, 'apiUrl'>>;
 
 const CONFIGURATION_NOT_FOUND_MESSAGE =
@@ -155,6 +158,12 @@ export function loadConfig(options?: Partial<Config>): Config | null {
  * Save configuration to a JSON file.
  * Creates parent directories if they don't exist.
  *
+ * The file carries an API key, so it is written through a temp file in the same
+ * directory and renamed into place: a crash or a full disk can never leave a
+ * truncated config behind, and the key is never briefly visible at a wider mode.
+ * The result is always {@link CONFIG_FILE_MODE}; repairing configs this function
+ * does not write is `agentteams doctor`'s job, not this one's.
+ *
  * @param configPath - Absolute path to write the config file
  * @param config - Configuration object to persist
  * @throws Error if write fails
@@ -166,5 +175,21 @@ export function saveConfig(configPath: string, config: PersistedConfig): void {
     mkdirSync(dir, { recursive: true });
   }
 
-  writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n', 'utf-8');
+  const body = JSON.stringify(config, null, 2) + '\n';
+  // Same directory as the target: `rename` is only atomic within a filesystem.
+  const temporaryPath = join(dir, `.${Date.now().toString(36)}-${process.pid}.agentteams-tmp`);
+
+  try {
+    // `mode` on open is masked by umask, so chmod restates it unconditionally.
+    writeFileSync(temporaryPath, body, { encoding: 'utf-8', mode: CONFIG_FILE_MODE });
+    chmodSync(temporaryPath, CONFIG_FILE_MODE);
+    renameSync(temporaryPath, configPath);
+  } catch (error) {
+    try {
+      unlinkSync(temporaryPath);
+    } catch {
+      // The temp file may never have been created; the original is untouched either way.
+    }
+    throw error;
+  }
 }

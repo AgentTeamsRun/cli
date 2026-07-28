@@ -139,6 +139,13 @@ describe('init helpers', () => {
     expect(parsed.searchParams.get('projectName')).toBe('demo');
     expect(parsed.searchParams.get('ap')).toBe('enc-value');
     expect(parsed.searchParams.get('ot')).toBe('LINUX');
+    expect(parsed.searchParams.has('state')).toBe(false);
+  });
+
+  test('buildAuthorizeUrl carries the login state so the web page can echo it back', () => {
+    const url = buildAuthorizeUrl(9876, 'demo', undefined, undefined, 'state-token');
+
+    expect(new URL(url).searchParams.get('state')).toBe('state-token');
   });
 
   test('detectOsType maps process.platform to supported values', () => {

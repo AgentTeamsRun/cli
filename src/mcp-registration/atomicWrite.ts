@@ -1,4 +1,15 @@
-import { chmodSync, copyFileSync, mkdirSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
+import {
+  closeSync,
+  fchmodSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  renameSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname, join } from 'node:path';
 
 /**
@@ -8,7 +19,11 @@ import { dirname, join } from 'node:path';
  * crash or a full disk can never leave a truncated config behind.
  */
 
-/** Suffix is deterministic so `install` twice does not accumulate backup files. */
+/**
+ * Suffix is deterministic so `install` twice does not accumulate backup files.
+ * The flip side is that the backup path is fully predictable from the target
+ * path, so the backup must never be readable to anyone the target is not.
+ */
 export const BACKUP_SUFFIX = '.agentteams-backup';
 
 /** User-scope files can carry a literal API key, so they must not be world-readable. */
@@ -31,11 +46,44 @@ function existingMode(path: string): number | null {
   }
 }
 
+/** Random suffix: two writes in the same millisecond from the same pid must not collide on `wx`. */
+function temporaryPathIn(directory: string, suffix: string): string {
+  return join(directory, `.${randomBytes(8).toString('hex')}${suffix}`);
+}
+
+function removeQuietly(path: string): void {
+  try {
+    unlinkSync(path);
+  } catch {
+    // The file may never have been created; nothing else depends on it existing.
+  }
+}
+
+/**
+ * Create `path` exclusively at `mode`, then write. Content never exists at a
+ * mode the caller did not ask for — not even for the width of a
+ * `writeFileSync` + `chmodSync` pair, which is exactly the window a predictable
+ * backup path makes worth watching. `mode` passed to `open` is still masked by
+ * umask, so `fchmod` restates it on the descriptor we already hold rather than
+ * on a path another process could have swapped.
+ */
+function writeNewFileWithMode(path: string, content: string | Buffer, mode: number): void {
+  const descriptor = openSync(path, 'wx', mode);
+  try {
+    fchmodSync(descriptor, mode);
+    writeFileSync(descriptor, content);
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
 /**
  * Replace `path` with `content` atomically.
  *
- * @param targetMode - when present, force the replacement to this mode while
- * preserving the original mode on the backup.
+ * @param targetMode - when present, force both the replacement and the backup
+ * to this mode. Narrowing a 0644 config to 0600 while leaving the backup at
+ * 0644 would just copy the secret out at the wider mode under a predictable
+ * name, so the backup follows the target rather than the original.
  */
 export function writeConfigFileAtomically(
   path: string,
@@ -53,22 +101,28 @@ export function writeConfigFileAtomically(
   let backupPath: string | null = null;
   if (!created) {
     backupPath = `${path}${BACKUP_SUFFIX}`;
-    copyFileSync(path, backupPath);
-    chmodSync(backupPath, previousMode ?? defaultMode);
+    // Copying straight onto the backup path would publish the secret at the
+    // source mode (or at a stale 0644 backup's mode) until a later chmod caught
+    // up, and would leave that copy behind if the chmod threw. Build the backup
+    // at the final mode in a temp file instead and rename it into place, which
+    // also drops any wider backup an older version left there.
+    const backupTemporaryPath = temporaryPathIn(directory, '.agentteams-backup-tmp');
+    try {
+      writeNewFileWithMode(backupTemporaryPath, readFileSync(path), mode);
+      renameSync(backupTemporaryPath, backupPath);
+    } catch (error) {
+      removeQuietly(backupTemporaryPath);
+      throw error;
+    }
   }
 
   // Same directory as the target: `rename` is only atomic within a filesystem.
-  const temporaryPath = join(directory, `.${Date.now().toString(36)}-${process.pid}.agentteams-tmp`);
+  const temporaryPath = temporaryPathIn(directory, '.agentteams-tmp');
   try {
-    writeFileSync(temporaryPath, content, { encoding: 'utf-8', mode });
-    chmodSync(temporaryPath, mode);
+    writeNewFileWithMode(temporaryPath, content, mode);
     renameSync(temporaryPath, path);
   } catch (error) {
-    try {
-      unlinkSync(temporaryPath);
-    } catch {
-      // The temp file may never have been created; the original is untouched either way.
-    }
+    removeQuietly(temporaryPath);
     throw error;
   }
 

@@ -86,7 +86,9 @@ describe('mcp install', () => {
 
       if (isPosix) {
         expect(statSync(cursorUserConfig()).mode & 0o777).toBe(0o600);
-        expect(statSync(`${cursorUserConfig()}${BACKUP_SUFFIX}`).mode & 0o777).toBe(0o644);
+        // The backup is a full copy of a file that now holds a literal API key,
+        // at a path anyone can guess from the target path.
+        expect(statSync(`${cursorUserConfig()}${BACKUP_SUFFIX}`).mode & 0o777).toBe(0o600);
       }
       expect(existsSync(`${cursorUserConfig()}${BACKUP_SUFFIX}`)).toBe(true);
     });

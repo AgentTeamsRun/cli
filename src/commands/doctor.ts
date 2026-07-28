@@ -1,6 +1,7 @@
-import { lstatSync, readFileSync, realpathSync } from 'node:fs';
+import { chmodSync, lstatSync, readFileSync, realpathSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { findProjectConfig } from '../utils/config.js';
+import { CONFIG_FILE_MODE, findProjectConfig } from '../utils/config.js';
+import { BACKUP_SUFFIX } from '../mcp-registration/atomicWrite.js';
 import { findMemberRepos, isNonGitRootProject } from '../utils/projectLayout.js';
 import {
   ensureConventionEntryPoints,
@@ -90,6 +91,83 @@ function pathEntryExists(path: string): boolean {
   } catch {
     return false;
   }
+}
+
+type ConfigPermissionRepair = {
+  changedCount: number;
+  issues: DoctorIssue[];
+};
+
+/**
+ * `.agentteams/config.json` holds a long-lived API key. `saveConfig` writes new
+ * ones owner-only, but a config written before that, restored from a backup, or
+ * copied around by hand can still be group- or world-readable — and narrowing it
+ * is an explicit, user-invoked repair, never a side effect of an unrelated save.
+ */
+function repairConfigFilePermissions(rootDir: string): ConfigPermissionRepair {
+  // Windows has no POSIX mode bits; chmod there only toggles the read-only flag.
+  if (process.platform === 'win32') {
+    return { changedCount: 0, issues: [] };
+  }
+
+  const issues: DoctorIssue[] = [];
+  let changedCount = 0;
+
+  const candidates = [
+    join(rootDir, CONFIG_DIR, CONFIG_FILE),
+    // A predictable path holding a full copy of the same secret.
+    join(rootDir, CONFIG_DIR, `${CONFIG_FILE}${BACKUP_SUFFIX}`),
+  ];
+
+  for (const path of candidates) {
+    let mode: number;
+    try {
+      const stats = lstatSync(path);
+      if (!stats.isFile()) continue;
+      mode = stats.mode & 0o777;
+    } catch {
+      continue;
+    }
+
+    // Only group/other access matters here; the owner's own bits are not exposure.
+    if ((mode & 0o077) === 0) continue;
+
+    const reported = `0${mode.toString(8).padStart(3, '0')}`;
+    try {
+      chmodSync(path, CONFIG_FILE_MODE);
+      changedCount += 1;
+      issues.push({
+        code: 'config-permissions-narrowed',
+        path,
+        message: `${path} was readable beyond its owner (${reported}); narrowed it to 0600. Reissue the agent API key if the machine is shared.`,
+        severity: 'info',
+      });
+    } catch (error) {
+      issues.push({
+        code: 'config-permissions-unrepairable',
+        path,
+        message: `${path} is readable beyond its owner (${reported}) and could not be narrowed to 0600: ${error instanceof Error ? error.message : String(error)}`,
+        severity: 'error',
+      });
+    }
+  }
+
+  return { changedCount, issues };
+}
+
+function withConfigPermissionFindings(result: DoctorResult, repair: ConfigPermissionRepair): DoctorResult {
+  if (repair.changedCount === 0 && repair.issues.length === 0) {
+    return result;
+  }
+
+  const degraded = result.status === 'DEGRADED' || repair.issues.some((issue) => issue.severity === 'error');
+
+  return {
+    ...result,
+    status: degraded ? 'DEGRADED' : result.status,
+    changedCount: result.changedCount + repair.changedCount,
+    issues: [...result.issues, ...repair.issues],
+  };
 }
 
 function notApplicableResult(rootDir: string | null, issue: DoctorIssue): DoctorResult {
@@ -319,6 +397,14 @@ function runDoctor(options?: DoctorOptions): DoctorResult {
     });
   }
 
+  // Repairing the config's own permissions applies to every layout, so it runs
+  // before the layout branch and is merged into whichever result comes back.
+  const configPermissions = repairConfigFilePermissions(rootDir);
+
+  return withConfigPermissionFindings(runLayoutDoctor(rootDir), configPermissions);
+}
+
+function runLayoutDoctor(rootDir: string): DoctorResult {
   if (!isNonGitRootProject(rootDir)) {
     return runGitRootDoctor(rootDir);
   }

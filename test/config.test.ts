@@ -1,9 +1,24 @@
 import { afterEach, describe, expect, it } from '@jest/globals';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { findProjectConfig, getConfigurationNotFoundMessage } from '../src/utils/config.js';
+import {
+  CONFIG_FILE_MODE,
+  findProjectConfig,
+  getConfigurationNotFoundMessage,
+  saveConfig,
+} from '../src/utils/config.js';
 import { canonicalizePath } from '../src/utils/path.js';
 
 const tempDirs: string[] = [];
@@ -95,6 +110,63 @@ describe('findProjectConfig', () => {
     writeConfig(unrelatedConfigPath);
 
     expect(findProjectConfig(repositoryDir)).toBeNull();
+  });
+});
+
+describe('saveConfig', () => {
+  const persisted = { teamId: 'team-1', projectId: 'project-1', apiKey: 'key_secret' };
+
+  // POSIX permission bits are the thing under test; Windows has no equivalent.
+  const posixIt = process.platform === 'win32' ? it.skip : it;
+  // Root ignores the mode bits the read-only directory case relies on.
+  const unprivilegedIt = process.platform === 'win32' || process.getuid?.() === 0 ? it.skip : it;
+
+  posixIt('writes a new config file with owner-only permissions', () => {
+    const tempDir = createTempDir();
+    const configPath = join(tempDir, '.agentteams', 'config.json');
+
+    saveConfig(configPath, persisted);
+
+    expect(statSync(configPath).mode & 0o777).toBe(CONFIG_FILE_MODE);
+    expect(JSON.parse(readFileSync(configPath, 'utf-8'))).toEqual(persisted);
+  });
+
+  posixIt('narrows an existing world-readable config to owner-only when it rewrites it', () => {
+    const tempDir = createTempDir();
+    const configPath = join(tempDir, '.agentteams', 'config.json');
+    writeConfig(configPath);
+    chmodSync(configPath, 0o644);
+
+    saveConfig(configPath, persisted);
+
+    expect(statSync(configPath).mode & 0o777).toBe(CONFIG_FILE_MODE);
+  });
+
+  it('leaves no temporary file behind on success', () => {
+    const tempDir = createTempDir();
+    const configDir = join(tempDir, '.agentteams');
+    saveConfig(join(configDir, 'config.json'), persisted);
+
+    expect(readdirSync(configDir)).toEqual(['config.json']);
+  });
+
+  unprivilegedIt('does not truncate the existing config when the write fails', () => {
+    const tempDir = createTempDir();
+    const configDir = join(tempDir, '.agentteams');
+    const configPath = join(configDir, 'config.json');
+    writeConfig(configPath);
+    const original = readFileSync(configPath, 'utf-8');
+    // A read-only directory blocks the temp file and the rename, but not an
+    // in-place `writeFileSync` on the already-existing target.
+    chmodSync(configDir, 0o500);
+
+    try {
+      expect(() => saveConfig(configPath, persisted)).toThrow();
+      expect(readFileSync(configPath, 'utf-8')).toBe(original);
+      expect(readdirSync(configDir)).toEqual(['config.json']);
+    } finally {
+      chmodSync(configDir, 0o700);
+    }
   });
 });
 
