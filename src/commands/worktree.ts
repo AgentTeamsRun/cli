@@ -65,20 +65,40 @@ const deliverDeferredDeletedEvent = async (): Promise<unknown> => {
   return sendWorktreeLifecycleEvent(apiUrl, { 'x-daemon-token': daemonConfig.daemonToken }, deferred.event);
 };
 
-const scheduleDeletedEventAfterRemoval = (
+type ScheduleDeletedEventDeps = {
+  spawn?: typeof spawn;
+  platform?: NodeJS.Platform;
+  execPath?: string;
+  entryPath?: string;
+  env?: NodeJS.ProcessEnv;
+};
+
+export const scheduleDeletedEventAfterRemoval = (
   worktreePath: string,
   stableCwd: string,
   event: WorktreeLifecycleEvent,
+  deps: ScheduleDeletedEventDeps = {},
 ): void => {
   const encoded = Buffer.from(JSON.stringify({ worktreePath, event } satisfies DeferredDeletedEvent)).toString(
     'base64url',
   );
-  const child = spawn(process.execPath, [process.argv[1], 'worktree', 'deliver-deleted'], {
-    cwd: stableCwd,
-    detached: true,
-    stdio: 'ignore',
-    env: { ...process.env, AGENTTEAMS_DEFERRED_WORKTREE_EVENT: encoded },
-  });
+  const currentPlatform = deps.platform ?? process.platform;
+  // Windows must not use DETACHED_PROCESS together with CREATE_NO_WINDOW:
+  // DETACHED_PROCESS wins and can allocate a visible console. stdio=ignore +
+  // unref is sufficient for this short-lived delivery helper to outlive the CLI.
+  // windows-hide-guard: child-process-alias spawnFn
+  const spawnFn = deps.spawn ?? spawn;
+  const child = spawnFn(
+    deps.execPath ?? process.execPath,
+    [deps.entryPath ?? process.argv[1], 'worktree', 'deliver-deleted'],
+    {
+      cwd: stableCwd,
+      detached: currentPlatform !== 'win32',
+      windowsHide: true,
+      stdio: 'ignore',
+      env: { ...(deps.env ?? process.env), AGENTTEAMS_DEFERRED_WORKTREE_EVENT: encoded },
+    },
+  );
   child.unref();
 };
 
