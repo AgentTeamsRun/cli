@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it } from '@jest/globals';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { findProjectConfig, getConfigurationNotFoundMessage } from '../src/utils/config.js';
+import { canonicalizePath } from '../src/utils/path.js';
 
 const tempDirs: string[] = [];
 
@@ -66,7 +67,7 @@ describe('findProjectConfig', () => {
   it('uses the main checkout config instead of an unrelated ancestor config for a linked worktree', () => {
     const tempDir = createTempDir();
     const repositoryDir = createRepository(tempDir);
-    const mainConfigPath = join(realpathSync(repositoryDir), '.agentteams', 'config.json');
+    const mainConfigPath = join(canonicalizePath(repositoryDir), '.agentteams', 'config.json');
     const unrelatedConfigPath = join(tempDir, 'fake-home', '.agentteams', 'config.json');
     const worktreeDir = join(tempDir, 'fake-home', 'workspaces', 'linked');
     writeConfig(mainConfigPath);
@@ -79,7 +80,7 @@ describe('findProjectConfig', () => {
   it('uses the main checkout config when a linked worktree has no config in its ancestors', () => {
     const tempDir = createTempDir();
     const repositoryDir = createRepository(tempDir);
-    const mainConfigPath = join(realpathSync(repositoryDir), '.agentteams', 'config.json');
+    const mainConfigPath = join(canonicalizePath(repositoryDir), '.agentteams', 'config.json');
     const worktreeDir = join(tempDir, 'worktrees', 'linked');
     writeConfig(mainConfigPath);
     createLinkedWorktree(repositoryDir, worktreeDir);
@@ -124,7 +125,9 @@ describe('getConfigurationNotFoundMessage', () => {
     const symbolicHome = join(tempDir, 'symbolic-home');
     const workspaceDir = join(physicalHome, 'workspace');
     mkdirSync(physicalHome, { recursive: true });
-    symlinkSync(physicalHome, symbolicHome, 'dir');
+    // Windows directory junctions exercise the same realpath boundary without requiring
+    // Developer Mode or elevated symlink privileges.
+    symlinkSync(physicalHome, symbolicHome, process.platform === 'win32' ? 'junction' : 'dir');
     writeConfig(join(physicalHome, '.agentteams', 'config.json'));
     const repositoryDir = createRepository(workspaceDir);
     expect(getConfigurationNotFoundMessage(repositoryDir, symbolicHome)).toBe(defaultMessage);

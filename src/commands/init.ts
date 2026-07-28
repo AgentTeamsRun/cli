@@ -26,6 +26,7 @@ import { withCommandContext } from '../utils/commandContext.js';
 import { conventionDownload } from './convention.js';
 import type { Config } from '../types/index.js';
 import { resolveGitTopLevel, resolveMainCheckoutRoot } from '../utils/git.js';
+import { canonicalizePath } from '../utils/path.js';
 import { buildAuthHeaders } from '../utils/apiContext.js';
 import {
   DEFAULT_CONVENTION_REFERENCE,
@@ -604,7 +605,7 @@ function isBrokenSymbolicLink(path: string): boolean {
 export function bootstrapLinkedWorktree(cwd: string): WorktreeInitResult | null {
   let worktreePath: string;
   try {
-    worktreePath = realpathSync(resolve(cwd));
+    worktreePath = canonicalizePath(resolve(cwd));
   } catch {
     return null;
   }
@@ -623,7 +624,7 @@ export function bootstrapLinkedWorktree(cwd: string): WorktreeInitResult | null 
   // so the entry point set is read from the actual root — not the member repo.
   let conventionRoot: string | null = null;
   try {
-    conventionRoot = dirname(realpathSync(sourcePath));
+    conventionRoot = dirname(canonicalizePath(sourcePath));
   } catch {
     conventionRoot = null;
   }
@@ -713,7 +714,7 @@ async function executeInitCommandWithContext(options?: InitOptions): Promise<Ini
   let authContext;
 
   try {
-    authContext = startLocalAuthServer();
+    authContext = await startLocalAuthServer();
   } catch (error) {
     throw new Error(`Failed to start local OAuth server: ${error instanceof Error ? error.message : String(error)}`);
   }

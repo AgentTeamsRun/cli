@@ -1,8 +1,9 @@
-import { existsSync, readFileSync, writeFileSync, mkdirSync, realpathSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import type { Config } from '../types/index.js';
 import { resolveGitTopLevel, resolveMainCheckoutRoot } from './git.js';
+import { canonicalizePath } from './path.js';
 
 const CONFIG_DIR = '.agentteams';
 const CONFIG_FILE = 'config.json';
@@ -61,7 +62,7 @@ export function findProjectConfig(startDir: string): string | null {
 
   if (repositoryRoot) {
     try {
-      current = realpathSync(current);
+      current = canonicalizePath(current);
     } catch {
       return null;
     }
@@ -95,7 +96,7 @@ export function getConfigurationNotFoundMessage(
   const repositoryRoot = resolveGitTopLevel(resolve(startDir));
   if (!repositoryRoot) return CONFIGURATION_NOT_FOUND_MESSAGE;
 
-  const homeDir = realpathSync(resolve(userHomeDir));
+  const homeDir = canonicalizePath(resolve(userHomeDir));
   let current = dirname(repositoryRoot);
 
   while (current !== homeDir) {

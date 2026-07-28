@@ -1,5 +1,4 @@
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'node:http';
-import { execFileSync } from 'node:child_process';
 
 const DEFAULT_OAUTH_PORT = 7777;
 const OAUTH_PORT_MIN = 7777;
@@ -53,37 +52,21 @@ function buildCandidatePorts(): number[] {
   return Array.from(uniquePorts.values());
 }
 
-function isPortAvailableSync(port: number): boolean {
-  const checkScript = [
-    'const net = require("node:net");',
-    'const port = Number(process.argv[1]);',
-    'const server = net.createServer();',
-    'server.once("error", () => process.exit(1));',
-    'server.listen(port, () => {',
-    '  server.close(() => process.exit(0));',
-    '});',
-  ].join(' ');
+function listenOnPort(server: Server, port: number): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const onListening = (): void => {
+      server.removeListener('error', onError);
+      resolve();
+    };
+    const onError = (error: Error & { code?: string }): void => {
+      server.removeListener('listening', onListening);
+      reject(error);
+    };
 
-  try {
-    execFileSync(process.execPath, ['-e', checkScript, String(port)], { stdio: 'ignore', windowsHide: true });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function findAvailablePortSync(): number {
-  const candidatePorts = buildCandidatePorts();
-
-  for (const candidatePort of candidatePorts) {
-    if (isPortAvailableSync(candidatePort)) {
-      return candidatePort;
-    }
-  }
-
-  throw new Error(
-    `No available OAuth callback port found in ${OAUTH_PORT_MIN}-${OAUTH_PORT_MAX} and requested AGENTTEAMS_OAUTH_PORT.`,
-  );
+    server.once('listening', onListening);
+    server.once('error', onError);
+    server.listen(port, 'localhost');
+  });
 }
 
 function isAuthResult(value: unknown): value is AuthResult {
@@ -157,9 +140,7 @@ function sendJson(response: ServerResponse, statusCode: number, payload: unknown
   response.end(body);
 }
 
-export function startLocalAuthServer(): AuthServerResult {
-  const port = findAvailablePortSync();
-
+export async function startLocalAuthServer(): Promise<AuthServerResult> {
   let settled = false;
   let timeoutHandle: NodeJS.Timeout | null = null;
   let isWaiting = false;
@@ -248,7 +229,28 @@ export function startLocalAuthServer(): AuthServerResult {
     }
   });
 
-  server.once('error', (error: Error & { code?: string }) => {
+  let port: number | null = null;
+  for (const candidatePort of buildCandidatePorts()) {
+    try {
+      await listenOnPort(server, candidatePort);
+      port = candidatePort;
+      break;
+    } catch (error) {
+      const errorCode =
+        typeof error === 'object' && error !== null && 'code' in error ? (error as { code?: unknown }).code : undefined;
+      if (errorCode !== 'EADDRINUSE') {
+        throw error;
+      }
+    }
+  }
+
+  if (port === null) {
+    throw new Error(
+      `No available OAuth callback port found in ${OAUTH_PORT_MIN}-${OAUTH_PORT_MAX} and requested AGENTTEAMS_OAUTH_PORT.`,
+    );
+  }
+
+  server.on('error', (error: Error & { code?: string }) => {
     rejectAuth(
       new Error(
         error.code === 'EADDRINUSE'
@@ -269,8 +271,6 @@ export function startLocalAuthServer(): AuthServerResult {
       clearTimeoutHandle();
     }
   });
-
-  server.listen(port, 'localhost');
 
   const waitForCallback = (): Promise<AuthResult> => {
     if (!isWaiting) {

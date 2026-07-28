@@ -15,6 +15,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { executeDoctorCommand } from '../src/commands/doctor.js';
 import { resolveDoctorExitCode } from '../src/utils/doctorOutput.js';
+import { canonicalizePath, isSamePath } from '../src/utils/path.js';
 
 const tempDirs: string[] = [];
 
@@ -76,10 +77,10 @@ describe('doctor on a non-git root project', () => {
     expect(first.status).toBe('READY');
     expect(first.layout).toBe('non-git-root');
     expect(first.applicable).toBe(true);
-    expect(realpathSync(first.rootDir!)).toBe(realpathSync(rootDir));
+    expect(isSamePath(first.rootDir!, rootDir)).toBe(true);
     expect(first.rootEntryPoints).toEqual(['CLAUDE.md', 'AGENTS.md']);
     expect(first.missingRecommendedEntryPoints).toEqual([]);
-    const canonicalRoot = realpathSync(rootDir);
+    const canonicalRoot = canonicalizePath(rootDir);
     expect(first.repositories.map((repo) => repo.path)).toEqual([
       join(canonicalRoot, 'alpha'),
       join(canonicalRoot, 'beta'),
@@ -150,7 +151,7 @@ describe('doctor on a non-git root project', () => {
     expect(result.status).toBe('DEGRADED');
 
     const byName = new Map(result.repositories.map((repo) => [repo.path, repo]));
-    const canonical = (path: string): string => realpathSync(path);
+    const canonical = (path: string): string => canonicalizePath(path);
 
     const customHookRepo = byName.get(canonical(customHookDir))!;
     expect(customHookRepo.status).toBe('DEGRADED');

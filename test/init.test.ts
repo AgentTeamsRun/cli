@@ -8,7 +8,6 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
-  realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -22,6 +21,7 @@ import {
   executeInitCommand,
   type WorktreeInitResult,
 } from '../src/commands/init.js';
+import { isSamePath } from '../src/utils/path.js';
 
 const tempDirs: string[] = [];
 const testPosix = process.platform === 'win32' ? test.skip : test;
@@ -111,7 +111,7 @@ function expectMaterializedConfig(result: WorktreeInitResult, worktreeDir: strin
   expect(result.warning).toBeUndefined();
   expect(readFileSync(join(targetPath, 'convention.md'), 'utf-8')).toBe('# Convention chain restored\n');
   expect(lstatSync(targetPath).isSymbolicLink()).toBe(true);
-  expect(realpathSync(targetPath)).toBe(realpathSync(sourcePath));
+  expect(isSamePath(targetPath, sourcePath)).toBe(true);
 }
 
 /**
@@ -227,7 +227,7 @@ describe('linked worktree bootstrap', () => {
     expect(result.materialization).toBe('relinked');
     expect(result.issues).toEqual([]);
     expect(lstatSync(targetPath).isSymbolicLink()).toBe(true);
-    expect(realpathSync(targetPath)).toBe(realpathSync(join(repositoryDir, '.agentteams')));
+    expect(isSamePath(targetPath, join(repositoryDir, '.agentteams'))).toBe(true);
     expect(readdirSync(join(repositoryDir, '.git')).filter((name) => name.startsWith('agentteams-relink'))).toEqual([]);
     expectConventionEditPropagates(worktreeDir, repositoryDir);
   });
