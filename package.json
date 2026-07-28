@@ -42,7 +42,7 @@
     "node": ">=20.12.0"
   },
   "dependencies": {
-    "@agentteams/context-tools": "0.1.0",
+    "@agentteams/context-tools": "0.1.1",
     "@clack/prompts": "^1.4.0",
     "@modelcontextprotocol/server": "2.0.0-beta.5",
     "axios": "^1.16.1",
