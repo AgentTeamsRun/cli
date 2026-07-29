@@ -11,10 +11,10 @@ const CONFIG_DIR = '.agentteams';
 const CONFIG_FILE = 'config.json';
 export const DEFAULT_API_URL = 'https://api.agentteams.run';
 
-/** The config file holds a long-lived API key, so it must not be group- or world-readable. */
+/** Local config may contain a legacy API key, so it must not be group- or world-readable. */
 export const CONFIG_FILE_MODE = 0o600;
-export type PersistedConfig = Pick<Config, 'teamId' | 'projectId'> &
-  Partial<Pick<Config, 'apiKey' | 'apiUrl' | 'authMode'>>;
+export type PersistedConfig = Pick<Config, 'teamId' | 'projectId'> & Partial<Pick<Config, 'apiUrl' | 'authMode'>>;
+export type LegacyApiKeyPersistedConfig = PersistedConfig & Pick<Config, 'apiKey'>;
 
 const CONFIGURATION_NOT_FOUND_MESSAGE =
   "Configuration not found. Run 'agentteams init' first or set AGENTTEAMS_* environment variables.";
@@ -234,6 +234,21 @@ export interface ResolveCredentialDeps {
   getClient?: (apiUrl: string) => PersonalTokenClient;
 }
 
+let legacyApiKeyWarningPrinted = false;
+
+function warnAboutLegacyApiKey(): void {
+  if (legacyApiKeyWarningPrinted) return;
+  legacyApiKeyWarningPrinted = true;
+  process.stderr.write(
+    "[warn] This project still stores a legacy key_ credential in .agentteams/config.json. Run 'agentteams auth login', verify it with 'agentteams auth status', then remove apiKey from the project config.\n",
+  );
+}
+
+/** Reset only the process-level warning latch used by isolated tests. */
+export function resetLegacyApiKeyWarningForTest(): void {
+  legacyApiKeyWarningPrinted = false;
+}
+
 /** An explicit flag or environment variable wins over anything stored on disk or in a keychain. */
 function explicitApiKey(options?: Partial<Config>): string | undefined {
   if (isNonEmptyString(options?.apiKey)) return options.apiKey;
@@ -302,6 +317,14 @@ export async function resolveCredential(
   }
 
   const configApiKey = plan.source === 'personal-token' ? plan.fallbackApiKey : plan.apiKey;
+
+  // The warning belongs here, not in `planCredential`. Planning is a pure decision that
+  // callers make without authenticating — `mcp config` renders a snippet and touches no
+  // file — and attaching stderr output to it made those commands nag about a key they
+  // never read.
+  if (configApiKey) {
+    warnAboutLegacyApiKey();
+  }
 
   if (plan.source === 'personal-token') {
     const optedIn = plan.optedIn;
@@ -392,17 +415,22 @@ export function setProjectAuthMode(configPath: string, authMode: Config['authMod
  * Save configuration to a JSON file.
  * Creates parent directories if they don't exist.
  *
- * The file carries an API key, so it is written through a temp file in the same
- * directory and renamed into place: a crash or a full disk can never leave a
- * truncated config behind, and the key is never briefly visible at a wider mode.
+ * The document is written through a temp file in the same directory and renamed
+ * into place: a crash or a full disk can never leave a truncated config behind.
  * The result is always {@link CONFIG_FILE_MODE}; repairing configs this function
- * does not write is `agentteams doctor`'s job, not this one's.
+ * does not write is `agentteams doctor`'s job, not this one's. This normal path
+ * deliberately cannot persist `apiKey`; only the explicit legacy helper can.
  *
  * @param configPath - Absolute path to write the config file
  * @param config - Configuration object to persist
  * @throws Error if write fails
  */
 export function saveConfig(configPath: string, config: PersistedConfig): void {
+  writeConfigDocument(configPath, config);
+}
+
+/** Compatibility-only persistence for an explicit `agentteams init --auth api-key`. */
+export function saveLegacyApiKeyConfig(configPath: string, config: LegacyApiKeyPersistedConfig): void {
   writeConfigDocument(configPath, config);
 }
 

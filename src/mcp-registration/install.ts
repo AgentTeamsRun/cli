@@ -3,7 +3,7 @@ import { PROJECT_SCOPE_FILE_MODE, USER_SCOPE_FILE_MODE, writeConfigFileAtomicall
 import { findClient, MCP_CLIENTS } from './clients.js';
 import { detectClients, type DetectionDependencies } from './detect.js';
 import { McpConfigParseError, upsertContainerEntry } from './jsonc.js';
-import { buildEntryValue, redactSecrets, renderConfigSnippet, renderVendorCommandLine } from './render.js';
+import { buildEntryValue, redactKeyMaterial, renderConfigSnippet, renderVendorCommandLine } from './render.js';
 import { buildServerSpec, MCP_SERVER_NAME, type McpCredentials } from './serverSpec.js';
 import type { DetectionSignal, InstallResult, McpClientDefinition, McpPathContext, McpScope } from './types.js';
 import { runVendorCommand, type VendorRunner } from './vendorCommand.js';
@@ -39,9 +39,8 @@ function installViaVendorCommand(
   if (!vendor) throw new Error(`No vendor command configured for ${client.id}/${scope}`);
 
   const spec = buildServerSpec({
-    credentials: options.credentials,
-    secretMode: scope === 'user' ? 'literal' : 'reference',
     serverEntry: options.serverEntry,
+    context: options.context,
   });
 
   const executable = client.executables[0];
@@ -59,12 +58,9 @@ function installViaVendorCommand(
     };
   }
 
-  // Vendor CLIs echo their own argv on failure, and user-scope argv carries the
-  // API key, so nothing reaches the caller before passing through redaction.
-  const combined = redactSecrets(
-    `${outcome.stdout}\n${outcome.stderr}`,
-    options.credentials.apiKey ? [options.credentials.apiKey] : [],
-  );
+  // Registration passes no credential, so there is no value of ours to redact — but a
+  // vendor CLI echoing its own argv/environment on failure can still surface a `key_`.
+  const combined = redactKeyMaterial(`${outcome.stdout}\n${outcome.stderr}`);
 
   const alreadyRegistered = (vendor.alreadyRegisteredPatterns ?? []).some((pattern) => pattern.test(combined));
   if (alreadyRegistered) {
@@ -105,10 +101,8 @@ function installViaJsonMerge(options: InstallClientOptions, configPath: string, 
   const base = { clientId: client.id, scope, strategy: definition.strategy, configPath } as const;
 
   const spec = buildServerSpec({
-    credentials: options.credentials,
-    // Project files are committable, so they never receive a literal key.
-    secretMode: scope === 'user' ? 'literal' : 'reference',
     serverEntry: options.serverEntry,
+    context: options.context,
   });
 
   let source = '';
@@ -130,7 +124,7 @@ function installViaJsonMerge(options: InstallClientOptions, configPath: string, 
     edited = upsertContainerEntry(source, {
       containerKey,
       entryKey: serverName,
-      entryValue: buildEntryValue(definition.entryShape ?? 'plain', spec, client.secretReference),
+      entryValue: buildEntryValue(definition.entryShape ?? 'plain', spec),
     });
   } catch (error) {
     const reason = error instanceof McpConfigParseError ? error.message : String(error);
@@ -183,9 +177,8 @@ export function installClient(options: InstallClientOptions): InstallResult {
   const configPath = definition.configPath(options.context);
 
   const displaySpec = buildServerSpec({
-    credentials: options.credentials,
-    secretMode: 'reference',
     serverEntry: options.serverEntry,
+    context: options.context,
   });
   const manualSnippet = renderConfigSnippet(client, scope, displaySpec, serverName);
 
@@ -288,7 +281,8 @@ export interface RunBatchInstallOptions extends BuildBatchPlanOptions {
  * the collected outcomes.
  */
 export function runBatchInstall(options: RunBatchInstallOptions): { plan: BatchPlan; results: InstallResult[] } {
-  const plan = buildBatchPlan({ ...options, scope: 'user' });
+  const scope = options.scope ?? 'user';
+  const plan = buildBatchPlan({ ...options, scope });
   const results: InstallResult[] = [];
 
   for (const entry of plan.entries) {
@@ -298,7 +292,7 @@ export function runBatchInstall(options: RunBatchInstallOptions): { plan: BatchP
     if (!entry.applicable) {
       results.push({
         clientId: entry.clientId,
-        scope: 'user',
+        scope: entry.scope,
         strategy: entry.strategy,
         configPath: entry.targetPath,
         outcome: entry.strategy === 'configOnly' ? 'SKIPPED_CONFIG_ONLY' : 'SKIPPED_NOT_DETECTED',
@@ -310,7 +304,7 @@ export function runBatchInstall(options: RunBatchInstallOptions): { plan: BatchP
     results.push(
       installClient({
         client,
-        scope: 'user',
+        scope: entry.scope,
         credentials: options.credentials,
         context: options.context,
         serverEntry: options.serverEntry,

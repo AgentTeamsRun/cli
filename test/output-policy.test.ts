@@ -1,4 +1,8 @@
-import { describe, it, expect } from '@jest/globals';
+import { describe, it, expect, jest } from '@jest/globals';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { resolveApiKeyInput } from '../src/utils/apiKeyInput.js';
 import { createSummaryLines, shouldPrintSummary } from '../src/utils/outputPolicy.js';
 
 describe('outputPolicy', () => {
@@ -210,5 +214,60 @@ describe('outputPolicy', () => {
         formatExplicit: false,
       }),
     ).toBe(false);
+  });
+});
+
+describe('API key input policy', () => {
+  it('keeps --api-key compatible while warning on stderr without touching stdout', () => {
+    const stdoutSpy = jest.spyOn(process.stdout, 'write').mockReturnValue(true);
+    const stderrSpy = jest.spyOn(process.stderr, 'write').mockReturnValue(true);
+
+    try {
+      expect(resolveApiKeyInput({ apiKey: 'ats_ci_legacy' })).toBe('ats_ci_legacy');
+      expect(stdoutSpy).not.toHaveBeenCalled();
+      expect(stderrSpy).toHaveBeenCalledWith(
+        expect.stringContaining('--api-key exposes credentials in shell history and process listings'),
+      );
+      expect(stderrSpy).toHaveBeenCalledWith(expect.stringContaining('AGENTTEAMS_API_KEY'));
+      expect(stderrSpy).toHaveBeenCalledWith(expect.stringContaining('--api-key-file'));
+      expect(stderrSpy).not.toHaveBeenCalledWith(expect.stringContaining('ats_ci_legacy'));
+    } finally {
+      stdoutSpy.mockRestore();
+      stderrSpy.mockRestore();
+    }
+  });
+
+  it('reads and trims an API key from --api-key-file', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'agentteams-api-key-file-'));
+    const filePath = join(directory, 'token');
+    writeFileSync(filePath, 'ats_ci_from_file\n', { encoding: 'utf-8', mode: 0o600 });
+
+    try {
+      expect(resolveApiKeyInput({ apiKeyFile: filePath })).toBe('ats_ci_from_file');
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('reads stdin when --api-key-file is -', () => {
+    expect(
+      resolveApiKeyInput(
+        { apiKeyFile: '-' },
+        {
+          readFile: () => {
+            throw new Error('file reader should not be used');
+          },
+          readStdin: () => 'ats_ci_from_stdin\r\n',
+          warn: () => undefined,
+        },
+      ),
+    ).toBe('ats_ci_from_stdin');
+  });
+
+  it('rejects ambiguous or empty API key input', () => {
+    expect(() => resolveApiKeyInput({ apiKey: 'ats_one', apiKeyFile: './token' })).toThrow(/cannot be used together/);
+    expect(() =>
+      resolveApiKeyInput({ apiKeyFile: '-' }, { readFile: () => '', readStdin: () => '\n', warn: () => undefined }),
+    ).toThrow(/empty/);
   });
 });

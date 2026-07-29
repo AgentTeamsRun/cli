@@ -1,10 +1,10 @@
 /**
  * `agentteams auth login | status | logout`.
  *
- * The opt-in authentication path. Nothing here changes what a project that has
- * never run `auth login` does: the command group is additive, and the credential
- * it stores is only picked up by `resolveCredential()` when the project opted in
- * (`authMode: 'personal-token'`) or has no `key_` left to use.
+ * The default authentication path for new projects and the migration path for
+ * legacy configs. The stored credential is picked up by `resolveCredential()`
+ * when the config has no `key_`, or when a migrated legacy project carries
+ * `authMode: 'personal-token'`.
  */
 
 import open from 'open';

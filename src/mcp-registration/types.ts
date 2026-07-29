@@ -14,9 +14,6 @@ export type McpClientId = (typeof MCP_CLIENT_IDS)[number];
 
 export type McpScope = 'user' | 'project';
 
-/** Syntax the client uses to inherit a secret from its parent process. */
-export type McpSecretReference = 'dollarBraces' | 'opencodeEnv' | 'codexEnvVars';
-
 /** How the AgentTeams entry reaches the client's configuration. */
 export type McpInstallStrategy =
   /** The client owns the format; we shell out to its documented non-interactive command. */
@@ -81,7 +78,6 @@ export interface McpClientDefinition {
   label: string;
   /** Executable names looked up on PATH. */
   executables: string[];
-  secretReference: McpSecretReference;
   /** Extra directories to probe when the client installs outside PATH (e.g. Kimi). */
   extraBinDirs?: (context: McpPathContext) => string[];
   /** Files/directories whose presence proves the client has been configured on this machine. */

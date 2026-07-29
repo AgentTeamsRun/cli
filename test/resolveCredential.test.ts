@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import {
   CredentialResolutionError,
   loadConfigWithCredential,
+  resetLegacyApiKeyWarningForTest,
   resolveCredential,
   type ResolveCredentialDeps,
 } from '../src/utils/config.js';
@@ -153,6 +154,23 @@ describe('resolveCredential priority', () => {
 });
 
 describe('resolveCredential and the legacy key_ path', () => {
+  it('prints migration guidance to stderr only once per execution', async () => {
+    resetLegacyApiKeyWarningForTest();
+    createProject({ teamId: 't', projectId: 'p', apiKey: 'key_legacy' });
+    const stderr = jest.spyOn(process.stderr, 'write').mockImplementation(() => true);
+
+    try {
+      await resolveCredential(undefined, clientDeps(tokenStore(null), workingFetch));
+      await resolveCredential(undefined, clientDeps(tokenStore(null), workingFetch));
+
+      expect(stderr).toHaveBeenCalledTimes(1);
+      expect(stderr.mock.calls[0]?.[0]).toContain('agentteams auth login');
+      expect(stderr.mock.calls[0]?.[0]).toContain('key_');
+    } finally {
+      stderr.mockRestore();
+    }
+  });
+
   it('never consults the credential store for a plain key_ project', async () => {
     createProject({ teamId: 't', projectId: 'p', apiKey: 'key_legacy' });
     const deps = clientDeps(tokenStore('atr_stored'), workingFetch);
@@ -213,6 +231,17 @@ describe('resolveCredential failure reporting', () => {
     const deps = clientDeps(tokenStore(null), workingFetch);
 
     await expect(resolveCredential(undefined, deps)).rejects.toThrow(/no credential is stored/);
+  });
+
+  it('routes the document `agentteams init` writes to auth login, not to a re-init', async () => {
+    // The exact default-init config (see toConfig in commands/init.ts): no apiKey, and the
+    // authMode marker. Drop the marker and this project silently returns null instead, so
+    // `auth logout` / a fresh clone / a wiped keychain all report "run `agentteams init`
+    // first" — advice that is wrong for an already-configured project.
+    createProject({ teamId: 't', projectId: 'p', apiUrl: API_URL, authMode: 'personal-token' });
+    const deps = clientDeps(tokenStore(null), workingFetch);
+
+    await expect(resolveCredential(undefined, deps)).rejects.toThrow(/agentteams auth login/);
   });
 });
 

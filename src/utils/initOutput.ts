@@ -20,6 +20,14 @@ interface InitResultShape {
   warning?: string;
 }
 
+/** Mirrors AGENT_API_KEY_TTL_MS in api/src/services/agentApiKey.ts. */
+const AGENT_API_KEY_TTL_DAYS = 30;
+
+function agentApiKeyExpiryLabel(): string {
+  const expiresAt = new Date(Date.now() + AGENT_API_KEY_TTL_DAYS * 24 * 60 * 60 * 1000);
+  return expiresAt.toISOString().slice(0, 10);
+}
+
 function isInitResult(result: unknown): result is InitResultShape {
   if (!result || typeof result !== 'object') return false;
   const r = result as Record<string, unknown>;
@@ -118,6 +126,16 @@ export function printInitResult(result: unknown, format: InitOutputFormat): void
     if (result.agentKeyRevoked === true) {
       console.log('✓ The setup agent key was revoked; nothing long-lived is left on the server.');
     }
+  }
+
+  // The compatibility path has a hard 30-day server-side TTL and no renewal of its own.
+  // Saying so here is the difference between a planned reissue and a runner that starts
+  // failing with a bare 401 exactly one month from today.
+  if (result.authMode === 'api-key') {
+    console.log(`⚠ This agent API key expires in 30 days (${agentApiKeyExpiryLabel()}) and does not renew itself.`);
+    console.log(
+      "  Reissue it in the web app (project settings → agents) before then, or run 'agentteams init' to switch to a personal login that refreshes automatically.",
+    );
   }
 
   if (result.warning) {

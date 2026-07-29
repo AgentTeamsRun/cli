@@ -4,6 +4,7 @@ import { getActiveCredential } from '../auth/activeCredential.js';
 type ApiErrorPayload = {
   message?: unknown;
   errorCode?: unknown;
+  errorDetailCode?: unknown;
   minimumVersion?: unknown;
 };
 
@@ -97,6 +98,7 @@ export function handleError(error: unknown, context?: ErrorContext): string {
       const rawMessage = typeof data?.message === 'string' ? data.message : error.message;
       const message = typeof rawMessage === 'string' ? translateServerMessage(rawMessage) : String(rawMessage);
       const errorCode = typeof data?.errorCode === 'string' ? data.errorCode : undefined;
+      const errorDetailCode = typeof data?.errorDetailCode === 'string' ? data.errorDetailCode : undefined;
       const minimumVersion = typeof data?.minimumVersion === 'string' ? data.minimumVersion : undefined;
 
       if (status === 426 || errorCode === 'CLI_UPGRADE_REQUIRED') {
@@ -112,6 +114,15 @@ Details: ${message}`;
           }
           return `Bad request. Check your flags and payload.\nNext: Verify required options (e.g., --id/--plan-id) and try again.\nDetails: ${message}`;
         case 401:
+          // An agent key that ran out its 30-day TTL is not a wrong key, and telling
+          // someone to check AGENTTEAMS_API_KEY sends them looking at a value that is
+          // exactly right. This is the only signal a runner gets, so it has to name
+          // the cause and the fix.
+          if (errorDetailCode === 'AGENT_API_KEY_EXPIRED') {
+            return `This agent API key is no longer valid: it expired or was revoked.
+Next: Reissue it in the AgentTeams web app (project settings → agents) and update .agentteams/config.json, or re-run 'agentteams init' to switch this project to a personal login that refreshes itself.
+Details: ${message}`;
+          }
           // A personal login that still fails after the automatic refresh is a
           // different problem from a wrong API key, and needs a different fix.
           if (getActiveCredential()) {

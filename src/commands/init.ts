@@ -20,7 +20,13 @@ import { multiselect, isCancel, cancel } from '@clack/prompts';
 import httpClient from '../utils/httpClient.js';
 import open from 'open';
 import { createAuthState, startLocalAuthServer } from '../utils/authServer.js';
-import { DEFAULT_API_URL, type PersistedConfig, saveConfig } from '../utils/config.js';
+import {
+  DEFAULT_API_URL,
+  type LegacyApiKeyPersistedConfig,
+  type PersistedConfig,
+  saveConfig,
+  saveLegacyApiKeyConfig,
+} from '../utils/config.js';
 import { performPersonalTokenLogin } from './auth.js';
 import { createSpinner, withSpinner } from '../utils/spinner.js';
 import { withCommandContext } from '../utils/commandContext.js';
@@ -67,10 +73,7 @@ JwIDAQAB
 
 type InitOptions = {
   cwd?: string;
-  /**
-   * Opt-in only. Absent or `api-key` keeps the original behaviour byte for byte;
-   * switching the default belongs to a later plan, not to this flag.
-   */
+  /** Personal login is the default; `api-key` is the explicit compatibility path. */
   authMode?: AuthMode;
 };
 
@@ -247,37 +250,45 @@ function resolveApiUrl(): string {
 /**
  * What actually lands in `.agentteams/config.json`.
  *
- * On the personal-token path the agent key is deliberately **not** written: the
- * whole point of that path is that no long-lived secret sits in the repository.
- * The key is still used in-process to fetch the convention template during this
- * run, and `authMode` marks the project so `resolveCredential()` prefers the
- * keychain credential from here on.
+ * The default document is deliberately secret-free. The callback's agent key is
+ * used only in-process to fetch conventions and is revoked before init exits.
+ * `apiUrl` is always explicit so the persisted schema is stable across default
+ * and custom deployments.
+ *
+ * `authMode` is not decoration: it is the only on-disk marker that this project
+ * *chose* the personal login. `planCredential` keys `optedIn` off it, and that
+ * flag is what turns "config exists, credential missing" into "run `agentteams
+ * auth login`" instead of the misleading "run `agentteams init` first" — the
+ * exact state after `auth logout`, a fresh clone, or a wiped OS keychain.
  */
 function toConfig(
   authResult: {
     teamId: string;
     projectId: string;
-    agentName: string;
-    apiKey: string;
   },
   apiUrl: string,
-  authMode: AuthMode,
 ): PersistedConfig {
-  const config: PersistedConfig = {
+  return {
     teamId: authResult.teamId,
     projectId: authResult.projectId,
+    apiUrl,
+    authMode: 'personal-token',
   };
+}
 
-  if (authMode === 'personal-token') {
-    config.authMode = 'personal-token';
-  } else {
-    config.apiKey = authResult.apiKey;
-  }
-
+/** Preserve the original config shape only for the explicit compatibility flag. */
+function toLegacyApiKeyConfig(
+  authResult: { teamId: string; projectId: string; apiKey: string },
+  apiUrl: string,
+): LegacyApiKeyPersistedConfig {
+  const config: LegacyApiKeyPersistedConfig = {
+    teamId: authResult.teamId,
+    projectId: authResult.projectId,
+    apiKey: authResult.apiKey,
+  };
   if (apiUrl !== DEFAULT_API_URL) {
     config.apiUrl = apiUrl;
   }
-
   return config;
 }
 
@@ -433,9 +444,7 @@ function generateAgentEntryPointFiles(cwd: string, selectedFiles: string[]): Age
 function isConfiguredMainCheckout(sourcePath: string): boolean {
   try {
     const config = JSON.parse(readFileSync(join(sourcePath, CONFIG_FILE), 'utf-8')) as Record<string, unknown>;
-    return ['teamId', 'projectId', 'apiKey'].every(
-      (field) => typeof config[field] === 'string' && config[field].length > 0,
-    );
+    return ['teamId', 'projectId'].every((field) => typeof config[field] === 'string' && config[field].length > 0);
   } catch {
     return false;
   }
@@ -548,10 +557,11 @@ function findCopyOnlyFiles(backupPath: string, sourcePath: string): string[] {
  * Park the copy outside every tracked surface while the link is created. A
  * backup next to `.agentteams` would show up in `git status` — the anchored
  * `/.agentteams` exclude is an exact match and does not cover a sibling name —
- * and the copied `config.json` carries the project apiKey. `git-common-dir` is
- * part of no working tree, so nothing can surface from there. A worktree on a
- * different volume cannot be renamed into it, and only then does the
- * in-worktree fallback apply — after registering its own exclude pattern.
+ * and a copied legacy `config.json` may carry the project apiKey.
+ * `git-common-dir` is part of no working tree, so nothing can surface from
+ * there. A worktree on a different volume cannot be renamed into it, and only
+ * then does the in-worktree fallback apply — after registering its own exclude
+ * pattern.
  */
 function moveConventionCopyAside(worktreePath: string, targetPath: string): { backupPath: string } | { error: string } {
   const failures: string[] = [];
@@ -783,8 +793,8 @@ export async function executeInitCommand(options?: InitOptions): Promise<InitRes
 
 async function executeInitCommandWithContext(options?: InitOptions): Promise<InitResult> {
   const cwd = resolve(options?.cwd ?? process.cwd());
-  // Anything other than an explicit opt-in is the original path.
-  const authMode: AuthMode = options?.authMode === 'personal-token' ? 'personal-token' : 'api-key';
+  // Only an explicit compatibility request persists the callback's agent key.
+  const authMode: AuthMode = options?.authMode === 'api-key' ? 'api-key' : 'personal-token';
   const worktreeResult = bootstrapLinkedWorktree(cwd);
   if (worktreeResult) return worktreeResult;
 
@@ -857,7 +867,6 @@ async function executeInitCommandWithContext(options?: InitOptions): Promise<Ini
 
     authSpinner?.succeed();
     const apiUrl = resolveApiUrl();
-    const config = toConfig(authResult, apiUrl, authMode);
     const runtimeConfig: Config = {
       teamId: authResult.teamId,
       projectId: authResult.projectId,
@@ -883,7 +892,11 @@ async function executeInitCommandWithContext(options?: InitOptions): Promise<Ini
       };
     }
 
-    saveConfig(configPath, config);
+    if (authMode === 'api-key') {
+      saveLegacyApiKeyConfig(configPath, toLegacyApiKeyConfig(authResult, apiUrl));
+    } else {
+      saveConfig(configPath, toConfig(authResult, apiUrl));
+    }
     writeFileSync(conventionPath, conventionContent, 'utf-8');
     await conventionDownload({ cwd, config: runtimeConfig });
 

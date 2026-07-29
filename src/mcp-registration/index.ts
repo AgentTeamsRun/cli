@@ -1,19 +1,28 @@
 import { homedir } from 'node:os';
-import { getConfigurationNotFoundMessage, loadConfigIdentity, planCredential } from '../utils/config.js';
+import { getConfigurationNotFoundMessage, loadConfigIdentity } from '../utils/config.js';
 import { buildConfigOverrides } from '../utils/apiContext.js';
 import { findClient, listClientIds, MCP_CLIENTS } from './clients.js';
 import type { DetectionDependencies } from './detect.js';
 import { buildBatchPlan, installClient, resolveInstallExitCode, runBatchInstall, type BatchPlan } from './install.js';
 import { renderConfigSnippet, renderVendorCommandLine } from './render.js';
 import { buildServerSpec, MCP_SERVER_NAME, type McpCredentials } from './serverSpec.js';
-import type { InstallResult, McpClientId, McpPathContext, McpScope } from './types.js';
+import type { InstallResult, McpClientId, McpPathContext, McpScope, McpServerSpec } from './types.js';
 import type { VendorRunner } from './vendorCommand.js';
 
 export { MCP_CLIENTS, findClient, listClientIds } from './clients.js';
 export { detectClients } from './detect.js';
+export { runMcpDoctorCommand } from './doctor.js';
+export type {
+  McpDoctorCleanup,
+  McpDoctorCommandOptions,
+  McpDoctorCommandOutput,
+  McpDoctorDependencies,
+  McpDoctorFinding,
+  McpDoctorReport,
+} from './doctor.js';
 export { buildBatchPlan, installClient, resolveInstallExitCode, runBatchInstall } from './install.js';
-export { renderConfigSnippet, renderVendorCommandLine, redactSecrets } from './render.js';
-export { buildServerSpec, MCP_SERVER_NAME, CREDENTIAL_ENV_KEYS } from './serverSpec.js';
+export { renderConfigSnippet, renderVendorCommandLine, redactKeyMaterial } from './render.js';
+export { buildServerSpec, MCP_SERVER_NAME } from './serverSpec.js';
 export type { McpCredentials } from './serverSpec.js';
 export * from './types.js';
 
@@ -49,11 +58,9 @@ export interface CommandOutput {
 /**
  * What goes into a client's config file.
  *
- * The project binding is always available; the credential is not. A
- * personal-login project deliberately produces no `apiKey` here — its access
- * token rotates every 15 minutes, so writing one into a client config would
- * register a server that stops working within the hour. `agentteams mcp`
- * resolves the login from the OS credential store on every request instead.
+ * Registration uses identity only for command context and human-readable
+ * output. The generated server spec never receives these values:
+ * `agentteams mcp` resolves project identity and credentials at request time.
  */
 function resolveCredentials(
   options: McpRegistrationCommandOptions,
@@ -65,17 +72,13 @@ function resolveCredentials(
   const identity = loadConfigIdentity(overrides);
   if (!identity) throw new Error(getConfigurationNotFoundMessage());
 
-  // The plan, not the resolved value: registration needs to know *which*
-  // credential applies, never a live token. That also keeps this path free of
-  // I/O, so a project with nothing logged in yet still renders its binding.
-  const plan = planCredential(overrides);
-  const apiKey = plan.source === 'personal-token' ? undefined : plan.apiKey;
-
+  // Identity only. Asking for a credential plan here would be dead work — the spec
+  // embeds nothing — and it would attach a side effect (the legacy `key_` warning)
+  // to `mcp config`, which renders a snippet and touches no file.
   return {
     projectId: identity.projectId,
     teamId: identity.teamId,
     apiUrl: identity.apiUrl,
-    ...(apiKey ? { apiKey } : {}),
   };
 }
 
@@ -93,6 +96,19 @@ function parseScope(value: unknown): McpScope {
   throw new Error(`Unsupported scope: ${String(value)}. Use "user" or "project".`);
 }
 
+/**
+ * Say which runtime the entry will spawn, so the choice is never silent.
+ *
+ * The bare executable is the fast path; `npx` is what a machine without a global install
+ * gets. Either way the user sees the reason here instead of discovering it as a client-side
+ * "server failed to start" (or as an unexplained cold start on every request).
+ */
+function describeRuntime(spec: McpServerSpec): string {
+  return spec.command === 'npx'
+    ? 'No global `agentteams` was found on PATH, so the entry runs the published package with npx. Run `npm install -g @agentteams/cli` and re-register for a faster start.'
+    : 'The entry runs the globally installed `agentteams` executable.';
+}
+
 function parseClientId(value: string): McpClientId {
   const client = findClient(value);
   if (!client) {
@@ -103,9 +119,9 @@ function parseClientId(value: string): McpClientId {
 
 /**
  * `config` is the escape hatch: it renders the exact fragment each client
- * expects and never touches a file, a vendor CLI or the network. The API key is
- * always emitted with the target client's environment-reference contract so
- * the output stays safe to paste into a terminal, an issue or a code review.
+ * expects and never touches a file, a vendor CLI or the network. The spawned
+ * server resolves local project identity and credentials for itself, so the
+ * fragment is safe to paste without any environment values.
  */
 export function runMcpConfigCommand(
   options: McpRegistrationCommandOptions,
@@ -116,7 +132,7 @@ export function runMcpConfigCommand(
   const scope = parseScope(options.scope);
   const clientIds = options.client ? [parseClientId(options.client)] : MCP_CLIENT_ID_LIST;
 
-  const spec = buildServerSpec({ credentials, secretMode: 'reference', serverEntry: options.serverEntry });
+  const spec = buildServerSpec({ serverEntry: options.serverEntry, context });
 
   const sections = clientIds.map((clientId) => {
     const client = findClient(clientId);
@@ -139,9 +155,8 @@ export function runMcpConfigCommand(
 
   const lines: string[] = [
     `AgentTeams MCP config (${scope} scope) — project ${credentials.projectId}, team ${credentials.teamId}`,
-    credentials.apiKey
-      ? 'The API key is rendered with the selected client’s environment-reference syntax. Export AGENTTEAMS_API_KEY before the client starts.'
-      : 'This project uses a personal login, so no API key is rendered — the MCP server reads it from the OS credential store at request time. Keep `agentteams auth login` valid on this machine.',
+    'No credentials or project binding are embedded. The MCP server resolves local configuration and the OS credential store at request time.',
+    describeRuntime(spec),
   ];
 
   for (const section of sections) {
@@ -177,9 +192,6 @@ function summarize(results: InstallResult[]): { applied: number; skipped: number
   };
 }
 
-const USER_SCOPE_BINDING_WARNING =
-  'Warning: a user-scope registration is machine-wide. If this client already has an "agentteams" server pointing at a different AgentTeams project, applying this plan re-points it.';
-
 /**
  * `install` has two modes:
  *  - `--client <id>`: apply a single client/scope (project scope allowed here).
@@ -210,8 +222,9 @@ export function runMcpInstallCommand(
     const lines = [
       `AgentTeams MCP install — ${client.label} (${scope} scope)`,
       `Project ${credentials.projectId}, team ${credentials.teamId}`,
+      'The server entry contains no credentials or project binding; runtime resolution uses local configuration and the OS credential store.',
+      describeRuntime(buildServerSpec({ serverEntry: options.serverEntry, context })),
     ];
-    if (scope === 'user') lines.push(USER_SCOPE_BINDING_WARNING);
     lines.push(renderResultLine(result));
     if (result.backupPath) lines.push(`Backup: ${result.backupPath}`);
     if (result.manualSnippet) {
@@ -243,9 +256,10 @@ export function runMcpInstallCommand(
     const lines = [
       'AgentTeams MCP install — dry run (no files were changed)',
       `Plan: register "${MCP_SERVER_NAME}" at ${scope} scope for project ${plan.binding.projectId}, team ${plan.binding.teamId}`,
+      'The server entries contain no credentials or project binding; runtime resolution uses local configuration and the OS credential store.',
+      describeRuntime(buildServerSpec({ serverEntry: options.serverEntry, context })),
       '',
     ];
-    if (scope === 'user') lines.splice(2, 0, USER_SCOPE_BINDING_WARNING);
 
     for (const entry of plan.entries) {
       lines.push(`- ${entry.clientId} [${entry.applicable ? 'will apply' : 'skip'}] ${formatDetectionEvidence(entry)}`);
@@ -266,6 +280,7 @@ export function runMcpInstallCommand(
   const { plan, results } = runBatchInstall({
     context,
     credentials,
+    scope,
     serverEntry: options.serverEntry,
     vendorRunner: dependencies?.vendorRunner,
     detectionDependencies: dependencies?.detectionDependencies,
@@ -273,7 +288,8 @@ export function runMcpInstallCommand(
 
   const summary = summarize(results);
   const lines = [
-    `AgentTeams MCP install — applied at user scope for project ${plan.binding.projectId}, team ${plan.binding.teamId}`,
+    `AgentTeams MCP install — applied at ${scope} scope for project ${plan.binding.projectId}, team ${plan.binding.teamId}`,
+    describeRuntime(buildServerSpec({ serverEntry: options.serverEntry, context })),
     ...results.map(renderResultLine),
     '',
     `Summary: ${summary.applied} registered, ${summary.skipped} skipped, ${summary.failed} failed.`,
@@ -281,7 +297,7 @@ export function runMcpInstallCommand(
 
   return {
     text: lines.join('\n'),
-    json: { scope: 'user', dryRun: false, plan, results, summary },
+    json: { scope, dryRun: false, plan, results, summary },
     exitCode: resolveInstallExitCode(results),
   };
 }

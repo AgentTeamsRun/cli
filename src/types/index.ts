@@ -14,10 +14,9 @@
 /**
  * Which credential family this project is configured to authenticate with.
  *
- * `api-key` is the original path and stays the default: a long-lived `key_`
- * agent key written into `.agentteams/config.json`. `personal-token` is the
- * opt-in path added by `agentteams auth login`, where the only thing on the
- * machine is a rotating refresh token inside the OS credential store.
+ * `personal-token` is the default: project config stays secret-free while a
+ * rotating refresh token lives in the OS credential store. `api-key` is the
+ * explicit compatibility path for existing automation and legacy projects.
  */
 export type AuthMode = 'api-key' | 'personal-token';
 
@@ -30,7 +29,7 @@ export interface Config {
   apiKey: string;
   /** API URL (e.g., "http://localhost:3001") */
   apiUrl: string;
-  /** Absent means `api-key` — an existing config file must keep behaving exactly as before. */
+  /** Legacy migration marker; absent configs choose by whether an apiKey exists. */
   authMode?: AuthMode;
 }
 

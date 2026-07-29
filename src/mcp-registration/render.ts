@@ -1,37 +1,21 @@
-import { CREDENTIAL_ENV_KEYS } from './serverSpec.js';
-import type { McpClientDefinition, McpEntryShape, McpScope, McpSecretReference, McpServerSpec } from './types.js';
-
-function referencedSpec(spec: McpServerSpec, reference: McpSecretReference): McpServerSpec {
-  if (reference !== 'opencodeEnv') return spec;
-  const apiKey = spec.env[CREDENTIAL_ENV_KEYS.apiKey];
-  if (apiKey !== `\${${CREDENTIAL_ENV_KEYS.apiKey}}`) return spec;
-  return {
-    ...spec,
-    env: { ...spec.env, [CREDENTIAL_ENV_KEYS.apiKey]: `{env:${CREDENTIAL_ENV_KEYS.apiKey}}` },
-  };
-}
+import type { McpClientDefinition, McpEntryShape, McpScope, McpServerSpec } from './types.js';
 
 /** Serialize the AgentTeams server entry in the shape the target client expects. */
-export function buildEntryValue(
-  shape: McpEntryShape,
-  spec: McpServerSpec,
-  reference: McpSecretReference = 'dollarBraces',
-): Record<string, unknown> {
-  const clientSpec = referencedSpec(spec, reference);
+export function buildEntryValue(shape: McpEntryShape, spec: McpServerSpec): Record<string, unknown> {
   if (shape === 'opencode') {
     return {
       type: 'local',
-      command: [clientSpec.command, ...clientSpec.args],
-      environment: { ...clientSpec.env },
+      command: [spec.command, ...spec.args],
+      environment: { ...spec.env },
       enabled: true,
     };
   }
 
   const entry: Record<string, unknown> = {};
   if (shape === 'stdio') entry.type = 'stdio';
-  entry.command = clientSpec.command;
-  entry.args = [...clientSpec.args];
-  entry.env = { ...clientSpec.env };
+  entry.command = spec.command;
+  entry.args = [...spec.args];
+  entry.env = { ...spec.env };
   return entry;
 }
 
@@ -46,14 +30,7 @@ function renderCodexToml(serverName: string, spec: McpServerSpec): string {
     `args = [${spec.args.map(tomlString).join(', ')}]`,
   ];
 
-  const apiKey = spec.env[CREDENTIAL_ENV_KEYS.apiKey];
-  if (apiKey === `\${${CREDENTIAL_ENV_KEYS.apiKey}}`) {
-    lines.push(`env_vars = [${tomlString(CREDENTIAL_ENV_KEYS.apiKey)}]`);
-  }
-
-  const envEntries = Object.entries(spec.env).filter(
-    ([key, value]) => key !== CREDENTIAL_ENV_KEYS.apiKey || value !== `\${${CREDENTIAL_ENV_KEYS.apiKey}}`,
-  );
+  const envEntries = Object.entries(spec.env);
   if (envEntries.length > 0) {
     lines.push('', `[mcp_servers.${serverName}.env]`);
     for (const [key, value] of envEntries) {
@@ -82,7 +59,7 @@ export function renderConfigSnippet(
   }
 
   const containerKey = definition.containerKey;
-  const entry = buildEntryValue(definition.entryShape ?? 'plain', spec, client.secretReference);
+  const entry = buildEntryValue(definition.entryShape ?? 'plain', spec);
   const document = containerKey ? { [containerKey]: { [serverName]: entry } } : { [serverName]: entry };
   return JSON.stringify(document, null, 2);
 }
@@ -102,15 +79,12 @@ export function renderVendorCommandLine(
 }
 
 /**
- * Strip credential values from anything that reaches a terminal, a log or a
- * test snapshot. Vendor CLIs echo their own arguments on failure, so their
- * captured output has to pass through here before it is shown.
+ * Strip AgentTeams key material from vendor output before it reaches a terminal or a log.
+ *
+ * Registration itself no longer holds a credential — the server spec embeds nothing — so
+ * there is no value to pass in. What remains is that vendor CLIs echo their own argv and
+ * environment on failure, and that output can carry a `key_` this process never saw.
  */
-export function redactSecrets(text: string, secrets: string[]): string {
-  let redacted = text;
-  for (const secret of secrets) {
-    if (!secret || secret.length < 4) continue;
-    redacted = redacted.split(secret).join('***');
-  }
-  return redacted;
+export function redactKeyMaterial(text: string): string {
+  return text.replace(/(?<![A-Za-z0-9_-])key_[A-Za-z0-9][A-Za-z0-9_-]{7,}/g, '***');
 }

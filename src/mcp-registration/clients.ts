@@ -52,7 +52,6 @@ export const MCP_CLIENTS: McpClientDefinition[] = [
     runnerType: 'CLAUDE_CODE',
     label: 'Claude Code',
     executables: ['claude'],
-    secretReference: 'dollarBraces',
     configSignals: (context) => [join(context.homeDir, '.claude.json'), join(context.homeDir, '.claude')],
     docsUrl: 'https://code.claude.com/docs/en/mcp',
     verifiedAt: '2026-07-25',
@@ -93,7 +92,6 @@ export const MCP_CLIENTS: McpClientDefinition[] = [
     runnerType: 'CODEX',
     label: 'Codex',
     executables: ['codex'],
-    secretReference: 'codexEnvVars',
     configSignals: (context) => [join(codexHome(context), 'config.toml'), codexHome(context)],
     docsUrl: 'https://developers.openai.com/codex/mcp',
     verifiedAt: '2026-07-25',
@@ -103,7 +101,7 @@ export const MCP_CLIENTS: McpClientDefinition[] = [
         format: 'toml',
         strategy: 'configOnly',
         configOnlyReason:
-          'Codex inherits secrets through `env_vars`, but `codex mcp add --env` accepts values only through argv. The CLI therefore prints a safe TOML snippet instead of exposing the API key in the process list.',
+          'Codex user config is TOML. The CLI prints a complete snippet instead of rewriting that user-owned file and dropping comments or key order.',
       },
       project: {
         configPath: (context) => join(context.cwd, '.codex', 'config.toml'),
@@ -119,7 +117,6 @@ export const MCP_CLIENTS: McpClientDefinition[] = [
     runnerType: 'COPILOT_CLI',
     label: 'GitHub Copilot CLI',
     executables: ['copilot'],
-    secretReference: 'dollarBraces',
     configSignals: (context) => [join(copilotHome(context), 'mcp-config.json'), copilotHome(context)],
     docsUrl: 'https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-mcp-servers',
     verifiedAt: '2026-07-25',
@@ -145,7 +142,6 @@ export const MCP_CLIENTS: McpClientDefinition[] = [
     runnerType: 'OPENCODE',
     label: 'OpenCode',
     executables: ['opencode'],
-    secretReference: 'opencodeEnv',
     configSignals: (context) => [
       join(xdgConfigHome(context), 'opencode', 'opencode.jsonc'),
       join(xdgConfigHome(context), 'opencode', 'opencode.json'),
@@ -175,7 +171,6 @@ export const MCP_CLIENTS: McpClientDefinition[] = [
     runnerType: 'AMP',
     label: 'Amp',
     executables: ['amp'],
-    secretReference: 'dollarBraces',
     configSignals: (context) => [
       join(xdgConfigHome(context), 'amp', 'settings.json'),
       join(xdgConfigHome(context), 'amp'),
@@ -218,7 +213,6 @@ export const MCP_CLIENTS: McpClientDefinition[] = [
     runnerType: 'CURSOR_CLI',
     label: 'Cursor CLI',
     executables: ['cursor-agent'],
-    secretReference: 'dollarBraces',
     configSignals: (context) => [join(context.homeDir, '.cursor', 'mcp.json'), join(context.homeDir, '.cursor')],
     docsUrl: 'https://docs.cursor.com/context/model-context-protocol',
     verifiedAt: '2026-07-25',
@@ -246,7 +240,6 @@ export const MCP_CLIENTS: McpClientDefinition[] = [
     runnerType: 'KIMI_CLI',
     label: 'Kimi CLI',
     executables: ['kimi'],
-    secretReference: 'dollarBraces',
     extraBinDirs: (context) => [join(kimiHome(context), 'bin')],
     configSignals: (context) => [join(kimiHome(context), 'mcp.json'), kimiHome(context)],
     docsUrl: 'https://www.kimi.com/code/docs/en/kimi-code-cli/customization/mcp.html',
@@ -275,7 +268,6 @@ export const MCP_CLIENTS: McpClientDefinition[] = [
     runnerType: 'ANTIGRAVITY',
     label: 'Antigravity',
     executables: ['agy', 'antigravity'],
-    secretReference: 'dollarBraces',
     configSignals: (context) => [
       join(context.homeDir, '.gemini', 'config', 'mcp_config.json'),
       join(context.homeDir, '.gemini', 'antigravity'),
