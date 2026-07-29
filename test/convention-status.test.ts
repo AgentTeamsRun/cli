@@ -1,8 +1,10 @@
-import { describe, it, expect } from '@jest/globals';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { afterEach, beforeEach, describe, it, expect } from '@jest/globals';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildStatusSummary, conventionStatus } from '../src/commands/convention.js';
+import { resetPersonalTokenClientsForTests } from '../src/auth/personalTokenClient.js';
+import { resetCredentialStoreForTests } from '../src/auth/credentialStore.js';
 
 describe('buildStatusSummary', () => {
   it('reports up to date when there are no changes', () => {
@@ -82,5 +84,52 @@ describe('conventionStatus', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  describe('personal-token project with no stored credential', () => {
+    let originalCwd: string;
+    let originalEnv: NodeJS.ProcessEnv;
+    let root: string;
+
+    beforeEach(() => {
+      originalCwd = process.cwd();
+      originalEnv = { ...process.env };
+      resetPersonalTokenClientsForTests();
+      resetCredentialStoreForTests();
+
+      root = mkdtempSync(join(tmpdir(), 'agentteams-conv-status-personal-'));
+      mkdirSync(join(root, '.agentteams'), { recursive: true });
+      // Exactly what `init --auth personal-token` writes: no `apiKey` at all.
+      writeFileSync(
+        join(root, '.agentteams', 'config.json'),
+        JSON.stringify({ teamId: 't', projectId: 'p', authMode: 'personal-token' }),
+        'utf-8',
+      );
+      delete process.env.AGENTTEAMS_API_KEY;
+      // A per-run server keeps the credential slot unique, so a developer who is
+      // actually logged in does not turn this into a flaky test.
+      process.env.AGENTTEAMS_API_URL = `https://conv-status-${process.pid}.invalid`;
+      process.chdir(root);
+    });
+
+    afterEach(() => {
+      process.chdir(originalCwd);
+      process.env = originalEnv;
+      rmSync(root, { recursive: true, force: true });
+      resetPersonalTokenClientsForTests();
+      resetCredentialStoreForTests();
+    });
+
+    it('reports that freshness could NOT be checked instead of claiming it is up to date', async () => {
+      // The platform convention makes this the session-start freshness gate. A
+      // silent "up to date" here means every agent in the project keeps working
+      // from stale rules and nobody finds out.
+      const result = await conventionStatus({ cwd: root, currentCliVersion: '0.1.0', latestCliVersion: '0.1.0' });
+
+      expect(result.credentialProblem).toContain('agentteams auth login');
+      expect(result.actionRequired).toBe(true);
+      expect(result.hints.some((hint) => hint.startsWith('WARNING: Convention freshness was NOT checked'))).toBe(true);
+      expect(result.hints).not.toContain('OK: Conventions and platform guides are up to date.');
+    });
   });
 });

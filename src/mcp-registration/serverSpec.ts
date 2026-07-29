@@ -13,7 +13,12 @@ export const CREDENTIAL_ENV_KEYS = {
 } as const;
 
 export interface McpCredentials {
-  apiKey: string;
+  /**
+   * Omitted for a personal-login project: there is no long-lived key to write,
+   * and the short-lived access token must not be baked into a client config.
+   * The spawned `agentteams mcp` resolves the credential per request instead.
+   */
+  apiKey?: string;
   projectId: string;
   teamId: string;
   apiUrl: string;
@@ -38,11 +43,17 @@ export interface BuildServerSpecOptions {
 export function buildServerSpec(options: BuildServerSpecOptions): McpServerSpec {
   const { credentials, secretMode, serverEntry } = options;
 
-  const env: Record<string, string> = {
-    [CREDENTIAL_ENV_KEYS.apiKey]: secretMode === 'literal' ? credentials.apiKey : `\${${CREDENTIAL_ENV_KEYS.apiKey}}`,
-    [CREDENTIAL_ENV_KEYS.projectId]: credentials.projectId,
-    [CREDENTIAL_ENV_KEYS.teamId]: credentials.teamId,
-  };
+  const env: Record<string, string> = {};
+
+  // No key means the personal-login path: emitting an empty value or a
+  // placeholder for a variable nobody will export would only override the
+  // credential the server can resolve for itself.
+  if (credentials.apiKey) {
+    env[CREDENTIAL_ENV_KEYS.apiKey] =
+      secretMode === 'literal' ? credentials.apiKey : `\${${CREDENTIAL_ENV_KEYS.apiKey}}`;
+  }
+  env[CREDENTIAL_ENV_KEYS.projectId] = credentials.projectId;
+  env[CREDENTIAL_ENV_KEYS.teamId] = credentials.teamId;
 
   // Only non-default API URLs are worth pinning; emitting the default would make
   // every generated config break the day the hosted URL changes.

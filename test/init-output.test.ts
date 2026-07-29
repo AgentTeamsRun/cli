@@ -192,6 +192,45 @@ describe('printInitResult', () => {
     });
   });
 
+  describe('개인 토큰 경로 (human format)', () => {
+    it('로그인 계정과 에이전트 키 폐기 결과를 사람용 출력에 표시한다', () => {
+      printInitResult(
+        {
+          ...MOCK_INIT_RESULT,
+          authMode: 'personal-token' as const,
+          personalLogin: { email: 'dev@example.com', nickname: 'dev', persisted: true },
+          agentKeyRevoked: true,
+        },
+        'human',
+      );
+
+      const output = captureOutput(logSpy);
+      expect(output).toContain('dev@example.com');
+      expect(output).toContain('OS credential store');
+      expect(output).toContain('revoked');
+    });
+
+    it('경고는 기본 포맷에서 반드시 보인다', () => {
+      // 기본 실행이 사람용 포맷이므로, --format json에서만 보이는 경고는 아무도 읽지 않는다.
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+      printInitResult(
+        {
+          ...MOCK_INIT_RESULT,
+          authMode: 'personal-token' as const,
+          personalLogin: { email: 'dev@example.com', nickname: 'dev', persisted: true },
+          agentKeyRevoked: false,
+          warning: 'The agent key created for "claude-main" could not be revoked and is still valid.',
+        },
+        'human',
+      );
+
+      expect(captureOutput(warnSpy)).toContain('could not be revoked');
+
+      warnSpy.mockRestore();
+    });
+  });
+
   describe('json format', () => {
     it('json 포맷이면 JSON 문자열을 출력한다', () => {
       printInitResult(MOCK_INIT_RESULT, 'json');

@@ -104,8 +104,11 @@ function normalizeVariables(variables: Record<string, string | string[]>): Recor
  * Start the stdio MCP server. stdout is reserved for JSON-RPC frames, so every
  * diagnostic goes to stderr.
  */
-export function startMcpServer(options: Record<string, unknown> = {}): StdioServerHandle {
-  const context = resolveMcpToolContext(options);
+export async function startMcpServer(options: Record<string, unknown> = {}): Promise<StdioServerHandle> {
+  // Startup still resolves once — that is where the `${VAR}` and project-binding
+  // refusals must happen, before a single tool is advertised. What changed is
+  // that the credential inside the context can now be re-resolved per request.
+  const context = await resolveMcpToolContext(options);
 
   writeDiagnostic(`serving stdio (cli ${pkg.version}) apiUrl=${context.apiUrl} projectId=${context.projectId}`);
 

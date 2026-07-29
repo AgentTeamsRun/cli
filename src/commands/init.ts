@@ -21,10 +21,11 @@ import httpClient from '../utils/httpClient.js';
 import open from 'open';
 import { createAuthState, startLocalAuthServer } from '../utils/authServer.js';
 import { DEFAULT_API_URL, type PersistedConfig, saveConfig } from '../utils/config.js';
+import { performPersonalTokenLogin } from './auth.js';
 import { createSpinner, withSpinner } from '../utils/spinner.js';
 import { withCommandContext } from '../utils/commandContext.js';
 import { conventionDownload } from './convention.js';
-import type { Config } from '../types/index.js';
+import type { AuthMode, Config } from '../types/index.js';
 import { resolveGitTopLevel, resolveMainCheckoutRoot } from '../utils/git.js';
 import { canonicalizePath } from '../utils/path.js';
 import { buildAuthHeaders } from '../utils/apiContext.js';
@@ -66,6 +67,11 @@ JwIDAQAB
 
 type InitOptions = {
   cwd?: string;
+  /**
+   * Opt-in only. Absent or `api-key` keeps the original behaviour byte for byte;
+   * switching the default belongs to a later plan, not to this flag.
+   */
+  authMode?: AuthMode;
 };
 
 export type AgentFileEntry = {
@@ -85,6 +91,16 @@ type OAuthInitResult = {
   seedPlanId: string | null;
   seedPlanWebUrl: string | null;
   postCheckoutHook?: EnsurePostCheckoutHookResult;
+  authMode: AuthMode;
+  /** Set only on the personal-token path, where the credential lives outside the repository. */
+  personalLogin?: { email: string; nickname: string; persisted: boolean };
+  /**
+   * Personal-token path only. The browser round trip still mints an agent key —
+   * it is what fetches the convention template — and this records whether that
+   * key was handed back before init exited.
+   */
+  agentKeyRevoked?: boolean;
+  warning?: string;
 };
 
 export type WorktreeEntryPointState = ConventionEntryPointState;
@@ -228,6 +244,15 @@ function resolveApiUrl(): string {
   return normalizeApiUrl(process.env.AGENTTEAMS_API_URL || DEFAULT_API_URL);
 }
 
+/**
+ * What actually lands in `.agentteams/config.json`.
+ *
+ * On the personal-token path the agent key is deliberately **not** written: the
+ * whole point of that path is that no long-lived secret sits in the repository.
+ * The key is still used in-process to fetch the convention template during this
+ * run, and `authMode` marks the project so `resolveCredential()` prefers the
+ * keychain credential from here on.
+ */
 function toConfig(
   authResult: {
     teamId: string;
@@ -236,12 +261,18 @@ function toConfig(
     apiKey: string;
   },
   apiUrl: string,
+  authMode: AuthMode,
 ): PersistedConfig {
   const config: PersistedConfig = {
     teamId: authResult.teamId,
     projectId: authResult.projectId,
-    apiKey: authResult.apiKey,
   };
+
+  if (authMode === 'personal-token') {
+    config.authMode = 'personal-token';
+  } else {
+    config.apiKey = authResult.apiKey;
+  }
 
   if (apiUrl !== DEFAULT_API_URL) {
     config.apiUrl = apiUrl;
@@ -274,6 +305,33 @@ async function fetchConventionTemplate(
   }
 
   return content;
+}
+
+/**
+ * Hand the agent key back at the end of a personal-token init.
+ *
+ * The browser round trip mints a `key_` no matter which auth mode was asked
+ * for — it is the only credential that can read the convention template. On the
+ * personal-token path that key is never written to disk, so leaving it live
+ * would mean a long-lived secret the user cannot see, use or cancel. The agent
+ * config itself stays: it is the project's record of this machine, and only its
+ * credential is the liability.
+ */
+async function revokeInitAgentKey(
+  authResult: { projectId: string; configId: string; apiKey: string },
+  apiUrl: string,
+): Promise<boolean> {
+  try {
+    await httpClient.delete(
+      `${apiUrl}/api/projects/${authResult.projectId}/agent-configs/${authResult.configId}/api-keys`,
+      { headers: buildAuthHeaders(authResult.apiKey) },
+    );
+    return true;
+  } catch {
+    // Not fatal: init has everything it needs, and the caller warns instead so
+    // the user can revoke it from the web app.
+    return false;
+  }
 }
 
 async function promptAgentFileSelection(): Promise<string[]> {
@@ -725,6 +783,8 @@ export async function executeInitCommand(options?: InitOptions): Promise<InitRes
 
 async function executeInitCommandWithContext(options?: InitOptions): Promise<InitResult> {
   const cwd = resolve(options?.cwd ?? process.cwd());
+  // Anything other than an explicit opt-in is the original path.
+  const authMode: AuthMode = options?.authMode === 'personal-token' ? 'personal-token' : 'api-key';
   const worktreeResult = bootstrapLinkedWorktree(cwd);
   if (worktreeResult) return worktreeResult;
 
@@ -797,18 +857,48 @@ async function executeInitCommandWithContext(options?: InitOptions): Promise<Ini
 
     authSpinner?.succeed();
     const apiUrl = resolveApiUrl();
-    const config = toConfig(authResult, apiUrl);
+    const config = toConfig(authResult, apiUrl, authMode);
     const runtimeConfig: Config = {
-      ...config,
+      teamId: authResult.teamId,
+      projectId: authResult.projectId,
+      apiKey: authResult.apiKey,
       apiUrl,
     };
     const conventionContent = await withSpinner('Fetching convention template...', () =>
       fetchConventionTemplate(authResult, apiUrl),
     );
 
+    // The project is known now, so the personal login can run before anything is
+    // written: a failed login must not leave a config with no usable credential.
+    // A login that cannot be stored throws here, which is the point — init stops
+    // before `saveConfig` rather than leaving a half-configured project behind.
+    let personalLogin: OAuthInitResult['personalLogin'];
+    const warnings: string[] = [];
+    if (authMode === 'personal-token') {
+      const outcome = await performPersonalTokenLogin({ apiUrl, projectName });
+      personalLogin = {
+        email: outcome.identity.email,
+        nickname: outcome.identity.nickname,
+        persisted: outcome.persisted,
+      };
+    }
+
     saveConfig(configPath, config);
     writeFileSync(conventionPath, conventionContent, 'utf-8');
     await conventionDownload({ cwd, config: runtimeConfig });
+
+    // Last use of the agent key is the convention download above.
+    let agentKeyRevoked: boolean | undefined;
+    if (authMode === 'personal-token') {
+      agentKeyRevoked = await revokeInitAgentKey(authResult, apiUrl);
+      if (!agentKeyRevoked) {
+        warnings.push(
+          `The agent key created for "${authResult.agentName}" could not be revoked and is still valid. ` +
+            'Revoke it in the AgentTeams web app (project settings → agents) — it was never written to this repository.',
+        );
+      }
+    }
+
     ensureGitignore(cwd);
     const selectedFiles = await promptAgentFileSelection();
     if (selectedFiles.includes('GEMINI.md')) {
@@ -841,6 +931,10 @@ async function executeInitCommandWithContext(options?: InitOptions): Promise<Ini
       seedPlanId,
       seedPlanWebUrl,
       postCheckoutHook,
+      authMode,
+      ...(personalLogin ? { personalLogin } : {}),
+      ...(agentKeyRevoked === undefined ? {} : { agentKeyRevoked }),
+      ...(warnings.length > 0 ? { warning: warnings.join(' ') } : {}),
     };
   } catch (error) {
     authSpinner?.fail();

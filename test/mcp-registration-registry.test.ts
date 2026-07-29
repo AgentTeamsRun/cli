@@ -238,6 +238,45 @@ describe('mcp config output', () => {
     expect(() => run({ scope: 'global' })).toThrow(/Unsupported scope/);
   });
 
+  it('renders a personal-login project without an API key instead of failing as unconfigured', () => {
+    // `init --auth personal-token` writes no `apiKey`, so the old config loader
+    // reported the project as uninitialized and `mcp config` refused to run.
+    const originalCwd = process.cwd();
+    const originalEnv = { ...process.env };
+    const projectRoot = mkdtempSync(join(tmpdir(), 'agentteams-mcp-personal-'));
+    mkdirSync(join(projectRoot, '.agentteams'), { recursive: true });
+    writeFileSync(
+      join(projectRoot, '.agentteams', 'config.json'),
+      JSON.stringify({ teamId: 'team-personal', projectId: 'project-personal', authMode: 'personal-token' }),
+      'utf-8',
+    );
+
+    try {
+      // Environment overrides beat the project file, and a runner process has
+      // these set; the fixture has to be the only source of truth here.
+      for (const key of ['AGENTTEAMS_API_KEY', 'AGENTTEAMS_TEAM_ID', 'AGENTTEAMS_PROJECT_ID', 'AGENTTEAMS_API_URL']) {
+        delete process.env[key];
+      }
+      process.chdir(projectRoot);
+
+      const output = runMcpConfigCommand(
+        { scope: 'user', client: 'cursor-cli' },
+        { context: { homeDir: home, cwd: projectRoot, env: {} as NodeJS.ProcessEnv } },
+      );
+
+      expect(output.text).toContain('project-personal');
+      // A 15-minute access token in a client config would break within the hour,
+      // and a `${AGENTTEAMS_API_KEY}` reference nobody exports would only mask
+      // the credential the server can resolve for itself.
+      expect(output.text).not.toContain('AGENTTEAMS_API_KEY');
+      expect(output.text).toContain('personal login');
+    } finally {
+      process.chdir(originalCwd);
+      process.env = originalEnv;
+      rmSync(projectRoot, { recursive: true, force: true });
+    }
+  });
+
   it('does not create or modify any file', () => {
     // Seed both trees so the comparison covers "modified", not just "created".
     mkdirSync(join(home, '.cursor'), { recursive: true });

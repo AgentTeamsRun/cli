@@ -61,7 +61,10 @@ function installViaVendorCommand(
 
   // Vendor CLIs echo their own argv on failure, and user-scope argv carries the
   // API key, so nothing reaches the caller before passing through redaction.
-  const combined = redactSecrets(`${outcome.stdout}\n${outcome.stderr}`, [options.credentials.apiKey]);
+  const combined = redactSecrets(
+    `${outcome.stdout}\n${outcome.stderr}`,
+    options.credentials.apiKey ? [options.credentials.apiKey] : [],
+  );
 
   const alreadyRegistered = (vendor.alreadyRegisteredPatterns ?? []).some((pattern) => pattern.test(combined));
   if (alreadyRegistered) {

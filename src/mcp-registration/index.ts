@@ -1,5 +1,5 @@
 import { homedir } from 'node:os';
-import { getConfigurationNotFoundMessage, loadConfig } from '../utils/config.js';
+import { getConfigurationNotFoundMessage, loadConfigIdentity, planCredential } from '../utils/config.js';
 import { buildConfigOverrides } from '../utils/apiContext.js';
 import { findClient, listClientIds, MCP_CLIENTS } from './clients.js';
 import type { DetectionDependencies } from './detect.js';
@@ -46,19 +46,36 @@ export interface CommandOutput {
   exitCode: number;
 }
 
+/**
+ * What goes into a client's config file.
+ *
+ * The project binding is always available; the credential is not. A
+ * personal-login project deliberately produces no `apiKey` here — its access
+ * token rotates every 15 minutes, so writing one into a client config would
+ * register a server that stops working within the hour. `agentteams mcp`
+ * resolves the login from the OS credential store on every request instead.
+ */
 function resolveCredentials(
   options: McpRegistrationCommandOptions,
   dependencies?: McpRegistrationDependencies,
 ): McpCredentials {
   if (dependencies?.credentials) return dependencies.credentials;
 
-  const config = loadConfig(buildConfigOverrides(options as Record<string, unknown>));
-  if (!config) throw new Error(getConfigurationNotFoundMessage());
+  const overrides = buildConfigOverrides(options as Record<string, unknown>);
+  const identity = loadConfigIdentity(overrides);
+  if (!identity) throw new Error(getConfigurationNotFoundMessage());
+
+  // The plan, not the resolved value: registration needs to know *which*
+  // credential applies, never a live token. That also keeps this path free of
+  // I/O, so a project with nothing logged in yet still renders its binding.
+  const plan = planCredential(overrides);
+  const apiKey = plan.source === 'personal-token' ? undefined : plan.apiKey;
+
   return {
-    apiKey: config.apiKey,
-    projectId: config.projectId,
-    teamId: config.teamId,
-    apiUrl: config.apiUrl,
+    projectId: identity.projectId,
+    teamId: identity.teamId,
+    apiUrl: identity.apiUrl,
+    ...(apiKey ? { apiKey } : {}),
   };
 }
 
@@ -122,7 +139,9 @@ export function runMcpConfigCommand(
 
   const lines: string[] = [
     `AgentTeams MCP config (${scope} scope) — project ${credentials.projectId}, team ${credentials.teamId}`,
-    'The API key is rendered with the selected client’s environment-reference syntax. Export AGENTTEAMS_API_KEY before the client starts.',
+    credentials.apiKey
+      ? 'The API key is rendered with the selected client’s environment-reference syntax. Export AGENTTEAMS_API_KEY before the client starts.'
+      : 'This project uses a personal login, so no API key is rendered — the MCP server reads it from the OS credential store at request time. Keep `agentteams auth login` valid on this machine.',
   ];
 
   for (const section of sections) {

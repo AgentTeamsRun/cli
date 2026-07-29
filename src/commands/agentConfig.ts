@@ -1,10 +1,12 @@
 import httpClient from '../utils/httpClient.js';
-import { getConfigurationNotFoundMessage, loadConfig } from '../utils/config.js';
+import { getConfigurationNotFoundMessage, loadConfigWithCredential } from '../utils/config.js';
 import { withoutJsonContentType } from '../utils/httpHeaders.js';
 import { buildAuthHeaders } from '../utils/apiContext.js';
 
-function getConfigOrThrow() {
-  const config = loadConfig();
+async function getConfigOrThrow() {
+  // Credential-aware: a personal-token project has no `apiKey` on disk, so the
+  // plain config loader would report it as "not initialized".
+  const config = await loadConfigWithCredential();
   if (!config) {
     throw new Error(getConfigurationNotFoundMessage());
   }
@@ -23,7 +25,7 @@ function getApiBaseUrl(apiUrl: string): string {
 }
 
 export async function agentConfigList(): Promise<any> {
-  const config = getConfigOrThrow();
+  const config = await getConfigOrThrow();
   const apiBaseUrl = getApiBaseUrl(config.apiUrl);
   const response = await httpClient.get(`${apiBaseUrl}/api/projects/${config.projectId}/agent-configs`, {
     headers: getHeaders(config.apiKey),
@@ -32,7 +34,7 @@ export async function agentConfigList(): Promise<any> {
 }
 
 export async function agentConfigGet(id: string): Promise<any> {
-  const config = getConfigOrThrow();
+  const config = await getConfigOrThrow();
   const apiBaseUrl = getApiBaseUrl(config.apiUrl);
   const response = await httpClient.get(`${apiBaseUrl}/api/projects/${config.projectId}/agent-configs/${id}`, {
     headers: getHeaders(config.apiKey),
@@ -41,7 +43,7 @@ export async function agentConfigGet(id: string): Promise<any> {
 }
 
 export async function agentConfigDelete(id: string): Promise<any> {
-  const config = getConfigOrThrow();
+  const config = await getConfigOrThrow();
   const apiBaseUrl = getApiBaseUrl(config.apiUrl);
   const response = await httpClient.delete(`${apiBaseUrl}/api/projects/${config.projectId}/agent-configs/${id}`, {
     headers: withoutJsonContentType(getHeaders(config.apiKey)),

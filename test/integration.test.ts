@@ -134,6 +134,10 @@ describe('CLI Integration Tests', () => {
       (jest as any).unstable_mockModule('../src/utils/authServer.js', () => ({
         startLocalAuthServer: mockStartLocalAuthServer,
         createAuthState: () => 'test-login-state',
+        // Reached only through the opt-in `--auth personal-token` path, which
+        // this default-path test never takes.
+        createPkcePair: () => ({ verifier: 'test-verifier', challenge: 'test-challenge' }),
+        startAuthorizationCodeServer: jest.fn(),
       }));
       (jest as any).unstable_mockModule('open', () => ({
         default: jest.fn().mockImplementation(async () => undefined),
@@ -249,6 +253,10 @@ describe('CLI Integration Tests', () => {
       (jest as any).unstable_mockModule('../src/utils/authServer.js', () => ({
         startLocalAuthServer: mockStartLocalAuthServer,
         createAuthState: () => 'test-login-state',
+        // Reached only through the opt-in `--auth personal-token` path, which
+        // this default-path test never takes.
+        createPkcePair: () => ({ verifier: 'test-verifier', challenge: 'test-challenge' }),
+        startAuthorizationCodeServer: jest.fn(),
       }));
       (jest as any).unstable_mockModule('open', () => ({
         default: jest.fn().mockImplementation(async () => undefined),

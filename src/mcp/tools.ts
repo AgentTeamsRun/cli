@@ -37,32 +37,37 @@ function documentListParams(params: ContextListParams): Record<string, string | 
  * authenticated HTTP functions. MCP envelopes remain in server.ts.
  */
 export function createCliContextToolsClient(context: McpToolContext): ContextToolsClient {
-  const { apiUrl, projectId, headers } = context;
+  const { apiUrl, projectId } = context;
+  // Resolved per call, not per client: an MCP server outlives its credential.
+  // Without `resolveHeaders` (a static agent key) this is the startup snapshot.
+  const auth = (): Promise<Record<string, string>> => context.resolveHeaders?.() ?? Promise.resolve(context.headers);
   return {
-    search: (params) => searchEntities(apiUrl, projectId, headers, params),
-    listPlans: (params) => listPlans(apiUrl, projectId, headers, scalarListParams(params)),
-    getPlan: (id) => getPlanRunbook(apiUrl, projectId, headers, id),
-    listCompletionReports: (params) => listReports(apiUrl, projectId, headers, scalarListParams(params)),
-    getCompletionReport: (id) => getReport(apiUrl, projectId, headers, id),
-    listCoActions: (params) => listCoActions(apiUrl, projectId, headers, scalarListParams(params)),
-    getCoAction: (id) => getCoAction(apiUrl, projectId, headers, id),
-    listPostMortems: (params) => listPostMortems(apiUrl, projectId, headers, scalarListParams(params)),
-    getPostMortem: (id) => getPostMortem(apiUrl, projectId, headers, id),
-    listDocuments: (params) => listDocuments(apiUrl, projectId, headers, documentListParams(params)),
-    getDocument: (id) => getDocument(apiUrl, projectId, headers, id),
-    listConventions: (params) => listConventions(apiUrl, projectId, headers, scalarListParams(params)),
-    getConvention: (id) => getConvention(apiUrl, projectId, headers, id),
-    listCodeReviews: (params) => listCodeReviews(apiUrl, projectId, headers, scalarListParams(params)),
-    getCodeReview: (id) => getCodeReview(apiUrl, projectId, headers, id),
-    listComments: (planId, params) => listComments(apiUrl, projectId, headers, planId, scalarListParams(params)),
-    listFindingComments: (findingId, params) =>
-      listFindingComments(apiUrl, projectId, headers, findingId, scalarListParams(params)),
-    listTaskComments: (taskId, params) =>
-      listTaskComments(apiUrl, projectId, headers, taskId, scalarListParams(params)),
-    listDocumentComments: (documentId, params) =>
-      listDocumentComments(apiUrl, projectId, headers, documentId, scalarListParams(params)),
-    getComment: (id) => getComment(apiUrl, projectId, headers, id),
-    getCodeReviewFinding: (id, codeReviewId) => getCodeReviewFinding(apiUrl, projectId, headers, id, codeReviewId),
+    search: async (params) => searchEntities(apiUrl, projectId, await auth(), params),
+    listPlans: async (params) => listPlans(apiUrl, projectId, await auth(), scalarListParams(params)),
+    getPlan: async (id) => getPlanRunbook(apiUrl, projectId, await auth(), id),
+    listCompletionReports: async (params) => listReports(apiUrl, projectId, await auth(), scalarListParams(params)),
+    getCompletionReport: async (id) => getReport(apiUrl, projectId, await auth(), id),
+    listCoActions: async (params) => listCoActions(apiUrl, projectId, await auth(), scalarListParams(params)),
+    getCoAction: async (id) => getCoAction(apiUrl, projectId, await auth(), id),
+    listPostMortems: async (params) => listPostMortems(apiUrl, projectId, await auth(), scalarListParams(params)),
+    getPostMortem: async (id) => getPostMortem(apiUrl, projectId, await auth(), id),
+    listDocuments: async (params) => listDocuments(apiUrl, projectId, await auth(), documentListParams(params)),
+    getDocument: async (id) => getDocument(apiUrl, projectId, await auth(), id),
+    listConventions: async (params) => listConventions(apiUrl, projectId, await auth(), scalarListParams(params)),
+    getConvention: async (id) => getConvention(apiUrl, projectId, await auth(), id),
+    listCodeReviews: async (params) => listCodeReviews(apiUrl, projectId, await auth(), scalarListParams(params)),
+    getCodeReview: async (id) => getCodeReview(apiUrl, projectId, await auth(), id),
+    listComments: async (planId, params) =>
+      listComments(apiUrl, projectId, await auth(), planId, scalarListParams(params)),
+    listFindingComments: async (findingId, params) =>
+      listFindingComments(apiUrl, projectId, await auth(), findingId, scalarListParams(params)),
+    listTaskComments: async (taskId, params) =>
+      listTaskComments(apiUrl, projectId, await auth(), taskId, scalarListParams(params)),
+    listDocumentComments: async (documentId, params) =>
+      listDocumentComments(apiUrl, projectId, await auth(), documentId, scalarListParams(params)),
+    getComment: async (id) => getComment(apiUrl, projectId, await auth(), id),
+    getCodeReviewFinding: async (id, codeReviewId) =>
+      getCodeReviewFinding(apiUrl, projectId, await auth(), id, codeReviewId),
   };
 }
 

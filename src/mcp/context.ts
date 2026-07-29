@@ -1,11 +1,26 @@
-import { getConfigurationNotFoundMessage, loadConfig, loadProjectConfig } from '../utils/config.js';
-import { buildConfigOverrides, resolveApiContext } from '../utils/apiContext.js';
+import { getPersonalTokenClient } from '../auth/personalTokenClient.js';
+import { getConfigurationNotFoundMessage, loadConfigWithCredential, loadProjectConfig } from '../utils/config.js';
+import { buildAuthHeaders, buildConfigOverrides, resolveApiContext } from '../utils/apiContext.js';
 
 /** Everything a tool handler needs to reach the AgentTeams API. */
 export interface McpToolContext {
   apiUrl: string;
   projectId: string;
+  /**
+   * Credentials as of server start. For a long-lived agent key this is the whole
+   * story; for a credential that expires it is only the first value.
+   */
   headers: Record<string, string>;
+  /**
+   * Present only when the credential can go stale.
+   *
+   * `agentteams mcp` runs for hours while a personal access token lives 15
+   * minutes, so resolving once at startup would make every later tool call 401.
+   * Tool handlers must call this instead of reading {@link headers} directly.
+   * It is cheap: the access token is cached in memory and only re-fetched inside
+   * the refresh window, so the OS credential store is not touched per call.
+   */
+  resolveHeaders?: () => Promise<Record<string, string>>;
 }
 
 /**
@@ -62,8 +77,8 @@ function assertNoUnresolvedPlaceholders(credentials: Record<string, string>): vo
  * trusted to sit inside the project: CLI overrides and `AGENTTEAMS_*`
  * environment variables are the reliable paths here.
  */
-export function resolveMcpToolContext(options: Record<string, unknown> = {}): McpToolContext {
-  const config = loadConfig(buildConfigOverrides(options));
+export async function resolveMcpToolContext(options: Record<string, unknown> = {}): Promise<McpToolContext> {
+  const config = await loadConfigWithCredential(buildConfigOverrides(options));
   if (!config) {
     throw new Error(getConfigurationNotFoundMessage());
   }
@@ -88,5 +103,24 @@ export function resolveMcpToolContext(options: Record<string, unknown> = {}): Mc
   });
 
   const { apiUrl, headers } = resolveApiContext(config);
-  return { apiUrl, projectId: config.projectId, headers };
+
+  if (config.credentialSource !== 'personal-token') {
+    return { apiUrl, projectId: config.projectId, headers };
+  }
+
+  const client = getPersonalTokenClient(apiUrl);
+  return {
+    apiUrl,
+    projectId: config.projectId,
+    headers,
+    resolveHeaders: async () => {
+      const accessToken = await client.getAccessToken();
+      // A refresh that cannot complete right now must not blank the credential:
+      // returning the last known headers lets the request fail as a normal 401
+      // (which the HTTP layer then retries once) instead of as an unauthenticated
+      // call with a confusing error.
+      if (!accessToken) return headers;
+      return { ...buildAuthHeaders(accessToken), 'Content-Type': 'application/json' };
+    },
+  };
 }

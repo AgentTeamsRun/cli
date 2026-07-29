@@ -89,16 +89,54 @@ program.name('agentteams').description('CLI tool for AgentTeams API').version(pk
 program
   .command('init')
   .description('Initialize AgentTeams CLI via OAuth')
+  .addOption(
+    new Option(
+      '--auth <mode>',
+      'Credential to configure. `api-key` (default) writes a long-lived key; `personal-token` stores a rotating login in the OS credential store instead (setup still mints an agent key to fetch conventions, and revokes it before exiting).',
+    )
+      .choices(['api-key', 'personal-token'])
+      .default('api-key'),
+  )
   .option('--format <format>', 'Output format (json; defaults to human-readable view)')
   .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
   .option('--verbose', 'Print full raw output to stdout; with --output-file, also echo it', false)
   .addHelpText('after', CONVENTION_HINT)
   .action(async (options) => {
     try {
-      const result = await executeCommand('init', 'start', {});
+      const result = await executeCommand('init', 'start', { authMode: options.auth });
       const format = normalizeInteractiveFormat(options.format);
 
       printInitResult(result, format);
+    } catch (error) {
+      console.error(handleError(error));
+      process.exit(1);
+    }
+  });
+
+program
+  .command('auth')
+  .description('Sign in with a personal AgentTeams login (opt-in; `init` still defaults to an API key)')
+  .argument('<action>', 'Action to perform (login, status, logout)')
+  .option('--api-url <url>', 'API server to authenticate against (defaults to the project config or env)')
+  .option(
+    '--local',
+    'logout only: clear the local credential without contacting the server (the token stays valid — revoke it in the web app)',
+    false,
+  )
+  .option('--format <format>', 'Output format (json)', 'json')
+  .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
+  .option('--verbose', 'Print full raw output to stdout; with --output-file, also echo it', false)
+  .addHelpText('after', CONVENTION_HINT)
+  .action(async (action, options) => {
+    try {
+      const result = await executeCommand('auth', action, { apiUrl: options.apiUrl, local: options.local === true });
+
+      printCommandResult({
+        result,
+        format: normalizeFormat(options.format),
+        outputFile: options.outputFile,
+        verbose: options.verbose,
+      });
     } catch (error) {
       console.error(handleError(error));
       process.exit(1);
@@ -1134,7 +1172,7 @@ const mcpCommand = program
 
       // stdout carries JSON-RPC frames only: this action deliberately bypasses
       // executeCommand()/printCommandResult() and never writes to stdout.
-      startMcpServer({
+      await startMcpServer({
         apiUrl: options.apiUrl,
         apiKey: options.apiKey,
         projectId: options.projectId,

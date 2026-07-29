@@ -1,4 +1,5 @@
 import { AxiosError, isAxiosError } from 'axios';
+import { getActiveCredential } from '../auth/activeCredential.js';
 
 type ApiErrorPayload = {
   message?: unknown;
@@ -111,6 +112,11 @@ Details: ${message}`;
           }
           return `Bad request. Check your flags and payload.\nNext: Verify required options (e.g., --id/--plan-id) and try again.\nDetails: ${message}`;
         case 401:
+          // A personal login that still fails after the automatic refresh is a
+          // different problem from a wrong API key, and needs a different fix.
+          if (getActiveCredential()) {
+            return `Your AgentTeams login is no longer valid.\nNext: Run 'agentteams auth login' to sign in again.\nDetails: ${message}`;
+          }
           if (errorCode === 'AUTH_REQUIRED') {
             return `Authentication required.
 Next: Verify your AGENTTEAMS_API_KEY and ensure credentials are configured.

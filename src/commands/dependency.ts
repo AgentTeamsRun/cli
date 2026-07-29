@@ -1,10 +1,12 @@
 import httpClient from '../utils/httpClient.js';
-import { getConfigurationNotFoundMessage, loadConfig } from '../utils/config.js';
+import { getConfigurationNotFoundMessage, loadConfigWithCredential } from '../utils/config.js';
 import { withoutJsonContentType } from '../utils/httpHeaders.js';
 import { buildAuthHeaders } from '../utils/apiContext.js';
 
-function getConfigOrThrow() {
-  const config = loadConfig();
+async function getConfigOrThrow() {
+  // Credential-aware: a personal-token project has no `apiKey` on disk, so the
+  // plain config loader would report it as "not initialized".
+  const config = await loadConfigWithCredential();
   if (!config) {
     throw new Error(getConfigurationNotFoundMessage());
   }
@@ -23,7 +25,7 @@ function getApiBaseUrl(apiUrl: string): string {
 }
 
 export async function dependencyList(planId: string): Promise<any> {
-  const config = getConfigOrThrow();
+  const config = await getConfigOrThrow();
   const apiBaseUrl = getApiBaseUrl(config.apiUrl);
   const response = await httpClient.get(`${apiBaseUrl}/api/projects/${config.projectId}/plans/${planId}/dependencies`, {
     headers: getHeaders(config.apiKey),
@@ -32,7 +34,7 @@ export async function dependencyList(planId: string): Promise<any> {
 }
 
 export async function dependencyCreate(planId: string, blockingPlanId: string): Promise<any> {
-  const config = getConfigOrThrow();
+  const config = await getConfigOrThrow();
   const apiBaseUrl = getApiBaseUrl(config.apiUrl);
   const response = await httpClient.post(
     `${apiBaseUrl}/api/projects/${config.projectId}/plans/${planId}/dependencies`,
@@ -43,7 +45,7 @@ export async function dependencyCreate(planId: string, blockingPlanId: string): 
 }
 
 export async function dependencyDelete(planId: string, depId: string): Promise<any> {
-  const config = getConfigOrThrow();
+  const config = await getConfigOrThrow();
   const apiBaseUrl = getApiBaseUrl(config.apiUrl);
   const response = await httpClient.delete(
     `${apiBaseUrl}/api/projects/${config.projectId}/plans/${planId}/dependencies/${depId}`,
