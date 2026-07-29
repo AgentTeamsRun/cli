@@ -1,6 +1,7 @@
-import { describe, expect, it } from '@jest/globals';
+import { afterEach, describe, expect, it } from '@jest/globals';
 import { AxiosError } from 'axios';
 import { attachErrorContext, handleError } from '../src/utils/errors.js';
+import { resetActiveCredentialForTests, setActiveCredential } from '../src/auth/activeCredential.js';
 
 function makeAxiosError(
   status: number,
@@ -132,5 +133,22 @@ describe('errors', () => {
     expect(handleError(networkError)).toBe(
       "Cannot connect to server (API URL not configured).\nNext: Run 'agentteams init' or set AGENTTEAMS_API_URL.",
     );
+  });
+});
+
+describe('errors with a personal login', () => {
+  afterEach(() => {
+    resetActiveCredentialForTests();
+  });
+
+  it('points a 401 at auth login instead of at the API key', () => {
+    resetActiveCredentialForTests();
+    expect(handleError(makeAxiosError(401, { message: 'Unauthorized' }))).toContain('AGENTTEAMS_API_KEY');
+
+    // The automatic refresh already ran and still failed, so the key is not the problem.
+    setActiveCredential({ refresh: async () => null });
+    const message = handleError(makeAxiosError(401, { message: 'Unauthorized' }));
+    expect(message).toContain('agentteams auth login');
+    expect(message).not.toContain('AGENTTEAMS_API_KEY');
   });
 });

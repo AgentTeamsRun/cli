@@ -134,10 +134,20 @@ describe('CLI Integration Tests', () => {
       (jest as any).unstable_mockModule('../src/utils/authServer.js', () => ({
         startLocalAuthServer: mockStartLocalAuthServer,
         createAuthState: () => 'test-login-state',
+        createPkcePair: () => ({ verifier: 'test-verifier', challenge: 'test-challenge' }),
+        startAuthorizationCodeServer: jest.fn(),
+      }));
+      const personalLoginMock = jest.fn(async () => ({
+        identity: { email: 'dev@example.com', nickname: 'dev' },
+        persisted: true,
+      }));
+      (jest as any).unstable_mockModule('../src/commands/auth.js', () => ({
+        performPersonalTokenLogin: personalLoginMock,
       }));
       (jest as any).unstable_mockModule('open', () => ({
         default: jest.fn().mockImplementation(async () => undefined),
       }));
+      axiosDeleteSpy.mockResolvedValueOnce({ data: {} } as any);
 
       const { executeInitCommand } = await import('../src/commands/init.js');
       const result = await executeInitCommand({ cwd: tempCwd });
@@ -151,6 +161,9 @@ describe('CLI Integration Tests', () => {
           teamId: 'team_1',
           projectId: PROJECT_ID,
           agentName: 'test-agent',
+          authMode: 'personal-token',
+          personalLogin: { email: 'dev@example.com', nickname: 'dev', persisted: true },
+          agentKeyRevoked: true,
         }),
       );
       if ('mode' in result) {
@@ -161,12 +174,26 @@ describe('CLI Integration Tests', () => {
       expect(parsedAuthUrl.searchParams.get('state')).toBe('test-login-state');
       expect(result.authUrl).not.toContain(tempCwd);
 
-      const savedConfig = JSON.parse(readFileSync(result.configPath, 'utf-8'));
+      const savedConfigText = readFileSync(result.configPath, 'utf-8');
+      const savedConfig = JSON.parse(savedConfigText);
+      // authMode is the marker that makes a missing credential say "run `agentteams auth
+      // login`" instead of "run `agentteams init` first"; the document stays secret-free.
       expect(savedConfig).toEqual({
         teamId: 'team_1',
         projectId: PROJECT_ID,
-        apiKey: 'key_oauth_123',
         apiUrl: API_URL,
+        authMode: 'personal-token',
+      });
+      expect(Object.keys(savedConfig).sort()).toEqual(['apiUrl', 'authMode', 'projectId', 'teamId']);
+      expect(savedConfigText).not.toContain('key_');
+      expect(personalLoginMock).toHaveBeenCalledWith({
+        apiUrl: API_URL,
+        projectName: expect.any(String),
+      });
+      expect(axiosDeleteSpy).toHaveBeenCalledWith(`${API_URL}/api/projects/${PROJECT_ID}/agent-configs/7/api-keys`, {
+        headers: {
+          'X-API-Key': 'key_oauth_123',
+        },
       });
 
       const savedConvention = readFileSync(result.conventionPath, 'utf-8');
@@ -193,7 +220,7 @@ describe('CLI Integration Tests', () => {
       rmSync(tempCwd, { recursive: true, force: true });
     });
 
-    it('init start: should ignore a callback-supplied apiUrl and use the CLI default', async () => {
+    it('init start: forced api-key mode should ignore a callback-supplied apiUrl and preserve legacy config', async () => {
       if (typeof (jest as any).unstable_mockModule !== 'function') {
         return;
       }
@@ -249,13 +276,15 @@ describe('CLI Integration Tests', () => {
       (jest as any).unstable_mockModule('../src/utils/authServer.js', () => ({
         startLocalAuthServer: mockStartLocalAuthServer,
         createAuthState: () => 'test-login-state',
+        createPkcePair: () => ({ verifier: 'test-verifier', challenge: 'test-challenge' }),
+        startAuthorizationCodeServer: jest.fn(),
       }));
       (jest as any).unstable_mockModule('open', () => ({
         default: jest.fn().mockImplementation(async () => undefined),
       }));
 
       const { executeInitCommand } = await import('../src/commands/init.js');
-      const result = await executeInitCommand({ cwd: tempCwd });
+      const result = await executeInitCommand({ cwd: tempCwd, authMode: 'api-key' });
       if ('mode' in result) {
         throw new Error('Expected the OAuth init path outside a linked worktree.');
       }

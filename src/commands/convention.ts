@@ -7,7 +7,7 @@ import { isAxiosError } from 'axios';
 import { downloadAllConventions, listConventions } from '../api/convention.js';
 import matter from 'gray-matter';
 import { diffLines, createTwoFilesPatch } from 'diff';
-import { loadConfig, findProjectConfig, getConfigurationNotFoundMessage } from '../utils/config.js';
+import { loadConfigWithCredential, findProjectConfig, getConfigurationNotFoundMessage } from '../utils/config.js';
 import { withSpinner } from '../utils/spinner.js';
 import { withoutJsonContentType } from '../utils/httpHeaders.js';
 import { compareVersions, getLatestCliVersion } from '../utils/updateCheck.js';
@@ -109,8 +109,11 @@ function getApiBaseUrl(apiUrl: string): string {
   return apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl;
 }
 
-function getApiConfigOrThrow(options?: ConventionCommandOptions) {
-  const config = options?.config ?? loadConfig();
+async function getApiConfigOrThrow(options?: ConventionCommandOptions) {
+  // Credential-aware: a personal-token project keeps no `apiKey` on disk, and
+  // the conventions these commands sync become always-on agent rules — reading
+  // "not initialized" there would silently freeze a project's rules.
+  const config = options?.config ?? (await loadConfigWithCredential());
   if (!config) {
     throw new Error(getConfigurationNotFoundMessage(options?.cwd));
   }
@@ -340,7 +343,7 @@ function toOptionalStringOrNullIfPresent(data: Record<string, unknown>, key: str
 }
 
 export async function conventionShow(): Promise<any> {
-  const { config, apiUrl, headers } = getApiConfigOrThrow();
+  const { config, apiUrl, headers } = await getApiConfigOrThrow();
 
   const conventions = await fetchConventionsWithContent(apiUrl, config.projectId, headers);
   if (!conventions || conventions.length === 0) {
@@ -446,6 +449,12 @@ export type ConventionStatusResult = {
   hints: string[];
   /** One-line human-readable summary. */
   summary: string;
+  /**
+   * Set when the project *is* configured but its credential could not be
+   * resolved. Distinguishes "nothing to check" from "could not check" — the
+   * latter must never read as "up to date".
+   */
+  credentialProblem?: string;
 };
 
 export function buildStatusSummary(result: ConventionFreshnessResult): string {
@@ -507,6 +516,7 @@ function buildStatusResult(params: {
   currentCliVersion: string;
   latestCliVersion: string | null;
   cliUpdateAvailable: boolean;
+  credentialProblem?: string;
 }): ConventionStatusResult {
   const conventionUpdateAvailable =
     params.freshness.platformGuidesChanged || params.freshness.conventionChanges.length > 0;
@@ -534,11 +544,16 @@ function buildStatusResult(params: {
     hints.push(
       `ACTION REQUIRED: Sync conventions now: ${actions.syncConventions}. After syncing, re-read .agentteams/convention.md and any changed rule files before continuing.`,
     );
+  } else if (params.credentialProblem) {
+    hints.push(
+      `WARNING: Convention freshness was NOT checked — ${params.credentialProblem} Conventions may be stale; fix the login, then re-run 'agentteams convention status'.`,
+    );
   } else {
     hints.push('OK: Conventions and platform guides are up to date.');
   }
 
   return {
+    ...(params.credentialProblem ? { credentialProblem: params.credentialProblem } : {}),
     updateAvailable: conventionUpdateAvailable,
     conventionUpdateAvailable,
     platformGuidesChanged: params.freshness.platformGuidesChanged,
@@ -546,7 +561,7 @@ function buildStatusResult(params: {
     cliUpdateAvailable: params.cliUpdateAvailable,
     currentCliVersion: params.currentCliVersion,
     latestCliVersion: params.latestCliVersion,
-    actionRequired: conventionUpdateAvailable || params.cliUpdateAvailable,
+    actionRequired: conventionUpdateAvailable || params.cliUpdateAvailable || Boolean(params.credentialProblem),
     actions,
     hints,
     summary: buildCombinedStatusSummary({
@@ -565,17 +580,34 @@ function buildStatusResult(params: {
  * update is available — it never downloads or mutates anything. Degrades gracefully
  * (exit 0, updateAvailable=false) when the project is not configured or has no local
  * conventions yet, so callers can safely "check then skip when unavailable".
+ *
+ * "Not configured" and "configured but the credential failed" are reported
+ * differently on purpose. The platform convention makes this the session-start
+ * freshness gate, so a project whose login is broken must say so instead of
+ * quietly claiming its rules are current.
  */
 export async function conventionStatus(options?: ConventionCommandOptions): Promise<ConventionStatusResult> {
-  const config = options?.config ?? loadConfig();
   const projectRoot = findProjectRoot(options?.cwd);
   const cliStatus = await resolveCliUpdateStatus(options);
+
+  let config = options?.config ?? null;
+  let credentialProblem: string | undefined;
+  if (!config) {
+    try {
+      config = await loadConfigWithCredential();
+    } catch (error) {
+      credentialProblem = error instanceof Error ? error.message : String(error);
+    }
+  }
 
   // Not configured or no local conventions → nothing to compare; treat as up to date.
   if (!config || !projectRoot) {
     return buildStatusResult({
       freshness: { platformGuidesChanged: false, conventionChanges: [] },
       ...cliStatus,
+      // Only a project that exists locally can have a credential problem worth
+      // reporting; without a project root there is nothing to be stale.
+      ...(credentialProblem && projectRoot ? { credentialProblem } : {}),
     });
   }
 
@@ -590,7 +622,7 @@ export async function conventionStatus(options?: ConventionCommandOptions): Prom
 }
 
 export async function conventionList(): Promise<any> {
-  const { config, apiUrl, headers } = getApiConfigOrThrow();
+  const { config, apiUrl, headers } = await getApiConfigOrThrow();
 
   const conventions = await fetchAllConventions(apiUrl, config.projectId, headers);
   if (!Array.isArray(conventions)) {
@@ -740,7 +772,7 @@ async function downloadReportingTemplate(
 }
 
 export async function conventionDownload(options?: ConventionCommandOptions): Promise<string> {
-  const { config, apiUrl, headers } = getApiConfigOrThrow(options);
+  const { config, apiUrl, headers } = await getApiConfigOrThrow(options);
 
   const projectRoot = findProjectRoot(options?.cwd);
   if (!projectRoot) {
@@ -852,7 +884,7 @@ function parseConventionMarkdown(fileRelativePath: string, markdown: string): Re
 }
 
 export async function conventionCreate(options: ConventionCreateOptions): Promise<string> {
-  const { config, apiUrl, headers } = getApiConfigOrThrow(options);
+  const { config, apiUrl, headers } = await getApiConfigOrThrow(options);
   const projectRoot = findProjectRoot(options?.cwd);
   if (!projectRoot) {
     throw new Error("No .agentteams directory found. Run 'agentteams init' first.");
@@ -950,7 +982,7 @@ export async function conventionCreate(options: ConventionCreateOptions): Promis
 }
 
 export async function conventionUpdate(options: ConventionUploadOptions): Promise<string> {
-  const { config, apiUrl, headers } = getApiConfigOrThrow(options);
+  const { config, apiUrl, headers } = await getApiConfigOrThrow(options);
   const projectRoot = findProjectRoot(options?.cwd);
   if (!projectRoot) {
     throw new Error("No .agentteams directory found. Run 'agentteams init' first.");
@@ -1059,7 +1091,7 @@ export async function conventionUpdate(options: ConventionUploadOptions): Promis
 }
 
 export async function conventionDelete(options: ConventionDeleteOptions): Promise<string> {
-  const { config, apiUrl, headers } = getApiConfigOrThrow(options);
+  const { config, apiUrl, headers } = await getApiConfigOrThrow(options);
   const projectRoot = findProjectRoot(options?.cwd);
   if (!projectRoot) {
     throw new Error("No .agentteams directory found. Run 'agentteams init' first.");

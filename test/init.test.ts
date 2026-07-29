@@ -44,7 +44,7 @@ function createRepository(): { repositoryDir: string; worktreeDir: string } {
   mkdirSync(join(repositoryDir, '.agentteams'));
   writeFileSync(
     join(repositoryDir, '.agentteams', 'config.json'),
-    JSON.stringify({ teamId: 'team-1', projectId: 'project-1', apiKey: 'api-key-1' }),
+    JSON.stringify({ teamId: 'team-1', projectId: 'project-1', apiUrl: 'https://api.agentteams.run' }),
     'utf-8',
   );
   writeFileSync(join(repositoryDir, '.agentteams', 'convention.md'), '# Convention chain restored\n', 'utf-8');
@@ -64,7 +64,7 @@ function createNonGitRootWithLinkedMember(): {
   mkdirSync(join(rootDir, '.agentteams'), { recursive: true });
   writeFileSync(
     join(rootDir, '.agentteams', 'config.json'),
-    JSON.stringify({ teamId: 'team-1', projectId: 'project-1', apiKey: 'api-key-1' }),
+    JSON.stringify({ teamId: 'team-1', projectId: 'project-1', apiUrl: 'https://api.agentteams.run' }),
     'utf-8',
   );
   writeFileSync(join(rootDir, '.agentteams', 'convention.md'), '# Root convention\n', 'utf-8');
@@ -262,8 +262,8 @@ describe('linked worktree bootstrap', () => {
     expect(readFileSync(join(retained!.path, 'cli', 'temp', 'findings.json'), 'utf-8')).toBe('{"findings":[]}');
     // The promotion never writes into the main checkout's conventions.
     expect(existsSync(join(repositoryDir, '.agentteams', 'runner'))).toBe(false);
-    // The backup holds a copy of config.json with the project apiKey, so it
-    // must not surface as untracked worktree state.
+    // The backup holds a copy of the project config, so it must not surface as
+    // untracked worktree state.
     expect(execFileSync('git', ['status', '--porcelain'], { cwd: worktreeDir, encoding: 'utf-8' }).trim()).toBe('');
   });
 

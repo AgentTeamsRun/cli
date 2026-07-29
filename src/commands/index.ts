@@ -1,4 +1,5 @@
 import { executeInitCommand } from './init.js';
+import { executeAuthCommand } from './auth.js';
 import { executeDoctorCommand } from './doctor.js';
 import { executeAgentConfigCommand } from './agentConfigCommand.js';
 import { executeConfigCommand } from './config.js';
@@ -17,7 +18,7 @@ import { executeSearchCommand } from './search.js';
 import { executeLinearCommand } from './linear.js';
 import { executeAttachmentCommand } from './attachment.js';
 import { executeTaskCommand } from './task.js';
-import { getConfigurationNotFoundMessage, loadConfig } from '../utils/config.js';
+import { getConfigurationNotFoundMessage, loadConfigWithCredential } from '../utils/config.js';
 import { executeWorktreeCommand } from './worktree.js';
 import { normalizeCommandContext, withCommandContext } from '../utils/commandContext.js';
 import { normalizeEntityIdOptions } from '../utils/entityId.js';
@@ -25,8 +26,8 @@ import { attachErrorContext } from '../utils/errors.js';
 import { buildConfigOverrides, resolveApiContext } from '../utils/apiContext.js';
 import type { Config } from '../types/index.js';
 
-function loadRequiredConfig(overrides?: Partial<Config>): Config {
-  const config = loadConfig(overrides);
+async function loadRequiredConfig(overrides?: Partial<Config>): Promise<Config> {
+  const config = await loadConfigWithCredential(overrides);
   if (!config) {
     throw new Error(getConfigurationNotFoundMessage());
   }
@@ -62,6 +63,10 @@ async function executeCommandWithContext(
   switch (resource) {
     case 'init':
       return executeInitCommand(options);
+    // Authentication is what produces a credential, so it must stay routable
+    // before any credential can be resolved.
+    case 'auth':
+      return executeAuthCommand(action, options);
     case 'worktree':
       return executeWorktreeCommand(action, options);
     // Local diagnosis/repair resource: must stay routable without loading the
@@ -75,7 +80,7 @@ async function executeCommandWithContext(
     case 'plan':
     case 'task':
     case 'comment': {
-      const config = loadRequiredConfig();
+      const config = await loadRequiredConfig();
       const { apiUrl, headers } = resolveApiContext(config);
 
       if (resource === 'plan') {
@@ -99,14 +104,14 @@ async function executeCommandWithContext(
       throw new Error(`Unknown resource: ${resource}`);
     }
     case 'document': {
-      const config = loadRequiredConfig(buildConfigOverrides(options));
+      const config = await loadRequiredConfig(buildConfigOverrides(options));
       const { apiUrl, headers } = resolveApiContext(config);
       return withApiErrorContext(apiUrl, () =>
         executeDocumentCommand(apiUrl, config.projectId, headers, action, options),
       );
     }
     case 'report': {
-      const config = loadRequiredConfig(buildConfigOverrides(options));
+      const config = await loadRequiredConfig(buildConfigOverrides(options));
       const { apiUrl, headers } = resolveApiContext(config);
 
       return withApiErrorContext(apiUrl, () =>
@@ -117,7 +122,7 @@ async function executeCommandWithContext(
       );
     }
     case 'code-review': {
-      const config = loadRequiredConfig(buildConfigOverrides(options));
+      const config = await loadRequiredConfig(buildConfigOverrides(options));
       const { apiUrl, headers } = resolveApiContext(config);
       return withApiErrorContext(apiUrl, () =>
         executeCodeReviewCommand(apiUrl, config.projectId, headers, action, {
@@ -127,14 +132,14 @@ async function executeCommandWithContext(
       );
     }
     case 'change-set': {
-      const config = loadRequiredConfig(buildConfigOverrides(options));
+      const config = await loadRequiredConfig(buildConfigOverrides(options));
       const { apiUrl, headers } = resolveApiContext(config);
       return withApiErrorContext(apiUrl, () =>
         executeChangeSetCommand({ apiUrl, projectId: config.projectId, headers }, action, options),
       );
     }
     case 'postmortem': {
-      const config = loadRequiredConfig(buildConfigOverrides(options));
+      const config = await loadRequiredConfig(buildConfigOverrides(options));
       const { apiUrl, headers } = resolveApiContext(config);
 
       return withApiErrorContext(apiUrl, () =>
@@ -145,7 +150,7 @@ async function executeCommandWithContext(
       );
     }
     case 'coaction': {
-      const config = loadRequiredConfig(buildConfigOverrides(options));
+      const config = await loadRequiredConfig(buildConfigOverrides(options));
       const { apiUrl, headers } = resolveApiContext(config);
       return withApiErrorContext(apiUrl, () =>
         executeCoActionCommand(apiUrl, headers, action, {
@@ -157,7 +162,7 @@ async function executeCommandWithContext(
     case 'dependency':
       return executeDependencyCommand(action, options);
     case 'feedback': {
-      const config = loadRequiredConfig(buildConfigOverrides(options));
+      const config = await loadRequiredConfig(buildConfigOverrides(options));
       const { apiUrl, headers } = resolveApiContext(config);
       return withApiErrorContext(apiUrl, () => executeFeedbackCommand(apiUrl, headers, action, options));
     }
@@ -166,17 +171,17 @@ async function executeCommandWithContext(
     case 'config':
       return executeConfigCommand(action);
     case 'search': {
-      const config = loadRequiredConfig(buildConfigOverrides(options));
+      const config = await loadRequiredConfig(buildConfigOverrides(options));
       const { apiUrl, headers } = resolveApiContext(config);
       return withApiErrorContext(apiUrl, () => executeSearchCommand(apiUrl, config.projectId, headers, options));
     }
     case 'linear': {
-      const config = loadRequiredConfig(buildConfigOverrides(options));
+      const config = await loadRequiredConfig(buildConfigOverrides(options));
       const { apiUrl, headers } = resolveApiContext(config);
       return withApiErrorContext(apiUrl, () => executeLinearCommand(apiUrl, headers, action, options));
     }
     case 'attachment': {
-      const config = loadRequiredConfig(buildConfigOverrides(options));
+      const config = await loadRequiredConfig(buildConfigOverrides(options));
       const { apiUrl, headers } = resolveApiContext(config);
       return withApiErrorContext(apiUrl, () => executeAttachmentCommand(apiUrl, headers, action, options));
     }

@@ -14,11 +14,44 @@ import type { DoctorResult } from './commands/doctor.js';
 import { executeValidatedInteractiveCommand, normalizeInteractiveFormat } from './utils/interactiveCommand.js';
 import { startUpdateCheck, readCache, compareVersions, formatUpdateMessage } from './utils/updateCheck.js';
 import { MCP_CLIENT_IDS } from './mcp-registration/types.js';
+import { resolveApiKeyInput } from './utils/apiKeyInput.js';
 
 const require = createRequire(import.meta.url);
 const pkg = require('../package.json') as { version: string };
 
 const program = new Command();
+
+function createApiKeyOption(): Option {
+  return new Option(
+    '--api-key <key>',
+    'Deprecated: pass an API key in argv. Prefer AGENTTEAMS_API_KEY or --api-key-file.',
+  );
+}
+
+function createApiKeyFileOption(): Option {
+  return new Option('--api-key-file <path>', 'Read the API key from a file, or use "-" to read stdin.');
+}
+
+program.hook('preAction', (_thisCommand, actionCommand) => {
+  try {
+    const commands: Command[] = [];
+    for (let command: Command | null = actionCommand; command; command = command.parent) {
+      commands.push(command);
+    }
+
+    const apiKeyCommand = commands.find((command) => command.opts().apiKey !== undefined);
+    const apiKeyFileCommand = commands.find((command) => command.opts().apiKeyFile !== undefined);
+    if (!apiKeyCommand && !apiKeyFileCommand) return;
+
+    const apiKey = apiKeyCommand?.opts().apiKey as string | undefined;
+    const apiKeyFile = apiKeyFileCommand?.opts().apiKeyFile as string | undefined;
+    const resolved = resolveApiKeyInput({ apiKey, apiKeyFile });
+    (apiKeyFileCommand ?? apiKeyCommand ?? actionCommand).setOptionValue('apiKey', resolved);
+  } catch (error) {
+    console.error(handleError(error));
+    process.exit(1);
+  }
+});
 
 function normalizeFormat(format: unknown): OutputFormat {
   if (format === undefined || format === null || format === '') return 'json';
@@ -89,16 +122,54 @@ program.name('agentteams').description('CLI tool for AgentTeams API').version(pk
 program
   .command('init')
   .description('Initialize AgentTeams CLI via OAuth')
+  .addOption(
+    new Option(
+      '--auth <mode>',
+      'Credential to configure. `personal-token` (default) stores a rotating login in the OS credential store and refreshes itself; `api-key` writes a legacy agent key into .agentteams/config.json, which expires 30 days after issue and must be reissued by hand.',
+    )
+      .choices(['api-key', 'personal-token'])
+      .default('personal-token'),
+  )
   .option('--format <format>', 'Output format (json; defaults to human-readable view)')
   .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
   .option('--verbose', 'Print full raw output to stdout; with --output-file, also echo it', false)
   .addHelpText('after', CONVENTION_HINT)
   .action(async (options) => {
     try {
-      const result = await executeCommand('init', 'start', {});
+      const result = await executeCommand('init', 'start', { authMode: options.auth });
       const format = normalizeInteractiveFormat(options.format);
 
       printInitResult(result, format);
+    } catch (error) {
+      console.error(handleError(error));
+      process.exit(1);
+    }
+  });
+
+program
+  .command('auth')
+  .description('Manage the personal AgentTeams login used by default')
+  .argument('<action>', 'Action to perform (login, status, logout)')
+  .option('--api-url <url>', 'API server to authenticate against (defaults to the project config or env)')
+  .option(
+    '--local',
+    'logout only: clear the local credential without contacting the server (the token stays valid — revoke it in the web app)',
+    false,
+  )
+  .option('--format <format>', 'Output format (json)', 'json')
+  .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
+  .option('--verbose', 'Print full raw output to stdout; with --output-file, also echo it', false)
+  .addHelpText('after', CONVENTION_HINT)
+  .action(async (action, options) => {
+    try {
+      const result = await executeCommand('auth', action, { apiUrl: options.apiUrl, local: options.local === true });
+
+      printCommandResult({
+        result,
+        format: normalizeFormat(options.format),
+        outputFile: options.outputFile,
+        verbose: options.verbose,
+      });
     } catch (error) {
       console.error(handleError(error));
       process.exit(1);
@@ -431,7 +502,8 @@ program
   .option('--code-review-id <id>', 'Attach to this code review (create)')
   .option('--completion-report-id <id>', 'Attach to this completion report (create)')
   .option('--api-url <url>', 'Override API URL (optional)')
-  .option('--api-key <key>', 'Override API key (optional)')
+  .addOption(createApiKeyOption())
+  .addOption(createApiKeyFileOption())
   .option('--project-id <id>', 'Override project ID (optional)')
   .option('--team-id <id>', 'Override team ID (optional)')
   .option('--format <format>', 'Output format (json)')
@@ -506,7 +578,8 @@ program
   .option('--search <text>', 'Title keyword search (list only)')
   .option('--limit <n>', 'Max results per page, alias for --page-size (list only)')
   .option('--api-url <url>', 'Override API URL (optional)')
-  .option('--api-key <key>', 'Override API key (optional)')
+  .addOption(createApiKeyOption())
+  .addOption(createApiKeyFileOption())
   .option('--project-id <id>', 'Override project ID (optional)')
   .option('--team-id <id>', 'Override team ID (optional)')
   .option('--format <format>', 'Output format (json)')
@@ -604,7 +677,8 @@ program
   .option('--page <number>', 'Page number (list only)')
   .option('--page-size <number>', 'Page size (list only)')
   .option('--api-url <url>', 'Override API URL (optional)')
-  .option('--api-key <key>', 'Override API key (optional)')
+  .addOption(createApiKeyOption())
+  .addOption(createApiKeyFileOption())
   .option('--project-id <id>', 'Override project ID (optional)')
   .option('--team-id <id>', 'Override team ID (optional)')
   .option('--format <format>', 'Output format (json)')
@@ -687,7 +761,8 @@ program
   .option('--page <number>', 'Page number (list only)')
   .option('--page-size <number>', 'Page size (list only)')
   .option('--api-url <url>', 'Override API URL (optional)')
-  .option('--api-key <key>', 'Override API key (optional)')
+  .addOption(createApiKeyOption())
+  .addOption(createApiKeyFileOption())
   .option('--project-id <id>', 'Override project ID (optional)')
   .option('--team-id <id>', 'Override team ID (optional)')
   .option('--format <format>', 'Output format (json)')
@@ -734,7 +809,8 @@ program
   .option('--search <text>', 'Title keyword search (list only)')
   .option('--limit <n>', 'Max results per page, alias for --page-size (list only)')
   .option('--api-url <url>', 'Override API URL (optional)')
-  .option('--api-key <key>', 'Override API key (optional)')
+  .addOption(createApiKeyOption())
+  .addOption(createApiKeyFileOption())
   .option('--project-id <id>', 'Override project ID (optional)')
   .option('--team-id <id>', 'Override team ID (optional)')
   .option('--format <format>', 'Output format (json)')
@@ -805,7 +881,8 @@ program
   .option('--search <text>', 'Title keyword search (list only)')
   .option('--limit <n>', 'Max results per page, alias for --page-size (list only)')
   .option('--api-url <url>', 'Override API URL (optional)')
-  .option('--api-key <key>', 'Override API key (optional)')
+  .addOption(createApiKeyOption())
+  .addOption(createApiKeyFileOption())
   .option('--project-id <id>', 'Override project ID (optional)')
   .option('--team-id <id>', 'Override team ID (optional)')
   .option('--format <format>', 'Output format (json)')
@@ -859,7 +936,8 @@ program
   .option('--title <title>', 'Feedback title')
   .option('--content <content>', 'Feedback content')
   .option('--api-url <url>', 'Override API URL (optional)')
-  .option('--api-key <key>', 'Override API key (optional)')
+  .addOption(createApiKeyOption())
+  .addOption(createApiKeyFileOption())
   .option('--project-id <id>', 'Override project ID (optional)')
   .option('--team-id <id>', 'Override team ID (optional)')
   .option('--format <format>', 'Output format (json)')
@@ -962,7 +1040,8 @@ program
   .option('--page <number>', 'Page number (list/revisions/comment-list)')
   .option('--page-size <number>', 'Page size (list/revisions/comment-list)')
   .option('--api-url <url>', 'Override API URL (optional)')
-  .option('--api-key <key>', 'Override API key (optional)')
+  .addOption(createApiKeyOption())
+  .addOption(createApiKeyFileOption())
   .option('--project-id <id>', 'Override project ID (optional)')
   .option('--team-id <id>', 'Override team ID (optional)')
   .option('--format <format>', 'Output format (json)', 'json')
@@ -1083,7 +1162,8 @@ program
   .option('--limit <n>', 'Max results (1-100, default: 20)')
   .option('--max-tokens <n>', 'Token budget for response')
   .option('--api-url <url>', 'Override API URL (optional)')
-  .option('--api-key <key>', 'Override API key (optional)')
+  .addOption(createApiKeyOption())
+  .addOption(createApiKeyFileOption())
   .option('--project-id <id>', 'Override project ID (optional)')
   .option('--team-id <id>', 'Override team ID (optional)')
   .option('--format <format>', 'Output format (json)', 'json')
@@ -1122,7 +1202,8 @@ const mcpCommand = program
   .command('mcp')
   .description('Run an MCP server over stdio, exposing AgentTeams reads to MCP-capable coding agents')
   .option('--api-url <url>', 'Override API URL (optional)')
-  .option('--api-key <key>', 'Override API key (optional)')
+  .addOption(createApiKeyOption())
+  .addOption(createApiKeyFileOption())
   .option('--project-id <id>', 'Override project ID (optional)')
   .option('--team-id <id>', 'Override team ID (optional)')
   .addHelpText('after', CONVENTION_HINT)
@@ -1134,7 +1215,7 @@ const mcpCommand = program
 
       // stdout carries JSON-RPC frames only: this action deliberately bypasses
       // executeCommand()/printCommandResult() and never writes to stdout.
-      startMcpServer({
+      await startMcpServer({
         apiUrl: options.apiUrl,
         apiKey: options.apiKey,
         projectId: options.projectId,
@@ -1159,7 +1240,8 @@ function addMcpRegistrationOptions(command: Command): Command {
     )
     .option('--json', 'Print the machine-readable result instead of the human-readable report', false)
     .option('--api-url <url>', 'Override API URL (optional)')
-    .option('--api-key <key>', 'Override API key (optional)')
+    .addOption(createApiKeyOption())
+    .addOption(createApiKeyFileOption())
     .option('--project-id <id>', 'Override project ID (optional)')
     .option('--team-id <id>', 'Override team ID (optional)');
 }
@@ -1207,6 +1289,24 @@ addMcpRegistrationOptions(
   .addHelpText('after', CONVENTION_HINT)
   .action((options, command: Command) => runMcpRegistration('install', options, command));
 
+mcpCommand
+  .command('doctor')
+  .description('Find legacy plaintext MCP key copies; cleanup is applied only with explicit --yes confirmation.')
+  .option('--yes', 'Confirm safe cleanup after the audit', false)
+  .option('--json', 'Print the machine-readable result instead of the human-readable report', false)
+  .addHelpText('after', CONVENTION_HINT)
+  .action(async (options) => {
+    try {
+      const { runMcpDoctorCommand } = await import('./mcp-registration/doctor.js');
+      const output = await runMcpDoctorCommand({ yes: options.yes === true });
+      console.log(options.json ? formatOutput(output.json) : output.text);
+      process.exitCode = output.exitCode;
+    } catch (error) {
+      console.error(handleError(error));
+      process.exit(1);
+    }
+  });
+
 const linearCommand = program
   .command('linear')
   .description('Read Linear issues and add comments through the AgentTeams API')
@@ -1223,7 +1323,8 @@ linearCommand
   .option('--state <name>', 'Issue state name, e.g. "Done", "Todo" (required for update, optional for create)')
   .option('--parent-id <id>', 'Linear parent issue UUID for creating a sub-issue (optional, for create)')
   .option('--api-url <url>', 'Override API URL (optional)')
-  .option('--api-key <key>', 'Override API key (optional)')
+  .addOption(createApiKeyOption())
+  .addOption(createApiKeyFileOption())
   .option('--project-id <id>', 'Override project ID (optional)')
   .option('--format <format>', 'Output format (json)', 'json')
   .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
@@ -1271,7 +1372,8 @@ linearCommand
   .option('--issue-id <id>', 'Linear issue ID')
   .option('--body <text>', 'Comment body')
   .option('--api-url <url>', 'Override API URL (optional)')
-  .option('--api-key <key>', 'Override API key (optional)')
+  .addOption(createApiKeyOption())
+  .addOption(createApiKeyFileOption())
   .option('--project-id <id>', 'Override project ID (optional)')
   .option('--team-id <id>', 'Override team ID (optional)')
   .option('--format <format>', 'Output format (json)', 'json')

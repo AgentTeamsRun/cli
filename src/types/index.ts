@@ -11,6 +11,15 @@
  * CLI Configuration stored in .agentteams/config.json
  * Contains credentials and project context for API communication
  */
+/**
+ * Which credential family this project is configured to authenticate with.
+ *
+ * `personal-token` is the default: project config stays secret-free while a
+ * rotating refresh token lives in the OS credential store. `api-key` is the
+ * explicit compatibility path for existing automation and legacy projects.
+ */
+export type AuthMode = 'api-key' | 'personal-token';
+
 export interface Config {
   /** Team ID from AgentTeams */
   teamId: string;
@@ -20,6 +29,8 @@ export interface Config {
   apiKey: string;
   /** API URL (e.g., "http://localhost:3001") */
   apiUrl: string;
+  /** Legacy migration marker; absent configs choose by whether an apiKey exists. */
+  authMode?: AuthMode;
 }
 
 // ============================================================

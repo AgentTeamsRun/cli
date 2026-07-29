@@ -40,7 +40,7 @@ describe('mcp credential resolution', () => {
     jest.resetModules();
     jest.unstable_mockModule('../src/utils/config.js', () => ({
       __esModule: true,
-      loadConfig: () => ({
+      loadConfigWithCredential: async () => ({
         apiUrl: 'http://localhost:3001',
         apiKey: 'key_valid',
         teamId: 'team-agentteams',
@@ -56,14 +56,14 @@ describe('mcp credential resolution', () => {
 
     const { resolveMcpToolContext } = await import('../src/commands/mcp.js');
 
-    expect(() => resolveMcpToolContext({})).toThrow(/project binding mismatch/i);
+    await expect(resolveMcpToolContext({})).rejects.toThrow(/project binding mismatch/i);
   });
 
   it('accepts an explicit Desktop binding even when the Desktop process cwd belongs to another project', async () => {
     jest.resetModules();
     jest.unstable_mockModule('../src/utils/config.js', () => ({
       __esModule: true,
-      loadConfig: () => ({
+      loadConfigWithCredential: async () => ({
         apiUrl: 'http://localhost:3001',
         apiKey: 'key_valid',
         teamId: 'team-kma',
@@ -81,7 +81,7 @@ describe('mcp credential resolution', () => {
 
     try {
       const { resolveMcpToolContext } = await import('../src/commands/mcp.js');
-      expect(resolveMcpToolContext({}).projectId).toBe(KMA_PROJECT_ID);
+      expect((await resolveMcpToolContext({})).projectId).toBe(KMA_PROJECT_ID);
     } finally {
       if (previousSource === undefined) delete process.env.AGENTTEAMS_MCP_BINDING_SOURCE;
       else process.env.AGENTTEAMS_MCP_BINDING_SOURCE = previousSource;
@@ -92,19 +92,19 @@ describe('mcp credential resolution', () => {
     jest.resetModules();
     jest.unstable_mockModule('../src/utils/config.js', () => ({
       __esModule: true,
-      loadConfig: () => null,
+      loadConfigWithCredential: async () => null,
       loadProjectConfig: () => null,
       getConfigurationNotFoundMessage: () => 'Configuration not found.',
     }));
 
     const { resolveMcpToolContext } = await import('../src/commands/mcp.js');
 
-    expect(() => resolveMcpToolContext({})).toThrow('Configuration not found.');
+    await expect(resolveMcpToolContext({})).rejects.toThrow('Configuration not found.');
   });
 
   it('passes CLI overrides through and normalizes the API URL', async () => {
     jest.resetModules();
-    const loadConfig = jest.fn(() => ({
+    const loadConfigWithCredential = jest.fn(async () => ({
       apiUrl: 'http://localhost:3001/',
       apiKey: 'key_override',
       teamId: 'team-1',
@@ -112,21 +112,21 @@ describe('mcp credential resolution', () => {
     }));
     jest.unstable_mockModule('../src/utils/config.js', () => ({
       __esModule: true,
-      loadConfig,
+      loadConfigWithCredential,
       loadProjectConfig: () => null,
       getConfigurationNotFoundMessage: () => 'Configuration not found.',
     }));
 
     const { resolveMcpToolContext } = await import('../src/commands/mcp.js');
 
-    const context = resolveMcpToolContext({
+    const context = await resolveMcpToolContext({
       apiKey: 'key_override',
       projectId: 'project-override',
       apiUrl: 'http://localhost:3001/',
       unrelated: 'ignored',
     });
 
-    expect(loadConfig).toHaveBeenCalledWith({
+    expect(loadConfigWithCredential).toHaveBeenCalledWith({
       apiKey: 'key_override',
       projectId: 'project-override',
       apiUrl: 'http://localhost:3001/',
@@ -149,7 +149,7 @@ describe('mcp credential resolution', () => {
     jest.resetModules();
     jest.unstable_mockModule('../src/utils/config.js', () => ({
       __esModule: true,
-      loadConfig: (overrides: Record<string, string>) => ({
+      loadConfigWithCredential: async (overrides: Record<string, string>) => ({
         apiUrl: 'http://localhost:3001',
         apiKey: 'key_valid',
         teamId: 'team-1',
@@ -162,15 +162,15 @@ describe('mcp credential resolution', () => {
 
     const { resolveMcpToolContext } = await import('../src/commands/mcp.js');
 
-    expect(() => resolveMcpToolContext(override)).toThrow(/Unresolved \$\{\.\.\.\} placeholder/);
-    expect(() => resolveMcpToolContext(override)).toThrow(new RegExp(`${field} \\(${envHint}\\)`));
+    await expect(resolveMcpToolContext(override)).rejects.toThrow(/Unresolved \$\{\.\.\.\} placeholder/);
+    await expect(resolveMcpToolContext(override)).rejects.toThrow(new RegExp(`${field} \\(${envHint}\\)`));
   });
 
   it('accepts credentials without placeholders', async () => {
     jest.resetModules();
     jest.unstable_mockModule('../src/utils/config.js', () => ({
       __esModule: true,
-      loadConfig: () => ({
+      loadConfigWithCredential: async () => ({
         apiUrl: 'http://localhost:3001',
         apiKey: 'key_valid',
         teamId: 'team-1',
@@ -182,6 +182,6 @@ describe('mcp credential resolution', () => {
 
     const { resolveMcpToolContext } = await import('../src/commands/mcp.js');
 
-    expect(() => resolveMcpToolContext({})).not.toThrow();
+    await expect(resolveMcpToolContext({})).resolves.toBeDefined();
   });
 });

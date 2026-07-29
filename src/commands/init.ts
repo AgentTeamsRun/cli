@@ -20,11 +20,18 @@ import { multiselect, isCancel, cancel } from '@clack/prompts';
 import httpClient from '../utils/httpClient.js';
 import open from 'open';
 import { createAuthState, startLocalAuthServer } from '../utils/authServer.js';
-import { DEFAULT_API_URL, type PersistedConfig, saveConfig } from '../utils/config.js';
+import {
+  DEFAULT_API_URL,
+  type LegacyApiKeyPersistedConfig,
+  type PersistedConfig,
+  saveConfig,
+  saveLegacyApiKeyConfig,
+} from '../utils/config.js';
+import { performPersonalTokenLogin } from './auth.js';
 import { createSpinner, withSpinner } from '../utils/spinner.js';
 import { withCommandContext } from '../utils/commandContext.js';
 import { conventionDownload } from './convention.js';
-import type { Config } from '../types/index.js';
+import type { AuthMode, Config } from '../types/index.js';
 import { resolveGitTopLevel, resolveMainCheckoutRoot } from '../utils/git.js';
 import { canonicalizePath } from '../utils/path.js';
 import { buildAuthHeaders } from '../utils/apiContext.js';
@@ -66,6 +73,8 @@ JwIDAQAB
 
 type InitOptions = {
   cwd?: string;
+  /** Personal login is the default; `api-key` is the explicit compatibility path. */
+  authMode?: AuthMode;
 };
 
 export type AgentFileEntry = {
@@ -85,6 +94,16 @@ type OAuthInitResult = {
   seedPlanId: string | null;
   seedPlanWebUrl: string | null;
   postCheckoutHook?: EnsurePostCheckoutHookResult;
+  authMode: AuthMode;
+  /** Set only on the personal-token path, where the credential lives outside the repository. */
+  personalLogin?: { email: string; nickname: string; persisted: boolean };
+  /**
+   * Personal-token path only. The browser round trip still mints an agent key —
+   * it is what fetches the convention template — and this records whether that
+   * key was handed back before init exited.
+   */
+  agentKeyRevoked?: boolean;
+  warning?: string;
 };
 
 export type WorktreeEntryPointState = ConventionEntryPointState;
@@ -228,25 +247,48 @@ function resolveApiUrl(): string {
   return normalizeApiUrl(process.env.AGENTTEAMS_API_URL || DEFAULT_API_URL);
 }
 
+/**
+ * What actually lands in `.agentteams/config.json`.
+ *
+ * The default document is deliberately secret-free. The callback's agent key is
+ * used only in-process to fetch conventions and is revoked before init exits.
+ * `apiUrl` is always explicit so the persisted schema is stable across default
+ * and custom deployments.
+ *
+ * `authMode` is not decoration: it is the only on-disk marker that this project
+ * *chose* the personal login. `planCredential` keys `optedIn` off it, and that
+ * flag is what turns "config exists, credential missing" into "run `agentteams
+ * auth login`" instead of the misleading "run `agentteams init` first" — the
+ * exact state after `auth logout`, a fresh clone, or a wiped OS keychain.
+ */
 function toConfig(
   authResult: {
     teamId: string;
     projectId: string;
-    agentName: string;
-    apiKey: string;
   },
   apiUrl: string,
 ): PersistedConfig {
-  const config: PersistedConfig = {
+  return {
+    teamId: authResult.teamId,
+    projectId: authResult.projectId,
+    apiUrl,
+    authMode: 'personal-token',
+  };
+}
+
+/** Preserve the original config shape only for the explicit compatibility flag. */
+function toLegacyApiKeyConfig(
+  authResult: { teamId: string; projectId: string; apiKey: string },
+  apiUrl: string,
+): LegacyApiKeyPersistedConfig {
+  const config: LegacyApiKeyPersistedConfig = {
     teamId: authResult.teamId,
     projectId: authResult.projectId,
     apiKey: authResult.apiKey,
   };
-
   if (apiUrl !== DEFAULT_API_URL) {
     config.apiUrl = apiUrl;
   }
-
   return config;
 }
 
@@ -274,6 +316,33 @@ async function fetchConventionTemplate(
   }
 
   return content;
+}
+
+/**
+ * Hand the agent key back at the end of a personal-token init.
+ *
+ * The browser round trip mints a `key_` no matter which auth mode was asked
+ * for — it is the only credential that can read the convention template. On the
+ * personal-token path that key is never written to disk, so leaving it live
+ * would mean a long-lived secret the user cannot see, use or cancel. The agent
+ * config itself stays: it is the project's record of this machine, and only its
+ * credential is the liability.
+ */
+async function revokeInitAgentKey(
+  authResult: { projectId: string; configId: string; apiKey: string },
+  apiUrl: string,
+): Promise<boolean> {
+  try {
+    await httpClient.delete(
+      `${apiUrl}/api/projects/${authResult.projectId}/agent-configs/${authResult.configId}/api-keys`,
+      { headers: buildAuthHeaders(authResult.apiKey) },
+    );
+    return true;
+  } catch {
+    // Not fatal: init has everything it needs, and the caller warns instead so
+    // the user can revoke it from the web app.
+    return false;
+  }
 }
 
 async function promptAgentFileSelection(): Promise<string[]> {
@@ -375,9 +444,7 @@ function generateAgentEntryPointFiles(cwd: string, selectedFiles: string[]): Age
 function isConfiguredMainCheckout(sourcePath: string): boolean {
   try {
     const config = JSON.parse(readFileSync(join(sourcePath, CONFIG_FILE), 'utf-8')) as Record<string, unknown>;
-    return ['teamId', 'projectId', 'apiKey'].every(
-      (field) => typeof config[field] === 'string' && config[field].length > 0,
-    );
+    return ['teamId', 'projectId'].every((field) => typeof config[field] === 'string' && config[field].length > 0);
   } catch {
     return false;
   }
@@ -490,10 +557,11 @@ function findCopyOnlyFiles(backupPath: string, sourcePath: string): string[] {
  * Park the copy outside every tracked surface while the link is created. A
  * backup next to `.agentteams` would show up in `git status` — the anchored
  * `/.agentteams` exclude is an exact match and does not cover a sibling name —
- * and the copied `config.json` carries the project apiKey. `git-common-dir` is
- * part of no working tree, so nothing can surface from there. A worktree on a
- * different volume cannot be renamed into it, and only then does the
- * in-worktree fallback apply — after registering its own exclude pattern.
+ * and a copied legacy `config.json` may carry the project apiKey.
+ * `git-common-dir` is part of no working tree, so nothing can surface from
+ * there. A worktree on a different volume cannot be renamed into it, and only
+ * then does the in-worktree fallback apply — after registering its own exclude
+ * pattern.
  */
 function moveConventionCopyAside(worktreePath: string, targetPath: string): { backupPath: string } | { error: string } {
   const failures: string[] = [];
@@ -725,6 +793,8 @@ export async function executeInitCommand(options?: InitOptions): Promise<InitRes
 
 async function executeInitCommandWithContext(options?: InitOptions): Promise<InitResult> {
   const cwd = resolve(options?.cwd ?? process.cwd());
+  // Only an explicit compatibility request persists the callback's agent key.
+  const authMode: AuthMode = options?.authMode === 'api-key' ? 'api-key' : 'personal-token';
   const worktreeResult = bootstrapLinkedWorktree(cwd);
   if (worktreeResult) return worktreeResult;
 
@@ -797,18 +867,51 @@ async function executeInitCommandWithContext(options?: InitOptions): Promise<Ini
 
     authSpinner?.succeed();
     const apiUrl = resolveApiUrl();
-    const config = toConfig(authResult, apiUrl);
     const runtimeConfig: Config = {
-      ...config,
+      teamId: authResult.teamId,
+      projectId: authResult.projectId,
+      apiKey: authResult.apiKey,
       apiUrl,
     };
     const conventionContent = await withSpinner('Fetching convention template...', () =>
       fetchConventionTemplate(authResult, apiUrl),
     );
 
-    saveConfig(configPath, config);
+    // The project is known now, so the personal login can run before anything is
+    // written: a failed login must not leave a config with no usable credential.
+    // A login that cannot be stored throws here, which is the point — init stops
+    // before `saveConfig` rather than leaving a half-configured project behind.
+    let personalLogin: OAuthInitResult['personalLogin'];
+    const warnings: string[] = [];
+    if (authMode === 'personal-token') {
+      const outcome = await performPersonalTokenLogin({ apiUrl, projectName });
+      personalLogin = {
+        email: outcome.identity.email,
+        nickname: outcome.identity.nickname,
+        persisted: outcome.persisted,
+      };
+    }
+
+    if (authMode === 'api-key') {
+      saveLegacyApiKeyConfig(configPath, toLegacyApiKeyConfig(authResult, apiUrl));
+    } else {
+      saveConfig(configPath, toConfig(authResult, apiUrl));
+    }
     writeFileSync(conventionPath, conventionContent, 'utf-8');
     await conventionDownload({ cwd, config: runtimeConfig });
+
+    // Last use of the agent key is the convention download above.
+    let agentKeyRevoked: boolean | undefined;
+    if (authMode === 'personal-token') {
+      agentKeyRevoked = await revokeInitAgentKey(authResult, apiUrl);
+      if (!agentKeyRevoked) {
+        warnings.push(
+          `The agent key created for "${authResult.agentName}" could not be revoked and is still valid. ` +
+            'Revoke it in the AgentTeams web app (project settings → agents) — it was never written to this repository.',
+        );
+      }
+    }
+
     ensureGitignore(cwd);
     const selectedFiles = await promptAgentFileSelection();
     if (selectedFiles.includes('GEMINI.md')) {
@@ -841,6 +944,10 @@ async function executeInitCommandWithContext(options?: InitOptions): Promise<Ini
       seedPlanId,
       seedPlanWebUrl,
       postCheckoutHook,
+      authMode,
+      ...(personalLogin ? { personalLogin } : {}),
+      ...(agentKeyRevoked === undefined ? {} : { agentKeyRevoked }),
+      ...(warnings.length > 0 ? { warning: warnings.join(' ') } : {}),
     };
   } catch (error) {
     authSpinner?.fail();

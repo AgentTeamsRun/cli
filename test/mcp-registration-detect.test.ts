@@ -9,8 +9,9 @@ import type { McpCredentials } from '../src/mcp-registration/serverSpec.js';
 import type { DetectionSignal, McpPathContext } from '../src/mcp-registration/types.js';
 import type { VendorCommandResult, VendorRunner } from '../src/mcp-registration/vendorCommand.js';
 
+const CANARY_API_KEY = 'key_canary_detect_5d0e1f2a3b4c';
+
 const credentials: McpCredentials = {
-  apiKey: 'key_canary_detect_5d0e1f2a3b4c',
   projectId: 'project-fixture',
   teamId: 'team-fixture',
   apiUrl: 'https://api.agentteams.run',
@@ -132,7 +133,8 @@ describe('mcp client detection', () => {
       expect(result.text).toContain('amp [skip] not detected');
       expect(result.text).toContain('Not detected on this machine.');
       expect(result.text).toContain('project-fixture');
-      expect(result.text).toContain('machine-wide');
+      expect(result.text).toContain('no credentials or project binding');
+      expect(result.text).not.toContain('machine-wide');
 
       expect({ ...snapshotTree(home), ...snapshotTree(cwd) }).toEqual(before);
     });
@@ -186,13 +188,19 @@ describe('mcp client detection', () => {
       expect({ ...snapshotTree(home), ...snapshotTree(cwd) }).toEqual(before);
     });
 
-    it('never prints the API key in a plan or an applied summary', () => {
+    it('never prints key material in a plan or an applied summary', () => {
       const plan = run({});
-      const applied = run({ yes: true, scope: 'user' }, () => ({ status: 0, stdout: '', stderr: '' }));
+      // Even if a vendor CLI echoes a key from the user's own environment, it must not
+      // survive into the summary — registration itself passes no credential at all.
+      const applied = run({ yes: true, scope: 'user' }, () => ({
+        status: 0,
+        stdout: `Added server with ${CANARY_API_KEY}`,
+        stderr: '',
+      }));
 
       for (const output of [plan, applied]) {
-        expect(output.text).not.toContain(credentials.apiKey);
-        expect(JSON.stringify(output.json)).not.toContain(credentials.apiKey);
+        expect(output.text).not.toContain(CANARY_API_KEY);
+        expect(JSON.stringify(output.json)).not.toContain(CANARY_API_KEY);
       }
     });
   });

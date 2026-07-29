@@ -1,4 +1,4 @@
-import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'node:http';
 
 const CALLBACK_TIMEOUT_MS = 60_000;
@@ -23,9 +23,19 @@ export type AuthResult = {
   seedPlanId?: string | null;
 };
 
-type AuthServerResult = {
+/**
+ * The authorization-code callback. Deliberately smaller than {@link AuthResult}:
+ * a single-use code that is worthless without the `code_verifier` this process
+ * never sent anywhere, instead of a long-lived key travelling through a browser.
+ */
+export type AuthorizationCodeResult = {
+  code: string;
+  state: string;
+};
+
+type AuthServerResult<T> = {
   server: Server;
-  waitForCallback: () => Promise<AuthResult>;
+  waitForCallback: () => Promise<T>;
   port: number;
   /** Echo this back through the authorize URL; the callback is rejected without it. */
   state: string;
@@ -38,6 +48,30 @@ type StartLocalAuthServerOptions = {
 /** Unguessable value that proves a callback belongs to the login this process started. */
 export function createAuthState(): string {
   return randomBytes(AUTH_STATE_BYTES).toString('base64url');
+}
+
+export type PkcePair = {
+  /** Stays in this process. Without it a stolen code cannot be redeemed. */
+  verifier: string;
+  /** S256 hash sent through the browser. */
+  challenge: string;
+};
+
+/**
+ * PKCE S256 pair.
+ *
+ * 48 random bytes base64url-encode to 64 characters, inside the server's
+ * 43–128 range (`api/src/routes/desktop-auth/index.ts`).
+ */
+export function createPkcePair(): PkcePair {
+  const verifier = randomBytes(48).toString('base64url');
+  return { verifier, challenge: createHash('sha256').update(verifier).digest('base64url') };
+}
+
+function isAuthorizationCodeResult(value: unknown): value is AuthorizationCodeResult {
+  if (!value || typeof value !== 'object') return false;
+  const candidate = value as Record<string, unknown>;
+  return typeof candidate.code === 'string' && candidate.code.length > 0;
 }
 
 function listenOnEphemeralPort(server: Server): Promise<number> {
@@ -190,17 +224,28 @@ function sendJson(response: ServerResponse, statusCode: number, payload: unknown
   response.end(body);
 }
 
-export async function startLocalAuthServer(options?: StartLocalAuthServerOptions): Promise<AuthServerResult> {
+/**
+ * The hardened loopback callback server, shared by both login paths.
+ *
+ * Origin allow-listing, constant-time state comparison, the ephemeral port, and
+ * the "a forged callback must not consume this login" rule all live here once:
+ * the authorization-code path must not get a second, weaker copy of them. The
+ * only difference between the two callers is which payload shape they accept.
+ */
+async function startCallbackServer<T>(
+  parsePayload: (value: unknown) => T | null,
+  options?: StartLocalAuthServerOptions,
+): Promise<AuthServerResult<T>> {
   const expectedState = options?.state ?? createAuthState();
 
   let settled = false;
   let timeoutHandle: NodeJS.Timeout | null = null;
   let isWaiting = false;
 
-  let resolveCallback: ((result: AuthResult) => void) | undefined;
+  let resolveCallback: ((result: T) => void) | undefined;
   let rejectCallback: ((error: Error) => void) | undefined;
 
-  const callbackPromise = new Promise<AuthResult>((resolve, reject) => {
+  const callbackPromise = new Promise<T>((resolve, reject) => {
     resolveCallback = resolve;
     rejectCallback = reject;
   });
@@ -222,7 +267,7 @@ export async function startLocalAuthServer(options?: StartLocalAuthServerOptions
     timeoutHandle = null;
   };
 
-  const resolveAuth = (payload: AuthResult): void => {
+  const resolveAuth = (payload: T): void => {
     if (settled) {
       return;
     }
@@ -271,14 +316,18 @@ export async function startLocalAuthServer(options?: StartLocalAuthServerOptions
 
     try {
       const rawBody = await readRequestBody(request);
-      const payload: unknown = JSON.parse(rawBody);
+      const rawPayload: unknown = JSON.parse(rawBody);
+      const payload = parsePayload(rawPayload);
 
-      if (!isAuthResult(payload)) {
+      if (!payload) {
         sendJson(response, 400, { message: 'Invalid OAuth callback payload.' }, request);
         return;
       }
 
-      const receivedState = payload.state;
+      // The state is read from the raw body, not from the parsed result: the
+      // legacy parser strips every field the CLI does not trust, `state`
+      // included, and it must still be checked before anything is accepted.
+      const receivedState = (rawPayload as Record<string, unknown>).state;
       if (typeof receivedState !== 'string' || receivedState.length === 0) {
         sendJson(response, 400, { message: `Missing OAuth callback state. ${WEB_UPDATE_HINT}` }, request);
         return;
@@ -295,7 +344,7 @@ export async function startLocalAuthServer(options?: StartLocalAuthServerOptions
       sendJson(response, 200, { success: true }, request);
 
       setTimeout(() => {
-        resolveAuth(toAuthResult(payload));
+        resolveAuth(payload);
       }, 100);
     } catch {
       sendJson(response, 400, { message: 'Invalid JSON body.' }, request);
@@ -320,7 +369,7 @@ export async function startLocalAuthServer(options?: StartLocalAuthServerOptions
     }
   });
 
-  const waitForCallback = (): Promise<AuthResult> => {
+  const waitForCallback = (): Promise<T> => {
     if (!isWaiting) {
       isWaiting = true;
       timeoutHandle = setTimeout(() => {
@@ -337,4 +386,23 @@ export async function startLocalAuthServer(options?: StartLocalAuthServerOptions
     port,
     state: expectedState,
   };
+}
+
+/**
+ * Legacy login callback: the web posts the issued agent key back to this port.
+ * Kept unchanged for CLI/web combinations that predate the authorization-code
+ * path; `P3` is where it goes away.
+ */
+export function startLocalAuthServer(options?: StartLocalAuthServerOptions): Promise<AuthServerResult<AuthResult>> {
+  return startCallbackServer<AuthResult>((value) => (isAuthResult(value) ? toAuthResult(value) : null), options);
+}
+
+/** Authorization-code login callback: only `{ code, state }` crosses this boundary. */
+export function startAuthorizationCodeServer(
+  options?: StartLocalAuthServerOptions,
+): Promise<AuthServerResult<AuthorizationCodeResult>> {
+  return startCallbackServer<AuthorizationCodeResult>(
+    (value) => (isAuthorizationCodeResult(value) ? { code: value.code, state: value.state } : null),
+    options,
+  );
 }

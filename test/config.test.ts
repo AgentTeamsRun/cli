@@ -18,6 +18,8 @@ import {
   findProjectConfig,
   getConfigurationNotFoundMessage,
   saveConfig,
+  saveLegacyApiKeyConfig,
+  type PersistedConfig,
 } from '../src/utils/config.js';
 import { canonicalizePath } from '../src/utils/path.js';
 
@@ -114,7 +116,13 @@ describe('findProjectConfig', () => {
 });
 
 describe('saveConfig', () => {
-  const persisted = { teamId: 'team-1', projectId: 'project-1', apiKey: 'key_secret' };
+  const persisted = { teamId: 'team-1', projectId: 'project-1', apiUrl: 'https://api.agentteams.run' };
+
+  it('keeps apiKey out of the persisted config type', () => {
+    const typecheckProof: 'apiKey' extends keyof PersistedConfig ? false : true = true;
+
+    expect(typecheckProof).toBe(true);
+  });
 
   // POSIX permission bits are the thing under test; Windows has no equivalent.
   const posixIt = process.platform === 'win32' ? it.skip : it;
@@ -129,6 +137,7 @@ describe('saveConfig', () => {
 
     expect(statSync(configPath).mode & 0o777).toBe(CONFIG_FILE_MODE);
     expect(JSON.parse(readFileSync(configPath, 'utf-8'))).toEqual(persisted);
+    expect(readFileSync(configPath, 'utf-8')).not.toContain('key_');
   });
 
   posixIt('narrows an existing world-readable config to owner-only when it rewrites it', () => {
@@ -167,6 +176,16 @@ describe('saveConfig', () => {
     } finally {
       chmodSync(configDir, 0o700);
     }
+  });
+
+  it('keeps legacy api-key persistence behind an explicit compatibility helper', () => {
+    const tempDir = createTempDir();
+    const configPath = join(tempDir, '.agentteams', 'config.json');
+    const legacy = { teamId: 'team-1', projectId: 'project-1', apiKey: 'key_secret' };
+
+    saveLegacyApiKeyConfig(configPath, legacy);
+
+    expect(JSON.parse(readFileSync(configPath, 'utf-8'))).toEqual(legacy);
   });
 });
 

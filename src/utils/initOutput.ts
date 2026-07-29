@@ -14,6 +14,18 @@ interface InitResultShape {
   seedPlanId?: string | null;
   seedPlanWebUrl?: string | null;
   postCheckoutHook?: EnsurePostCheckoutHookResult;
+  authMode?: 'api-key' | 'personal-token';
+  personalLogin?: { email: string; nickname: string; persisted: boolean };
+  agentKeyRevoked?: boolean;
+  warning?: string;
+}
+
+/** Mirrors AGENT_API_KEY_TTL_MS in api/src/services/agentApiKey.ts. */
+const AGENT_API_KEY_TTL_DAYS = 30;
+
+function agentApiKeyExpiryLabel(): string {
+  const expiresAt = new Date(Date.now() + AGENT_API_KEY_TTL_DAYS * 24 * 60 * 60 * 1000);
+  return expiresAt.toISOString().slice(0, 10);
 }
 
 function isInitResult(result: unknown): result is InitResultShape {
@@ -98,6 +110,38 @@ export function printInitResult(result: unknown, format: InitOutputFormat): void
   }
 
   console.log(`✓ Authenticated as ${result.agentName}`);
+
+  // The human view is the default, so anything the personal-token path decided
+  // has to show up here — a warning only `--format json` reveals is a warning
+  // nobody reads.
+  if (result.authMode === 'personal-token') {
+    if (result.personalLogin) {
+      console.log(`✓ Signed in as ${result.personalLogin.email} (${result.personalLogin.nickname})`);
+      console.log(
+        result.personalLogin.persisted
+          ? '✓ Login stored in the OS credential store; no long-lived key was written to this repository.'
+          : '⚠ Login kept in memory for this process only.',
+      );
+    }
+    if (result.agentKeyRevoked === true) {
+      console.log('✓ The setup agent key was revoked; nothing long-lived is left on the server.');
+    }
+  }
+
+  // The compatibility path has a hard 30-day server-side TTL and no renewal of its own.
+  // Saying so here is the difference between a planned reissue and a runner that starts
+  // failing with a bare 401 exactly one month from today.
+  if (result.authMode === 'api-key') {
+    console.log(`⚠ This agent API key expires in 30 days (${agentApiKeyExpiryLabel()}) and does not renew itself.`);
+    console.log(
+      "  Reissue it in the web app (project settings → agents) before then, or run 'agentteams init' to switch to a personal login that refreshes automatically.",
+    );
+  }
+
+  if (result.warning) {
+    console.warn(`⚠ ${result.warning}`);
+  }
+
   console.log(`✓ Config saved:      ${result.configPath}`);
   console.log(`✓ Convention saved:  ${result.conventionPath}`);
   console.log(`✓ Conventions synced to .agentteams/`);
