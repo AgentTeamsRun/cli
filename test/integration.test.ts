@@ -1069,6 +1069,9 @@ describe('CLI Integration Tests', () => {
 
     it('plan start: should call single lifecycle endpoint without runnerType/model', async () => {
       axiosPostSpy.mockResolvedValue({ data: { data: { id: 'plan-1' } } } as any);
+      // 데몬이 띄운 세션에는 이 변수가 있다. 아래 "assignedTo 없음" 단정이 실행
+      // 환경에 좌우되지 않도록 비운다.
+      delete process.env.AGENTTEAMS_AGENT_NAME;
 
       await executeCommand('plan', 'start', { id: 'plan-1' });
 
@@ -1085,6 +1088,7 @@ describe('CLI Integration Tests', () => {
 
     it('plan start: should pass custom task to lifecycle endpoint', async () => {
       axiosPostSpy.mockResolvedValue({ data: { data: { id: 'plan-1' } } } as any);
+      delete process.env.AGENTTEAMS_AGENT_NAME;
 
       await executeCommand('plan', 'start', { id: 'plan-1', task: 'Work started custom' });
 
@@ -1095,6 +1099,36 @@ describe('CLI Integration Tests', () => {
       );
       const sentBody = axiosPostSpy.mock.calls[0][1] as Record<string, unknown>;
       expect(sentBody).not.toHaveProperty('assignedTo');
+    });
+
+    it('plan start: forwards the agent the daemon exported so start records the same agent', async () => {
+      axiosPostSpy.mockResolvedValue({ data: { data: { id: 'plan-1' } } } as any);
+      // 서버는 agent API key의 agentConfigId를 우선하고 이 값은 무시한다. 에이전트를
+      // 실어오지 않는 자격증명(개인 토큰)에서는 이것이 유일한 귀속 근거다.
+      process.env.AGENTTEAMS_AGENT_NAME = 'agent-from-daemon';
+
+      try {
+        await executeCommand('plan', 'start', { id: 'plan-1' });
+      } finally {
+        delete process.env.AGENTTEAMS_AGENT_NAME;
+      }
+
+      const sentBody = axiosPostSpy.mock.calls[0][1] as Record<string, unknown>;
+      expect(sentBody.assignedTo).toBe('agent-from-daemon');
+    });
+
+    it('plan start: lets an explicit --assigned-to win over the exported one', async () => {
+      axiosPostSpy.mockResolvedValue({ data: { data: { id: 'plan-1' } } } as any);
+      process.env.AGENTTEAMS_AGENT_NAME = 'agent-from-daemon';
+
+      try {
+        await executeCommand('plan', 'start', { id: 'plan-1', assignedTo: 'agent-chosen-explicitly' });
+      } finally {
+        delete process.env.AGENTTEAMS_AGENT_NAME;
+      }
+
+      const sentBody = axiosPostSpy.mock.calls[0][1] as Record<string, unknown>;
+      expect(sentBody.assignedTo).toBe('agent-chosen-explicitly');
     });
 
     it('plan start: should fail when lifecycle endpoint fails', async () => {

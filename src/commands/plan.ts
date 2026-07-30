@@ -76,6 +76,30 @@ type PlanRunbookDetailResponse = {
   };
 };
 
+/**
+ * Environment variable every daemon runner sets to the agentConfigId of the
+ * session it is spawning (`daemon/src/runners/*`).
+ */
+const AGENT_NAME_ENV = 'AGENTTEAMS_AGENT_NAME';
+
+/**
+ * Which agent this run represents, for the lifecycle calls that record one.
+ *
+ * The server prefers the `agentConfigId` carried by an agent API key
+ * (`key_{configId}_{secret}`) and ignores this value, because a proven identity
+ * must not be overridable by the caller. It matters for credentials that carry no
+ * agent: a personal token identifies a person, so without this the request has no
+ * agent at all and the record would silently lose its attribution — a change in
+ * how you authenticate must not change what gets recorded.
+ *
+ * `AGENTTEAMS_AGENT_NAME` is the existing channel for this: the daemon has always
+ * exported it, and the CLI read it until the `--agent` flag was removed, which
+ * left the producer without a consumer.
+ */
+export function resolveAgentAssignee(options: Record<string, unknown>): string | undefined {
+  return toNonEmptyString(options.assignedTo) ?? toNonEmptyString(process.env[AGENT_NAME_ENV]);
+}
+
 // Lightweight, warning-only heuristic that flags an obvious mismatch between the declared
 // complexity and the plan body length. It never rejects — precise structural validation is future work.
 function warnOnComplexityMismatch(complexity: string, content: string): void {
@@ -606,6 +630,7 @@ export async function executePlanCommand(
 
       const body: {
         task?: string;
+        assignedTo?: string;
         startCommit?: string;
         startBranch?: string;
         runnerType?: string;
@@ -614,6 +639,10 @@ export async function executePlanCommand(
       } = {};
       if (options.task) {
         body.task = options.task;
+      }
+      const startAssignee = resolveAgentAssignee(options);
+      if (startAssignee) {
+        body.assignedTo = startAssignee;
       }
       if (startGitInfo.commitHash) {
         body.startCommit = startGitInfo.commitHash;
@@ -1104,6 +1133,7 @@ export async function executePlanCommand(
       // start/finish step from leaving a draft quick plan behind.
       const includeCompletionReport = typeof options.reportFile === 'string' && options.reportFile.trim().length > 0;
 
+      const quickAssignee = resolveAgentAssignee(options);
       const quickBody: {
         title: string;
         content: string;
@@ -1111,6 +1141,7 @@ export async function executePlanCommand(
         complexity: string;
         priority: string;
         repositoryRemoteUrl?: string;
+        assignedTo?: string;
         runnerType: string;
         model: string;
         fastMode?: boolean;
@@ -1122,6 +1153,7 @@ export async function executePlanCommand(
         complexity: quickComplexity,
         priority,
         ...(repositoryRemoteUrl ? { repositoryRemoteUrl } : {}),
+        ...(quickAssignee ? { assignedTo: quickAssignee } : {}),
         runnerType,
         model,
         fastMode: options.fast === true,

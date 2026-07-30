@@ -1,5 +1,6 @@
 import {
   getCredentialStore,
+  type CredentialReadOptions,
   type CredentialSaveOutcome,
   type CredentialStore,
   type CredentialStoreStatus,
@@ -15,7 +16,8 @@ const SLOT_PREFIX = 'personal-refresh';
 
 export interface PersonalTokenStore {
   status(): CredentialStoreStatus;
-  read(): string | null;
+  /** Pass `{ fresh: true }` before presenting the token — see {@link CredentialReadOptions}. */
+  read(options?: CredentialReadOptions): string | null;
   save(refreshToken: string): CredentialSaveOutcome;
   remove(): void;
 }
@@ -38,7 +40,7 @@ export function createPersonalTokenStore(
 
   return {
     status: () => store.status(),
-    read: () => store.read(slot),
+    read: (options) => store.read(slot, options),
     save: (refreshToken) => store.save(slot, refreshToken),
     remove: () => store.remove(slot),
   };

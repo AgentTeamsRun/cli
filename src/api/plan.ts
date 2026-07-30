@@ -73,6 +73,7 @@ export async function quickPlan(
     complexity: string;
     priority: string;
     repositoryRemoteUrl?: string;
+    assignedTo?: string;
     startCommit?: string;
     startBranch?: string;
     runnerType: string;
@@ -122,6 +123,7 @@ export async function startPlanLifecycle(
   id: string,
   body: {
     task?: string;
+    assignedTo?: string;
     startCommit?: string;
     startBranch?: string;
     runnerType?: string;

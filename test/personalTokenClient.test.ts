@@ -1,29 +1,69 @@
 import { describe, expect, it, jest } from '@jest/globals';
 import { PersonalTokenClient, PersonalTokenError } from '../src/auth/personalTokenClient.js';
 import type { PersonalTokenStore } from '../src/auth/personalTokenStore.js';
-import { createCredentialStore } from '../src/auth/credentialStore.js';
+import { createCredentialStore, type CredentialReadOptions } from '../src/auth/credentialStore.js';
 import { createPersonalTokenStore } from '../src/auth/personalTokenStore.js';
+import { RefreshLockTimeoutError, type RefreshLock } from '../src/auth/refreshLock.js';
 
 const API_URL = 'https://api.agentteams.run';
 const IDENTITY = { memberId: 'm-1', email: 'dev@example.com', nickname: 'dev' };
 
-function fakeStore(initial: string | null = null): PersonalTokenStore & { value: string | null; removals: number } {
-  const state = {
+type FakeStore = PersonalTokenStore & {
+  /** What the backend holds — i.e. what every other process sees. */
+  value: string | null;
+  /**
+   * A superseded copy served to cached (non-fresh) reads, standing in for the
+   * store's process-lifetime cache after another process has rotated.
+   */
+  cached?: string;
+  reads: boolean[];
+  removals: number;
+};
+
+function fakeStore(initial: string | null = null): FakeStore {
+  const state: FakeStore = {
     value: initial,
+    reads: [],
     removals: 0,
     status: () => ({ backend: 'macos-keychain' as const, persisted: true, reason: 'OK' as const }),
-    read: () => state.value,
+    read: (options?: CredentialReadOptions) => {
+      const fresh = options?.fresh === true;
+      state.reads.push(fresh);
+      return !fresh && state.cached !== undefined ? state.cached : state.value;
+    },
     save: (token: string) => {
       state.value = token;
+      state.cached = undefined;
       return { persisted: true, reason: 'OK' as const };
     },
     remove: () => {
       state.removals += 1;
       state.value = null;
+      state.cached = undefined;
     },
   };
   return state;
 }
+
+/** Records how rotation interleaves with the lock it is supposed to hold. */
+function recordingLock(order: string[]): RefreshLock {
+  return {
+    withLock: async (run) => {
+      order.push('lock:acquire');
+      try {
+        return await run();
+      } finally {
+        order.push('lock:release');
+      }
+    },
+  };
+}
+
+const timingOutLock: RefreshLock = {
+  withLock: async () => {
+    throw new RefreshLockTimeoutError('/tmp/personal-token.lock', 30_000);
+  },
+};
 
 const jsonResponse = (status: number, body: unknown): Response =>
   new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
@@ -174,6 +214,119 @@ describe('PersonalTokenClient access token lifecycle', () => {
 
     expect(await client.getAccessToken()).toBeNull();
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Rotation is destructive server-side: presenting an already-rotated refresh
+ * token is reuse, and the server answers reuse by revoking the whole family.
+ * Since one credential slot is shared by one-shot commands and a long-lived
+ * `agentteams mcp`, rotation has to be serialized across processes and must
+ * always send the token the slot actually holds.
+ */
+describe('PersonalTokenClient rotation against other processes', () => {
+  it('sends the token from the backend, not a copy cached before another process rotated', async () => {
+    const store = fakeStore('atr_rotated_by_mcp');
+    // What this process read hours ago, and what the server has already revoked.
+    store.cached = 'atr_stale';
+    const fetchMock = jest.fn(async () => jsonResponse(200, tokenPayload({ refreshToken: 'atr_next' })));
+    const client = new PersonalTokenClient({
+      apiUrl: API_URL,
+      store,
+      fetch: fetchMock as unknown as typeof fetch,
+      now: () => 0,
+    });
+
+    await client.getAccessToken();
+
+    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(JSON.parse(String(init.body))).toMatchObject({ refreshToken: 'atr_rotated_by_mcp' });
+    expect(store.value).toBe('atr_next');
+  });
+
+  it('rotates with the lock held, and releases it afterwards', async () => {
+    const order: string[] = [];
+    const store = fakeStore('atr_refresh_0');
+    const client = new PersonalTokenClient({
+      apiUrl: API_URL,
+      store,
+      fetch: (async () => {
+        order.push('rotate');
+        return jsonResponse(200, tokenPayload());
+      }) as unknown as typeof fetch,
+      now: () => 0,
+      lock: recordingLock(order),
+    });
+
+    await client.getAccessToken();
+
+    expect(order).toEqual(['lock:acquire', 'rotate', 'lock:release']);
+  });
+
+  it('never takes the lock when there is no credential to rotate', async () => {
+    const order: string[] = [];
+    const client = new PersonalTokenClient({
+      apiUrl: API_URL,
+      store: fakeStore(null),
+      fetch: (async () => jsonResponse(200, tokenPayload())) as unknown as typeof fetch,
+      lock: recordingLock(order),
+    });
+
+    expect(await client.getAccessToken()).toBeNull();
+    expect(order).toEqual([]);
+  });
+
+  it('gives up the rotation rather than racing when the lock cannot be taken', async () => {
+    const store = fakeStore('atr_refresh_0');
+    const fetchMock = jest.fn(async () => jsonResponse(200, tokenPayload()));
+    const client = new PersonalTokenClient({
+      apiUrl: API_URL,
+      store,
+      fetch: fetchMock as unknown as typeof fetch,
+      now: () => 0,
+      lock: timingOutLock,
+    });
+
+    expect(await client.getAccessToken()).toBeNull();
+    // Treated like a network failure: nothing was sent, the credential survives,
+    // and the next command retries instead of demanding a fresh login.
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(store.value).toBe('atr_refresh_0');
+    expect(store.removals).toBe(0);
+    expect(client.state().reconnectRequired).toBe(false);
+  });
+
+  it('reports no credential when another process cleared the slot while waiting', async () => {
+    const store = fakeStore(null);
+    // This process still has a cached copy, but the backend no longer does —
+    // a family already revoked and cleaned up elsewhere.
+    store.cached = 'atr_stale';
+    const fetchMock = jest.fn(async () => jsonResponse(200, tokenPayload()));
+    const client = new PersonalTokenClient({
+      apiUrl: API_URL,
+      store,
+      fetch: fetchMock as unknown as typeof fetch,
+      now: () => 0,
+    });
+
+    expect(await client.getAccessToken()).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('revokes the token the slot actually holds', async () => {
+    const store = fakeStore('atr_current');
+    store.cached = 'atr_stale';
+    const fetchMock = jest.fn(async () => new Response(null, { status: 204 }));
+    const client = new PersonalTokenClient({
+      apiUrl: API_URL,
+      store,
+      fetch: fetchMock as unknown as typeof fetch,
+    });
+
+    await client.revoke();
+
+    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(JSON.parse(String(init.body))).toEqual({ clientId: 'agentteams-cli', token: 'atr_current' });
   });
 });
 

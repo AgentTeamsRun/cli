@@ -3,7 +3,11 @@ import { join, dirname, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import type { Config } from '../types/index.js';
 import { setActiveCredential } from '../auth/activeCredential.js';
-import { getPersonalTokenClient, type PersonalTokenClient } from '../auth/personalTokenClient.js';
+import {
+  getPersonalTokenClient,
+  type PersonalTokenClient,
+  type PersonalTokenState,
+} from '../auth/personalTokenClient.js';
 import { resolveGitTopLevel, resolveMainCheckoutRoot } from './git.js';
 import { canonicalizePath } from './path.js';
 
@@ -304,6 +308,29 @@ export function planCredential(options?: Partial<Config>): CredentialPlan {
   return { source: 'config-api-key', apiKey: configApiKey, apiUrl: merged.apiUrl };
 }
 
+/**
+ * Explain a stored credential that could not be turned into an access token.
+ *
+ * The distinction is worth carrying: telling someone to check a network that is
+ * fine, or to re-login with a credential that is valid, costs them the time it
+ * takes to rule those out. Lock contention and an unusable lock both clear on a
+ * retry, so neither should read as "your login is broken".
+ */
+export function describeUnusableCredential(state: PersonalTokenState): string {
+  if (state.reconnectRequired) {
+    return "Your AgentTeams login was revoked or expired. Run 'agentteams auth login' to sign in again.";
+  }
+
+  switch (state.refreshFailure) {
+    case 'LOCK_CONTENTION':
+      return 'Another agentteams process is refreshing this login and did not finish in time. Your credential is intact — retry the command.';
+    case 'LOCK_UNAVAILABLE':
+      return 'Could not maintain the lock that keeps concurrent logins from clashing (check free space and permissions on ~/.agentteams/locks). Your credential is intact — retry the command.';
+    default:
+      return "Could not refresh your AgentTeams login. Check your network connection, then retry or run 'agentteams auth login'.";
+  }
+}
+
 /** Decide which credential to authenticate with, and produce the value to send. */
 export async function resolveCredential(
   options?: Partial<Config>,
@@ -350,11 +377,7 @@ export async function resolveCredential(
       // A stored-but-unusable token is only fatal when there is nothing else to
       // try; otherwise the `key_` below still works and the user sees nothing.
       if (!configApiKey) {
-        throw new CredentialResolutionError(
-          client.state().reconnectRequired
-            ? "Your AgentTeams login was revoked or expired. Run 'agentteams auth login' to sign in again."
-            : "Could not refresh your AgentTeams login. Check your network connection, then retry or run 'agentteams auth login'.",
-        );
+        throw new CredentialResolutionError(describeUnusableCredential(client.state()));
       }
     } else if (optedIn && !configApiKey) {
       throw new CredentialResolutionError(
