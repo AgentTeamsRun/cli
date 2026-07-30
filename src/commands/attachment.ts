@@ -30,10 +30,18 @@ const CONTENT_TYPE_BY_EXTENSION: Record<string, string> = {
   pdf: 'application/pdf',
   html: 'text/html',
   htm: 'text/html',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
 };
 
+const OFFICE_EXTENSIONS = new Set(['docx', 'pptx', 'xlsx']);
+
+const resolveExtension = (fileName: string): string =>
+  fileName.includes('.') ? (fileName.split('.').pop()?.toLowerCase() ?? '') : '';
+
 const resolveContentType = (fileName: string): string => {
-  const ext = fileName.includes('.') ? (fileName.split('.').pop()?.toLowerCase() ?? '') : '';
+  const ext = resolveExtension(fileName);
   const contentType = CONTENT_TYPE_BY_EXTENSION[ext];
   if (!contentType) {
     throw new Error(
@@ -102,12 +110,15 @@ export async function executeAttachmentCommand(
 
     const fileName = basename(filePath);
     const contentType = resolveContentType(fileName);
+    if (OFFICE_EXTENSIONS.has(resolveExtension(fileName)) && targetType !== 'document') {
+      throw new Error('Office attachments are supported only with --document-id.');
+    }
     printFileSizeInfo(filePathOption, buffer.length);
 
     // 1) Presigned draft 업로드 URL 발급
     const draftResponse = await axios.post(
       `${apiUrl}/api/attachments/draft-upload-url`,
-      { fileName, contentType, size: buffer.length },
+      { fileName, contentType, size: buffer.length, targetType },
       { headers },
     );
     const { uploadUrl, key } = draftResponse.data.data as { uploadUrl: string; key: string };
