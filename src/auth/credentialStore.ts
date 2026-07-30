@@ -63,13 +63,42 @@ export interface CredentialCommand {
   input?: string;
   /** Extra environment for the child. Used on Windows so the secret stays off argv. */
   env?: Record<string, string>;
+  /**
+   * Run the child in its own session, with no controlling terminal.
+   *
+   * Required for any tool that reads a secret from stdin: macOS `security`
+   * collects the password with `readpassphrase(3)`, which opens the controlling
+   * terminal in preference to stdin and only falls back to stdin when there is
+   * none to open. Piping the token in therefore works from a script or a test but is
+   * silently ignored in an interactive shell, where `security` prompts the user
+   * instead and stores whatever the terminal happened to supply. Detaching
+   * removes the terminal, so the piped value is the only thing it can read.
+   */
+  detachTerminal?: boolean;
 }
 
 export type CommandRunner = (command: CredentialCommand) => CommandResult;
 
+export interface CredentialReadOptions {
+  /**
+   * Skip the process-lifetime read cache and ask the backend again.
+   *
+   * Required before presenting a **rotating** credential: another process may
+   * have rotated it since this one first read it, and the cached copy would then
+   * be a superseded token the server treats as reuse.
+   *
+   * Fails closed — if the backend cannot be read, the call returns null rather
+   * than the cached guess, because the caller is about to present the value
+   * somewhere that punishes staleness. Ignored for an account whose only copy is
+   * in memory (a write that could not be persisted), since there the cache *is*
+   * the credential.
+   */
+  fresh?: boolean;
+}
+
 export interface CredentialStore {
   status(): CredentialStoreStatus;
-  read(account: string): string | null;
+  read(account: string, options?: CredentialReadOptions): string | null;
   save(account: string, secret: string): CredentialSaveOutcome;
   remove(account: string): void;
 }
@@ -103,6 +132,27 @@ function powershellCommand(script: string, env?: Record<string, string>): Creden
   };
   if (env) command.env = env;
   return command;
+}
+
+/**
+ * Exit statuses that mean "no such item" rather than "the read failed".
+ *
+ * `security` answers a missing generic password with 44 (errSecItemNotFound);
+ * `secret-tool lookup` exits 1 with no output. Anything else — a locked keychain,
+ * a denied access prompt, a dead Secret Service — is an error, and must not be
+ * mistaken for the credential having been removed.
+ */
+const MISSING_ITEM_STATUS: Partial<Record<CredentialBackendId, readonly number[]>> = {
+  'macos-keychain': [44],
+  libsecret: [1],
+};
+
+export function isMissingItemStatus(backend: CredentialBackendId, status: number | null): boolean {
+  if (status === null) return false;
+  // PasswordVault throws for a missing item and PowerShell turns that into 1;
+  // there is no separate code to key on, so it is treated as absence.
+  if (backend === 'windows-credential-manager') return status === 1;
+  return (MISSING_ITEM_STATUS[backend] ?? []).includes(status);
 }
 
 export function resolveBackendId(platform: NodeJS.Platform): CredentialBackendId {
@@ -161,13 +211,15 @@ export function buildSaveCommand(
 ): CredentialCommand | null {
   switch (backend) {
     case 'macos-keychain':
-      // `-w` without a value makes `security` read the password from stdin, and
-      // it asks for it twice ("retype password"), so the value is written twice.
-      // Passing `-w <secret>` instead would expose the token on argv.
+      // `-w` without a value makes `security` read the password rather than take
+      // it from argv, where `ps` would expose it. It asks twice ("retype
+      // password"), so the value is written twice. `detachTerminal` is what makes
+      // it read *this* stdin instead of prompting the user's terminal.
       return {
         command: 'security',
         args: ['add-generic-password', '-a', account, '-s', service, '-U', '-w'],
         input: `${secret}\n${secret}\n`,
+        detachTerminal: true,
       };
     case 'libsecret':
       return {
@@ -212,6 +264,9 @@ const defaultRunner: CommandRunner = (command) => {
     input: command.input,
     windowsHide: true,
     env: command.env ? { ...process.env, ...command.env } : process.env,
+    // `spawnSync` still waits for the child, so detaching only changes which
+    // session it belongs to — there is nothing left running afterwards.
+    ...(command.detachTerminal ? { detached: true } : {}),
   });
 
   return {
@@ -245,6 +300,13 @@ export function createCredentialStore(options: CreateCredentialStoreOptions = {}
    * would otherwise re-shell out on every credential resolution.
    */
   const memory = new Map<string, string>();
+  /**
+   * Accounts whose only copy is in {@link memory}, because a write could not be
+   * persisted. Tracked per account rather than as one store-wide latch: one
+   * account's failed write says nothing about another's, and a store-wide flag
+   * would silently turn every later `{ fresh: true }` read back into a cache hit.
+   */
+  const memoryOnlyAccounts = new Set<string>();
   let availability: boolean | null = null;
   /**
    * Set once a write is rejected by a backend that passed the probe. From then
@@ -279,41 +341,80 @@ export function createCredentialStore(options: CreateCredentialStoreOptions = {}
     return { backend, persisted: available, reason: available ? 'OK' : 'NO_BACKEND' };
   };
 
+  /**
+   * The backend's own answer, with no memory cache in front of it.
+   *
+   * `missing` and `error` must stay apart. Collapsing them makes a locked
+   * keychain or a denied access prompt look exactly like "another process logged
+   * out", which would drop a live credential from the cache and let `logout`
+   * claim there is nothing to revoke while a valid refresh token sits in the
+   * store.
+   */
+  const readFromBackend = (
+    account: string,
+  ): { kind: 'found'; secret: string } | { kind: 'missing' } | { kind: 'error'; detail: string } => {
+    if (!isAvailable()) return { kind: 'error', detail: 'the credential store is not available' };
+
+    const command = buildReadCommand(backend, service, account);
+    if (!command) return { kind: 'error', detail: 'no read command for this backend' };
+
+    const result = runner(command);
+    if (result.status !== 0) {
+      return isMissingItemStatus(backend, result.status)
+        ? { kind: 'missing' }
+        : { kind: 'error', detail: `${result.stderr}`.trim() || `the credential store read failed (${result.status})` };
+    }
+
+    // `security -w` and `secret-tool lookup` both terminate the value with a
+    // newline; a token never legitimately ends in whitespace.
+    const secret = result.stdout.replace(/\r?\n$/, '');
+    return secret.length === 0 ? { kind: 'missing' } : { kind: 'found', secret };
+  };
+
   return {
     status,
 
-    read(account) {
+    read(account, options) {
       const cached = memory.get(account);
-      if (cached !== undefined) return cached;
-      if (!isAvailable()) return null;
+      // A re-read only makes sense when the backend, not memory, holds the
+      // authoritative copy for this account. Where a write could not be
+      // persisted, memory is the only copy there is and consulting the backend
+      // would throw the live credential away.
+      const reread = options?.fresh === true && isAvailable() && !memoryOnlyAccounts.has(account);
+      if (cached !== undefined && !reread) return cached;
 
-      const command = buildReadCommand(backend, service, account);
-      if (!command) return null;
+      const outcome = readFromBackend(account);
+      if (outcome.kind === 'found') {
+        memory.set(account, outcome.secret);
+        return outcome.secret;
+      }
 
-      const result = runner(command);
-      // A missing item (`security` 44, `secret-tool` 1) and a broken backend
-      // both mean the same thing to the caller: there is no credential to use.
-      if (result.status !== 0) return null;
+      // Only a definite absence means another process removed the credential; a
+      // read that merely failed says nothing, so the cached copy stays.
+      if (outcome.kind === 'missing' && reread) memory.delete(account);
 
-      // `security -w` and `secret-tool lookup` both terminate the value with a
-      // newline; a token never legitimately ends in whitespace.
-      const secret = result.stdout.replace(/\r?\n$/, '');
-      if (secret.length === 0) return null;
-
-      memory.set(account, secret);
-      return secret;
+      // Either way this call cannot vouch for what the backend holds. A caller
+      // that asked for a fresh value is about to present it somewhere that
+      // punishes staleness, so it gets nothing rather than the cached guess.
+      if (reread) return null;
+      return cached ?? null;
     },
 
     save(account, secret) {
       memory.set(account, secret);
 
+      const markMemoryOnly = (reason: CredentialStoreReason, detail?: string): CredentialSaveOutcome => {
+        memoryOnlyAccounts.add(account);
+        return detail === undefined ? { persisted: false, reason } : { persisted: false, reason, detail };
+      };
+
       if (!isAvailable()) {
-        return { persisted: false, reason: backend === 'none' ? 'UNSUPPORTED_PLATFORM' : 'NO_BACKEND' };
+        return markMemoryOnly(backend === 'none' ? 'UNSUPPORTED_PLATFORM' : 'NO_BACKEND');
       }
 
       const command = buildSaveCommand(backend, service, account, secret);
       if (!command) {
-        return { persisted: false, reason: 'NO_BACKEND' };
+        return markMemoryOnly('NO_BACKEND');
       }
 
       const result = runner(command);
@@ -323,10 +424,31 @@ export function createCredentialStore(options: CreateCredentialStoreOptions = {}
         // here would kill the documented session-only fallback at the exact
         // moment it is needed.
         writeFailureDetail = maskSecret(`${result.stderr}`.trim(), secret) || 'the credential store rejected the write';
-        return { persisted: false, reason: 'WRITE_FAILED', detail: writeFailureDetail };
+        return markMemoryOnly('WRITE_FAILED', writeFailureDetail);
+      }
+
+      // A zero exit is not proof the value landed. A backend tool that collects
+      // the secret interactively can store something else entirely and still
+      // succeed, and the caller would then commit to a credential that is only
+      // discovered to be wrong when the server rejects it — as an expired login,
+      // which sends the user back to a re-login that fails the same way. Reading
+      // it back turns that silent corruption into an honest WRITE_FAILED.
+      //
+      // A read that fails is not evidence either way, so it is not treated as a
+      // mismatch: doing so would revoke a token that did store, on nothing more
+      // than a locked keychain.
+      const stored = readFromBackend(account);
+      if (stored.kind === 'error') {
+        writeFailureDetail = `the write could not be verified: ${stored.detail}`;
+        return markMemoryOnly('WRITE_FAILED', writeFailureDetail);
+      }
+      if (stored.kind === 'missing' || stored.secret !== secret) {
+        writeFailureDetail = 'the credential store did not keep the value that was written';
+        return markMemoryOnly('WRITE_FAILED', writeFailureDetail);
       }
 
       writeFailureDetail = null;
+      memoryOnlyAccounts.delete(account);
       return { persisted: true, reason: 'OK' };
     },
 

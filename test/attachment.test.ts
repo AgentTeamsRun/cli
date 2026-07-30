@@ -73,7 +73,7 @@ describe('attachment command', () => {
     expect(postSpy).toHaveBeenNthCalledWith(
       1,
       'http://localhost:3001/api/attachments/draft-upload-url',
-      { fileName: 'evidence.txt', contentType: 'text/plain', size: 12 },
+      { fileName: 'evidence.txt', contentType: 'text/plain', size: 12, targetType: 'codeReview' },
       { headers },
     );
     expect(putSpy).toHaveBeenCalledWith('https://r2.example/put?sig=1', expect.any(Buffer), {
@@ -133,7 +133,7 @@ describe('attachment command', () => {
     expect(postSpy).toHaveBeenNthCalledWith(
       1,
       'http://localhost:3001/api/attachments/draft-upload-url',
-      { fileName: 'document.md', contentType: 'text/markdown', size: 10 },
+      { fileName: 'document.md', contentType: 'text/markdown', size: 10, targetType: 'document' },
       { headers },
     );
     expect(putSpy).toHaveBeenCalledWith('https://r2.example/document?sig=1', expect.any(Buffer), {
@@ -152,6 +152,72 @@ describe('attachment command', () => {
     );
     expect(result).toEqual({ data: { id: 'att-doc-1', documentId: 'doc-1' } });
   });
+
+  it.each([
+    ['sample.DOCX', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
+    ['sample.pptx', 'application/vnd.openxmlformats-officedocument.presentationml.presentation'],
+    ['sample.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
+  ])('create accepts document Office file %s with MIME %s', async (fileName, contentType) => {
+    const filePath = writeTempFile(fileName, 'office package');
+    const postSpy = jest.spyOn(axios, 'post');
+    const putSpy = jest.spyOn(axios, 'put');
+
+    postSpy.mockResolvedValueOnce({
+      data: { data: { uploadUrl: 'https://r2.example/office?sig=1', key: `drafts/member-1/${fileName}` } },
+    } as any);
+    putSpy.mockResolvedValueOnce({ status: 200 } as any);
+    postSpy.mockResolvedValueOnce({ data: { data: { id: 'att-office-1', documentId: 'doc-1' } } } as any);
+
+    await executeAttachmentCommand(apiUrl, headers, 'create', {
+      file: filePath,
+      documentId: 'doc-1',
+    });
+
+    expect(postSpy).toHaveBeenNthCalledWith(
+      1,
+      'http://localhost:3001/api/attachments/draft-upload-url',
+      { fileName, contentType, size: 14, targetType: 'document' },
+      { headers },
+    );
+    expect(putSpy).toHaveBeenCalledWith('https://r2.example/office?sig=1', expect.any(Buffer), {
+      headers: { 'Content-Type': contentType },
+    });
+  });
+
+  it.each([
+    ['code review', { codeReviewId: 'rev-1' }],
+    ['completion report', { completionReportId: 'rpt-1' }],
+  ])('create rejects Office files for a %s before network upload', async (_label, targetOptions) => {
+    const filePath = writeTempFile('sample.docx', 'office package');
+    const postSpy = jest.spyOn(axios, 'post');
+    const putSpy = jest.spyOn(axios, 'put');
+
+    await expect(
+      executeAttachmentCommand(apiUrl, headers, 'create', {
+        file: filePath,
+        ...targetOptions,
+      }),
+    ).rejects.toThrow('Office attachments are supported only with --document-id.');
+
+    expect(postSpy).not.toHaveBeenCalled();
+    expect(putSpy).not.toHaveBeenCalled();
+  });
+
+  it.each(['sample.docm', 'sample.pptm', 'sample.xlsm', 'sample.doc', 'sample.ppt', 'sample.xls'])(
+    'create keeps macro-enabled and legacy Office file %s unsupported',
+    async (fileName) => {
+      const filePath = writeTempFile(fileName, 'office package');
+      const postSpy = jest.spyOn(axios, 'post');
+      const putSpy = jest.spyOn(axios, 'put');
+
+      await expect(
+        executeAttachmentCommand(apiUrl, headers, 'create', { file: filePath, documentId: 'doc-1' }),
+      ).rejects.toThrow(/Unsupported attachment type/);
+
+      expect(postSpy).not.toHaveBeenCalled();
+      expect(putSpy).not.toHaveBeenCalled();
+    },
+  );
 
   it('create requires --file', async () => {
     await expect(executeAttachmentCommand(apiUrl, headers, 'create', { codeReviewId: 'rev-1' })).rejects.toThrow(

@@ -6,6 +6,7 @@ import { dirname, resolve } from 'node:path';
 import { Command, Option } from 'commander';
 import { executeCommand } from './commands/index.js';
 import { formatOutput } from './utils/formatter.js';
+import { formatAuthResultText } from './utils/authFormat.js';
 import { handleError } from './utils/errors.js';
 import { createSummaryLines, shouldPrintSummary, type OutputFormat } from './utils/outputPolicy.js';
 import { printInitResult } from './utils/initOutput.js';
@@ -156,7 +157,7 @@ program
     'logout only: clear the local credential without contacting the server (the token stays valid — revoke it in the web app)',
     false,
   )
-  .option('--format <format>', 'Output format (json)', 'json')
+  .option('--format <format>', 'Output format (json; defaults to human-readable text)')
   .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
   .option('--verbose', 'Print full raw output to stdout; with --output-file, also echo it', false)
   .addHelpText('after', CONVENTION_HINT)
@@ -164,8 +165,12 @@ program
     try {
       const result = await executeCommand('auth', action, { apiUrl: options.apiUrl, local: options.local === true });
 
+      // `auth` is read by a person, so text is the default; scripts that read the
+      // documented fields ask for JSON explicitly.
+      const wantsJson = options.format !== undefined;
+
       printCommandResult({
-        result,
+        result: wantsJson ? result : formatAuthResultText(action, result),
         format: normalizeFormat(options.format),
         outputFile: options.outputFile,
         verbose: options.verbose,
@@ -302,7 +307,10 @@ program
     '--repository-remote-url <url>',
     'Repository remote origin URL (create/report attach; defaults to git origin)',
   )
-  .option('--assigned-to <id>', 'Assigned agent config ID (list filter)')
+  .option(
+    '--assigned-to <id>',
+    'Agent config ID or name. Filters plan list; assigns the agent on start/quick when the credential carries none (defaults to $AGENTTEAMS_AGENT_NAME)',
+  )
   .option('--task <text>', 'Task summary for plan start/finish')
   .option('--report-title <title>', 'Completion report title (plan finish)')
   .option('--report-file <path>', 'Read completion report content from a local file (plan finish)')

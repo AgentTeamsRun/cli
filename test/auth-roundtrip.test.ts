@@ -11,7 +11,8 @@ import {
   type CredentialStore,
 } from '../src/auth/credentialStore.js';
 import { PersonalTokenClient } from '../src/auth/personalTokenClient.js';
-import { createPersonalTokenStore } from '../src/auth/personalTokenStore.js';
+import { createPersonalTokenStore, personalTokenSlot } from '../src/auth/personalTokenStore.js';
+import { createFileRefreshLock } from '../src/auth/refreshLock.js';
 import { createAuthState, createPkcePair, startAuthorizationCodeServer } from '../src/utils/authServer.js';
 import { findProjectConfig, loadConfigWithCredential, setProjectAuthMode } from '../src/utils/config.js';
 
@@ -32,12 +33,18 @@ type TokenServer = {
   /** Refresh tokens the server currently accepts. Rotation replaces the entry. */
   issued: Set<string>;
   revoked: string[];
+  /** Tokens that were valid and have since been rotated away. */
+  retired: Set<string>;
+  /** How many times reuse detection has revoked the whole family. */
+  familyRevocations: () => number;
 };
 
 function startTokenServer(expectedChallenge: string): Promise<TokenServer> {
   const issued = new Set<string>();
+  const retired = new Set<string>();
   const revoked: string[] = [];
   let counter = 0;
+  let familyRevocations = 0;
 
   const server: Server = createServer((request, response) => {
     const chunks: Buffer[] = [];
@@ -79,10 +86,22 @@ function startTokenServer(expectedChallenge: string): Promise<TokenServer> {
         }
       } else if (body.grantType === 'refresh_token') {
         if (!issued.has(body.refreshToken)) {
+          // What `rotatePersonalRefreshToken` does on reuse: a token that was
+          // valid and has already been rotated away is evidence the credential
+          // is duplicated, so the **whole family** is revoked, not just this
+          // token. This is the blast radius that makes stale-token rotation a
+          // full logout across every process rather than one failed command.
+          if (retired.has(body.refreshToken)) {
+            familyRevocations += 1;
+            issued.clear();
+            send(401, { error: 'invalid_grant', reason: 'reused' });
+            return;
+          }
           send(401, { error: 'invalid_grant', reason: 'UNKNOWN' });
           return;
         }
         issued.delete(body.refreshToken);
+        retired.add(body.refreshToken);
       } else {
         send(400, { error: 'unsupported_grant_type' });
         return;
@@ -113,32 +132,24 @@ function startTokenServer(expectedChallenge: string): Promise<TokenServer> {
         close: () => new Promise((done) => server.close(() => done())),
         issued,
         revoked,
+        retired,
+        familyRevocations: () => familyRevocations,
       });
     });
   });
 }
 
 /**
- * A credential store that always persists.
- *
- * The real OS store is used when the machine has a working one, because that is
- * the configuration the CLI actually ships into. CI runners are headless — no
- * Secret Service on Linux — and there a login that cannot be stored is aborted
- * by design, which would leave this test asserting the failure path instead of
- * the round trip. So a stand-in backend takes over: the same `CredentialStore`
- * wrapper driven by a scripted `security` runner, keeping the store's own
- * caching and trailing-newline handling in the loop. Whether each platform's
- * commands are assembled correctly is `credentialStore.test.ts`'s job.
+ * A stand-in backend: the same `CredentialStore` wrapper driven by a scripted
+ * `security` runner, so the store's own caching and trailing-newline handling
+ * stay in the loop while the OS is not involved.
  *
  * Returns a factory rather than one store: every instance shares the backend but
- * has its own read cache, which is what lets the test prove a value came back
- * from storage instead of from memory.
+ * has its own read cache, which is what lets a test prove a value came back from
+ * storage instead of from memory. Whether each platform's commands are assembled
+ * correctly is `credentialStore.test.ts`'s job.
  */
-function createRoundTripStoreFactory(service: string): () => CredentialStore {
-  if (createCredentialStore({ service }).status().persisted) {
-    return () => createCredentialStore({ service });
-  }
-
+function createStandInStoreFactory(service: string): () => CredentialStore {
   const items = new Map<string, string>();
   const ok = (stdout = ''): CommandResult => ({ status: 0, stdout, stderr: '' });
   // `security` answers a missing item with 44, not with an empty value.
@@ -162,6 +173,22 @@ function createRoundTripStoreFactory(service: string): () => CredentialStore {
   };
 
   return () => createCredentialStore({ service, platform: 'darwin', runner });
+}
+
+/**
+ * A credential store that always persists, preferring the real OS one.
+ *
+ * The real store is what the CLI actually ships into, so the full round trip uses
+ * it when the machine has a working one. CI runners are headless — no Secret
+ * Service on Linux — and there a login that cannot be stored is aborted by
+ * design, which would leave the test asserting the failure path instead of the
+ * round trip, so the stand-in takes over.
+ */
+function createRoundTripStoreFactory(service: string): () => CredentialStore {
+  if (createCredentialStore({ service }).status().persisted) {
+    return () => createCredentialStore({ service });
+  }
+  return createStandInStoreFactory(service);
 }
 
 const tempDirs: string[] = [];
@@ -262,6 +289,182 @@ describe('personal login round trip', () => {
       store.remove(`personal-refresh:${tokenServer.url}`);
       await tokenServer.close();
     }
+  });
+
+  /**
+   * The failure this guards against: one credential slot is shared by every
+   * `agentteams` process — one-shot commands next to a long-lived `agentteams
+   * mcp` — and each of them rotates the refresh token. A process that presents
+   * the copy it read before someone else rotated triggers the server's reuse
+   * detection, which revokes the whole family and logs every process out at
+   * once, recoverable only by a fresh `agentteams auth login`.
+   */
+  describe('two processes sharing one credential slot', () => {
+    /** Each case starts an HTTP server and drives three processes through it. */
+    const RACE_TEST_TIMEOUT_MS = 30_000;
+
+    type Processes = {
+      tokenServer: TokenServer;
+      slot: string;
+      /** A process whose read cache already holds the pre-rotation token. */
+      openProcess: () => PersonalTokenClient;
+      cleanup: () => Promise<void>;
+    };
+
+    /**
+     * Deliberately the stand-in backend rather than the real OS store: what is
+     * under test is the store's per-process read cache and the rotation lock, not
+     * any platform's credential tool. Windows would otherwise spawn a WinRT
+     * PowerShell per read and per write — roughly a second each — and these tests
+     * do dozens of them across three processes.
+     */
+    async function startProcesses(): Promise<Processes> {
+      const service = `agentteams-cli-race-${process.pid}`;
+      const openStore = createStandInStoreFactory(service);
+      const lockDirectory = mkdtempSync(join(tmpdir(), 'agentteams-race-lock-'));
+      tempDirs.push(lockDirectory);
+
+      const pkce = createPkcePair();
+      const tokenServer = await startTokenServer(pkce.challenge);
+      const slot = personalTokenSlot(tokenServer.url);
+
+      // A completed login seeds the slot with the family's first refresh token.
+      await new PersonalTokenClient({
+        apiUrl: tokenServer.url,
+        store: createPersonalTokenStore(tokenServer.url, openStore()),
+      }).exchangeAuthorizationCode({
+        code: 'atc_code',
+        codeVerifier: pkce.verifier,
+        redirectUri: 'http://localhost:1/callback',
+      });
+
+      return {
+        tokenServer,
+        slot,
+        openProcess: () => {
+          // Its own store instance, so it has its own read cache — the thing
+          // that makes one process's view of the slot go stale.
+          const client = new PersonalTokenClient({
+            apiUrl: tokenServer.url,
+            store: createPersonalTokenStore(tokenServer.url, openStore()),
+            lock: createFileRefreshLock(slot, { directory: lockDirectory }),
+          });
+          // Every command starts by checking for a credential, which is what
+          // populates the cache that later goes stale.
+          expect(client.hasCredential()).toBe(true);
+          return client;
+        },
+        cleanup: async () => {
+          openStore().remove(slot);
+          await tokenServer.close();
+        },
+      };
+    }
+
+    it(
+      'lets a process rotate after another one already did',
+      async () => {
+        const { tokenServer, openProcess, cleanup } = await startProcesses();
+
+        try {
+          const command = openProcess();
+          const mcp = openProcess();
+
+          // The one-shot command rotates first; the MCP server's cached copy of
+          // the refresh token is now the superseded one.
+          const commandToken = await command.getAccessToken();
+          expect(commandToken).not.toBeNull();
+
+          const mcpToken = await mcp.getAccessToken();
+
+          expect(mcpToken).not.toBeNull();
+          expect(mcpToken).not.toBe(commandToken);
+          expect(tokenServer.familyRevocations()).toBe(0);
+          expect(mcp.state().reconnectRequired).toBe(false);
+        } finally {
+          await cleanup();
+        }
+      },
+      RACE_TEST_TIMEOUT_MS,
+    );
+
+    it(
+      'serializes concurrent rotations instead of revoking the family',
+      async () => {
+        const { tokenServer, openProcess, cleanup } = await startProcesses();
+
+        try {
+          const processes = [openProcess(), openProcess(), openProcess()];
+
+          const tokens = await Promise.all(processes.map((client) => client.getAccessToken()));
+
+          expect(tokens.every((token) => typeof token === 'string')).toBe(true);
+          expect(new Set(tokens).size).toBe(processes.length);
+          expect(tokenServer.familyRevocations()).toBe(0);
+          // Exactly one live refresh token is left: the last rotation's.
+          expect(tokenServer.issued.size).toBe(1);
+        } finally {
+          await cleanup();
+        }
+      },
+      RACE_TEST_TIMEOUT_MS,
+    );
+
+    it(
+      'still works for the next command after every process has rotated',
+      async () => {
+        const { tokenServer, openProcess, cleanup } = await startProcesses();
+
+        try {
+          const mcp = openProcess();
+          await mcp.getAccessToken();
+          await openProcess().getAccessToken();
+
+          // The MCP server's access token expires and it rotates again — the exact
+          // point at which the stale cached refresh token used to kill the family.
+          mcp.invalidateAccessToken();
+          expect(await mcp.getAccessToken()).not.toBeNull();
+
+          expect(tokenServer.familyRevocations()).toBe(0);
+          expect(openProcess().hasCredential()).toBe(true);
+        } finally {
+          await cleanup();
+        }
+      },
+      RACE_TEST_TIMEOUT_MS,
+    );
+
+    it(
+      'models a server that does revoke the family when a retired token is replayed',
+      async () => {
+        // Without this the tests above would pass against a harness with no teeth.
+        const { tokenServer, openProcess, cleanup } = await startProcesses();
+
+        try {
+          const retiredBefore = [...tokenServer.issued];
+          await openProcess().getAccessToken();
+
+          const replay = await fetch(`${tokenServer.url}/api/auth/desktop/token`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              grantType: 'refresh_token',
+              clientId: 'agentteams-cli',
+              refreshToken: retiredBefore[0],
+            }),
+          });
+
+          expect(replay.status).toBe(401);
+          expect(await replay.json()).toMatchObject({ error: 'invalid_grant', reason: 'reused' });
+          expect(tokenServer.familyRevocations()).toBe(1);
+          // Every process is now locked out, which is the outcome the lock prevents.
+          expect(tokenServer.issued.size).toBe(0);
+        } finally {
+          await cleanup();
+        }
+      },
+      RACE_TEST_TIMEOUT_MS,
+    );
   });
 
   it('keeps a legacy key_ project on the old path throughout', async () => {

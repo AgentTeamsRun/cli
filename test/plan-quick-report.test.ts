@@ -11,9 +11,13 @@ describe('plan quick with completion report integration', () => {
   writeFileSync(reportFile, '# Report\n\n' + 'Did the work. '.repeat(10), 'utf-8');
   let axiosPostSpy: jest.SpiedFunction<typeof axios.post>;
   let axiosGetSpy: jest.SpiedFunction<typeof axios.get>;
+  const originalAgentName = process.env.AGENTTEAMS_AGENT_NAME;
 
   beforeEach(() => {
     jest.restoreAllMocks();
+    // 데몬이 띄운 세션에서는 이 변수가 설정되어 있다. 아래 "보내지 않는다" 단정이
+    // 실행 환경에 좌우되지 않도록 명시적으로 비운다.
+    delete process.env.AGENTTEAMS_AGENT_NAME;
     axiosPostSpy = jest.spyOn(axios, 'post');
     axiosPostSpy.mockImplementation((url: string) => {
       if (url.endsWith('/plans/quick')) {
@@ -44,6 +48,11 @@ describe('plan quick with completion report integration', () => {
 
   afterAll(() => {
     rmSync(tmp, { force: true, recursive: true });
+    if (originalAgentName === undefined) {
+      delete process.env.AGENTTEAMS_AGENT_NAME;
+    } else {
+      process.env.AGENTTEAMS_AGENT_NAME = originalAgentName;
+    }
   });
 
   it('runs plan quick with report flags and builds completionReport payload', async () => {
@@ -77,8 +86,8 @@ describe('plan quick with completion report integration', () => {
         qualityScore?: number;
       };
     };
-    // 에이전트 배정은 API key 인증 정보(agentConfigId)로 서버가 추론하므로
-    // CLI는 더 이상 assignedTo를 요청 body에 보내지 않는다.
+    // 지정도 없고 $AGENTTEAMS_AGENT_NAME도 없으면 보낼 에이전트가 없다. API key
+    // 인증이면 서버가 agentConfigId로 추론하므로 이 경로가 정상이다.
     expect(quickBody.assignedTo).toBeUndefined();
     expect(quickBody.completionReport).toBeDefined();
     expect(quickBody.completionReport!.title).toBe('Quick Report Title');
@@ -87,11 +96,11 @@ describe('plan quick with completion report integration', () => {
     expect(quickBody.completionReport!.qualityScore).toBe(95);
   });
 
-  it('never forwards an agent option as assignedTo (API key inference only)', async () => {
+  it('never forwards the retired --agent option as assignedTo', async () => {
     await executePlanCommand('http://localhost:3001', 'test-project', {}, 'quick', {
       title: 'Quick Plan Title',
       content: 'Quick plan description',
-      // 폐기된 --agent 입력이 들어오더라도 quick plan 요청 body로 forwarding되면 안 된다.
+      // 폐기된 입력이다. 배정은 --assigned-to 또는 $AGENTTEAMS_AGENT_NAME으로만 온다.
       agent: 'legacy-agent',
       runnerType: 'CLAUDE_CODE',
       model: 'claude-opus-4-8',
@@ -102,6 +111,40 @@ describe('plan quick with completion report integration', () => {
     expect(quickCall).toBeDefined();
     const quickBody = quickCall![1] as { assignedTo?: string };
     expect(quickBody.assignedTo).toBeUndefined();
+  });
+
+  it('assigns the agent the daemon exported, so authentication does not change what is recorded', async () => {
+    // 데몬의 모든 러너가 세션의 agentConfigId를 이 변수로 내보낸다
+    // (daemon/src/runners/*). 에이전트를 실어오지 않는 자격증명(개인 토큰)에서는
+    // 이것이 유일한 귀속 근거다.
+    process.env.AGENTTEAMS_AGENT_NAME = 'agent-from-daemon';
+
+    await executePlanCommand('http://localhost:3001', 'test-project', {}, 'quick', {
+      title: 'Quick Plan Title',
+      content: 'Quick plan description',
+      runnerType: 'CLAUDE_CODE',
+      model: 'claude-opus-4-8',
+      git: false,
+    });
+
+    const quickCall = axiosPostSpy.mock.calls.find((call) => call[0].endsWith('/plans/quick'));
+    expect((quickCall![1] as { assignedTo?: string }).assignedTo).toBe('agent-from-daemon');
+  });
+
+  it('lets an explicit --assigned-to win over the exported one', async () => {
+    process.env.AGENTTEAMS_AGENT_NAME = 'agent-from-daemon';
+
+    await executePlanCommand('http://localhost:3001', 'test-project', {}, 'quick', {
+      title: 'Quick Plan Title',
+      content: 'Quick plan description',
+      assignedTo: 'agent-chosen-explicitly',
+      runnerType: 'CLAUDE_CODE',
+      model: 'claude-opus-4-8',
+      git: false,
+    });
+
+    const quickCall = axiosPostSpy.mock.calls.find((call) => call[0].endsWith('/plans/quick'));
+    expect((quickCall![1] as { assignedTo?: string }).assignedTo).toBe('agent-chosen-explicitly');
   });
 
   it('does not use the just-created quick plan startCommit as the report diff range', async () => {

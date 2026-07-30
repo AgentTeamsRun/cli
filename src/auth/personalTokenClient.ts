@@ -12,16 +12,39 @@
  *  3. Delete the stored refresh token **only** on an explicit `invalid_grant`.
  *     A flaky network must not log the user out — otherwise one offline moment
  *     costs a full re-login even after connectivity returns.
+ *
+ * Guarantee 2 covers one process. Rotation also has to be serialized *across*
+ * processes, because a one-shot `agentteams` command and a long-lived
+ * `agentteams mcp` share one credential slot: see {@link RefreshLock}.
  */
 
 import type { CredentialBackendId, CredentialSaveOutcome, CredentialStoreReason } from './credentialStore.js';
-import { createPersonalTokenStore, type PersonalTokenStore } from './personalTokenStore.js';
+import { createPersonalTokenStore, personalTokenSlot, type PersonalTokenStore } from './personalTokenStore.js';
+import {
+  createFileRefreshLock,
+  noopRefreshLock,
+  DEFAULT_STALE_AFTER_MS,
+  RefreshLockTimeoutError,
+  RefreshLockUnavailableError,
+  type RefreshLock,
+} from './refreshLock.js';
 
 /** Registered in `api/src/services/personalTokenClients.ts`; the server rejects anything else. */
 export const CLI_OAUTH_CLIENT_ID = 'agentteams-cli';
 
 /** Refresh this far before the server-declared expiry rather than at it. */
 export const ACCESS_REFRESH_SKEW_MS = 60_000;
+
+/**
+ * Cap on a token-endpoint request.
+ *
+ * Deliberately below {@link DEFAULT_STALE_AFTER_MS}: a rotation runs with the
+ * cross-process lock held, and if it could outlast the staleness window another
+ * process would judge the lock abandoned, take it, and rotate the same refresh
+ * token — the reuse that revokes the whole family. Bounding the request keeps the
+ * holder inside the window it promised.
+ */
+export const TOKEN_REQUEST_TIMEOUT_MS = Math.floor(DEFAULT_STALE_AFTER_MS / 2);
 
 export type PersonalTokenErrorCode =
   | 'INVALID_GRANT'
@@ -55,6 +78,15 @@ export interface PersonalTokenSession {
   identity: PersonalTokenIdentity;
 }
 
+/**
+ * Why the last refresh attempt produced no token. `null` once one succeeds.
+ *
+ * Exists so the caller can name the actual problem: every one of these used to
+ * surface as "check your network connection", which sends the user after a
+ * network that is fine.
+ */
+export type PersonalTokenRefreshFailure = 'NETWORK' | 'LOCK_CONTENTION' | 'LOCK_UNAVAILABLE';
+
 export interface PersonalTokenState {
   /** A refresh token exists locally. It may still turn out to be revoked. */
   connected: boolean;
@@ -67,6 +99,8 @@ export interface PersonalTokenState {
   expiresAt: number | null;
   /** The server rejected the refresh token; only a fresh login recovers. */
   reconnectRequired: boolean;
+  /** Why the last refresh produced nothing; null when it succeeded or never ran. */
+  refreshFailure: PersonalTokenRefreshFailure | null;
 }
 
 export interface AuthorizationCodeGrant {
@@ -80,6 +114,12 @@ export interface PersonalTokenClientDeps {
   store: PersonalTokenStore;
   fetch?: typeof fetch;
   now?: () => number;
+  /**
+   * Serializes rotation against other processes. Defaults to a pass-through so
+   * a client built in a test touches no filesystem; {@link getPersonalTokenClient}
+   * supplies the real file lock for every shipped code path.
+   */
+  lock?: RefreshLock;
 }
 
 interface TokenResponse {
@@ -155,6 +195,7 @@ export class PersonalTokenClient {
   private accessExpiresAt = 0;
   private identity: PersonalTokenIdentity | null = null;
   private reconnectRequired = false;
+  private refreshFailure: PersonalTokenRefreshFailure | null = null;
   private refreshInFlight: Promise<string | null> | null = null;
 
   constructor(private readonly deps: PersonalTokenClientDeps) {}
@@ -169,6 +210,7 @@ export class PersonalTokenClient {
       identity: this.identity,
       expiresAt: this.accessToken ? this.accessExpiresAt : null,
       reconnectRequired: this.reconnectRequired,
+      refreshFailure: this.refreshFailure,
     };
   }
 
@@ -291,7 +333,15 @@ export class PersonalTokenClient {
    * cancel.
    */
   async revoke(): Promise<void> {
-    const refreshToken = this.deps.store.read();
+    // Fresh: a logout has to revoke the token the family is actually on, not a
+    // copy this process cached before someone else rotated it.
+    //
+    // Falling back to the cached copy is safe and necessary here: revocation
+    // kills the whole family, so a superseded token from the same family does the
+    // same job, and a read that failed (locked keychain, denied prompt) must not
+    // make logout claim there is nothing to revoke while a live token sits in the
+    // store — that would leave it valid server-side with no way to reach it.
+    const refreshToken = this.deps.store.read({ fresh: true }) ?? this.deps.store.read();
     if (!refreshToken) {
       throw new PersonalTokenError('NOT_LOGGED_IN', 'No personal token is stored for this server.');
     }
@@ -332,7 +382,38 @@ export class PersonalTokenClient {
   }
 
   private async refresh(): Promise<string | null> {
-    const refreshToken = this.deps.store.read();
+    // Cheap pre-check off the cache: no credential means there is nothing to
+    // serialize against, so the lock is never taken for a logged-out process.
+    if (!this.deps.store.read()) return null;
+
+    try {
+      const accessToken = await (this.deps.lock ?? noopRefreshLock).withLock(() => this.rotate());
+      if (accessToken) this.refreshFailure = null;
+      return accessToken;
+    } catch (error) {
+      // Both lock problems leave the refresh token exactly where it is, so the
+      // next command retries. Rotating anyway would risk the server's reuse
+      // detection revoking the whole family, which costs a full re-login. They
+      // are recorded distinctly so the caller does not blame the network.
+      if (error instanceof RefreshLockTimeoutError) {
+        this.refreshFailure = 'LOCK_CONTENTION';
+        return null;
+      }
+      if (error instanceof RefreshLockUnavailableError) {
+        this.refreshFailure = 'LOCK_UNAVAILABLE';
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  /** The rotation itself. Runs with the cross-process lock held. */
+  private async rotate(): Promise<string | null> {
+    // Re-read past the store's process-lifetime cache. Another process may have
+    // rotated — or cleared — the family while this one waited for the lock, and
+    // presenting the superseded token is precisely what makes the server revoke
+    // every token in the family.
+    const refreshToken = this.deps.store.read({ fresh: true });
     if (!refreshToken) return null;
 
     let parsed: ParsedTokenResponse;
@@ -343,8 +424,10 @@ export class PersonalTokenClient {
         refreshToken,
       });
     } catch {
-      // Network-level failure. The refresh token is still presumed valid, so it
-      // stays exactly where it is; the next command can try again.
+      // Network-level failure, which now includes the request outrunning
+      // TOKEN_REQUEST_TIMEOUT_MS. The refresh token is still presumed valid, so
+      // it stays exactly where it is; the next command can try again.
+      this.refreshFailure = 'NETWORK';
       return null;
     }
 
@@ -366,6 +449,7 @@ export class PersonalTokenClient {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
+      signal: AbortSignal.timeout(TOKEN_REQUEST_TIMEOUT_MS),
     });
     return parseTokenResponse(response);
   }
@@ -389,6 +473,7 @@ export class PersonalTokenClient {
     this.accessExpiresAt = 0;
     this.identity = null;
     this.reconnectRequired = false;
+    this.refreshFailure = null;
     this.deps.store.remove();
   }
 
@@ -414,7 +499,13 @@ export function getPersonalTokenClient(apiUrl: string): PersonalTokenClient {
   const key = apiUrl.replace(/\/+$/, '');
   let client = clients.get(key);
   if (!client) {
-    client = new PersonalTokenClient({ apiUrl: key, store: createPersonalTokenStore(key) });
+    const slot = personalTokenSlot(key);
+    client = new PersonalTokenClient({
+      apiUrl: key,
+      store: createPersonalTokenStore(key),
+      // Per slot, so a dev-API rotation never blocks a production one.
+      lock: createFileRefreshLock(slot),
+    });
     clients.set(key, client);
   }
   return client;
