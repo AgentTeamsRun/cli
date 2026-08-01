@@ -52,6 +52,8 @@ describe('mcp credential resolution', () => {
         apiKey: 'key_local',
       }),
       getConfigurationNotFoundMessage: () => 'Configuration not found.',
+      // writeTools -> guides.ts로 이어지는 정적 import. 이 키가 없으면 모듈 링크 자체가 깨진다.
+      findProjectConfig: () => null,
     }));
 
     const { resolveMcpToolContext } = await import('../src/commands/mcp.js');
@@ -75,6 +77,8 @@ describe('mcp credential resolution', () => {
         apiKey: 'key_local',
       }),
       getConfigurationNotFoundMessage: () => 'Configuration not found.',
+      // writeTools -> guides.ts로 이어지는 정적 import. 이 키가 없으면 모듈 링크 자체가 깨진다.
+      findProjectConfig: () => null,
     }));
     const previousSource = process.env.AGENTTEAMS_MCP_BINDING_SOURCE;
     process.env.AGENTTEAMS_MCP_BINDING_SOURCE = 'desktop';
@@ -95,6 +99,8 @@ describe('mcp credential resolution', () => {
       loadConfigWithCredential: async () => null,
       loadProjectConfig: () => null,
       getConfigurationNotFoundMessage: () => 'Configuration not found.',
+      // writeTools -> guides.ts로 이어지는 정적 import. 이 키가 없으면 모듈 링크 자체가 깨진다.
+      findProjectConfig: () => null,
     }));
 
     const { resolveMcpToolContext } = await import('../src/commands/mcp.js');
@@ -115,6 +121,8 @@ describe('mcp credential resolution', () => {
       loadConfigWithCredential,
       loadProjectConfig: () => null,
       getConfigurationNotFoundMessage: () => 'Configuration not found.',
+      // writeTools -> guides.ts로 이어지는 정적 import. 이 키가 없으면 모듈 링크 자체가 깨진다.
+      findProjectConfig: () => null,
     }));
 
     const { resolveMcpToolContext } = await import('../src/commands/mcp.js');
@@ -158,6 +166,8 @@ describe('mcp credential resolution', () => {
       }),
       loadProjectConfig: () => null,
       getConfigurationNotFoundMessage: () => 'Configuration not found.',
+      // writeTools -> guides.ts로 이어지는 정적 import. 이 키가 없으면 모듈 링크 자체가 깨진다.
+      findProjectConfig: () => null,
     }));
 
     const { resolveMcpToolContext } = await import('../src/commands/mcp.js');
@@ -178,6 +188,8 @@ describe('mcp credential resolution', () => {
       }),
       loadProjectConfig: () => null,
       getConfigurationNotFoundMessage: () => 'Configuration not found.',
+      // writeTools -> guides.ts로 이어지는 정적 import. 이 키가 없으면 모듈 링크 자체가 깨진다.
+      findProjectConfig: () => null,
     }));
 
     const { resolveMcpToolContext } = await import('../src/commands/mcp.js');

@@ -36,6 +36,18 @@ type DocumentCommandOptions = {
   limit?: string | number;
   page?: string | number;
   pageSize?: string | number;
+  // 쓰기 계약 필드(전부 선택). 지정하지 않으면 요청에 실리지 않아 기존 호출과 동일하다.
+  guideHash?: string;
+  idempotencyKey?: string;
+  expectedUpdatedAt?: string;
+};
+
+/** 값이 있는 계약 필드만 담는다 — 빈 값을 보내면 서버 스키마(minLength:1)에 걸린다. */
+const writeContractFields = (options: DocumentCommandOptions): Record<string, string> => {
+  const fields: Record<string, string> = {};
+  if (options.guideHash) fields.guideHash = options.guideHash;
+  if (options.idempotencyKey) fields.idempotencyKey = options.idempotencyKey;
+  return fields;
 };
 
 type DocumentRecord = {
@@ -195,6 +207,7 @@ export async function executeDocumentCommand(
         body,
         ...(createSuggestedTags.length > 0 ? { suggestedTags: createSuggestedTags } : {}),
         ...(options.visibility ? { visibility: normalizeVisibility(options.visibility) } : {}),
+        ...writeContractFields(options),
       });
       return withMessage(response as Record<string, unknown>, 'Document created');
     }
@@ -209,11 +222,14 @@ export async function executeDocumentCommand(
         payload.suggestedTags = normalizeTags([options.suggestedTags, options.tags].filter(Boolean).join(','));
       }
       if (options.visibility !== undefined) payload.visibility = normalizeVisibility(options.visibility);
+      // 계약 필드는 "변경할 내용"이 아니므로 위 검사 뒤에 붙인다. --guide-hash만 준 호출은 여전히 오류다.
       if (Object.keys(payload).length === 0) {
         throw new Error(
           'At least one of --title, --file, --tags, --suggested-tags, or --visibility is required for document update',
         );
       }
+      Object.assign(payload, writeContractFields(options));
+      if (options.expectedUpdatedAt) payload.expectedUpdatedAt = options.expectedUpdatedAt;
 
       const response = await updateDocument(apiUrl, projectId, headers, options.id, payload);
       return withMessage(response as Record<string, unknown>, 'Document updated');
@@ -263,7 +279,10 @@ export async function executeDocumentCommand(
 
     case 'delete': {
       if (!options.id) throw new Error('--id is required for document delete');
-      await deleteDocument(apiUrl, projectId, headers, options.id);
+      await deleteDocument(apiUrl, projectId, headers, options.id, {
+        ...writeContractFields(options),
+        ...(options.expectedUpdatedAt ? { expectedUpdatedAt: options.expectedUpdatedAt } : {}),
+      });
       return {
         message: 'Document deleted',
         data: {

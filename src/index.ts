@@ -1047,6 +1047,18 @@ program
   .option('--limit <n>', 'Max results per page, alias for --page-size (list/revisions/comment-list)')
   .option('--page <number>', 'Page number (list/revisions/comment-list)')
   .option('--page-size <number>', 'Page size (list/revisions/comment-list)')
+  .option(
+    '--guide-hash <hash>',
+    'Hash of the document guide you followed (create/update/delete). Stale hash is rejected with GUIDE_OUTDATED.',
+  )
+  .option(
+    '--idempotency-key <key>',
+    'Retry-safe key (create/update/delete). Repeating the same key with the same request replays the first result.',
+  )
+  .option(
+    '--expected-updated-at <iso>',
+    "The document's updatedAt as you last read it (update/delete). Rejects the write if it changed meanwhile.",
+  )
   .option('--api-url <url>', 'Override API URL (optional)')
   .addOption(createApiKeyOption())
   .addOption(createApiKeyFileOption())

@@ -46,7 +46,8 @@ describe('mcp convention tools', () => {
     const list = await client.request('tools/list', { _meta: MODERN_META });
     const names = (list.result?.tools ?? []).map((tool: { name: string }) => tool.name);
 
-    expect(names).toHaveLength(18);
+    // 18 read tools + 4 write tools (guide handoff + document create/update/delete).
+    expect(names).toHaveLength(22);
     expect(names).toEqual(
       expect.arrayContaining([
         'agentteams_search',
