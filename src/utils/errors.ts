@@ -6,6 +6,9 @@ type ApiErrorPayload = {
   errorCode?: unknown;
   errorDetailCode?: unknown;
   minimumVersion?: unknown;
+  // GUIDE_OUTDATED 응답에만 실리는 복구 정보.
+  requiredGuideHash?: unknown;
+  guideFileName?: unknown;
 };
 
 export type ErrorContext = {
@@ -157,9 +160,29 @@ Details: ${message}`;
         case 404:
           return `Resource not found.\nNext: Check identifiers (e.g., --id) and the target project.\nDetails: ${message}`;
         case 409:
+          // The server names the guide and the hash it wants, so the recovery is
+          // mechanical: resync, re-read the guide, retry. Say that instead of a bare "conflict".
+          if (errorCode === 'GUIDE_OUTDATED') {
+            const guideFileName = typeof data?.guideFileName === 'string' ? data.guideFileName : 'the platform guide';
+            const requiredGuideHash =
+              typeof data?.requiredGuideHash === 'string' ? `\nRequired hash: ${data.requiredGuideHash}` : '';
+            return `Conflict (outdated ${guideFileName}).
+Next: Run 'agentteams convention download' to resync platform guides, re-read ${guideFileName}, then retry with the refreshed hash.${requiredGuideHash}
+Details: ${message}`;
+          }
+          if (errorDetailCode === 'MUTATION_IN_PROGRESS') {
+            return `Conflict (same idempotency key still running).
+Next: An earlier request with this key has not finished. Wait a moment and repeat the same request — it will replay that result instead of writing twice.
+Details: ${message}`;
+          }
+          if (errorDetailCode === 'MUTATION_IDEMPOTENCY_KEY_REUSED') {
+            return `Conflict (idempotency key reused).
+Next: This key was already used for a different request. Use a new --idempotency-key, or repeat the original request unchanged to replay it.
+Details: ${message}`;
+          }
           if (errorCode === 'OPTIMISTIC_LOCK_CONFLICT') {
             return `Conflict (stale update).
-Next: Run 'agentteams convention download' and retry with the latest updatedAt.
+Next: Re-read the record and retry with its latest updatedAt. For conventions, run 'agentteams convention download' first.
 Details: ${message}`;
           }
           return `Conflict.\nNext: If this is a convention update/delete, run 'agentteams convention download' and retry.\nDetails: ${message}`;

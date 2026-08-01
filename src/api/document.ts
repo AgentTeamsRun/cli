@@ -71,14 +71,29 @@ export async function listDocumentTags(
   return response.data;
 }
 
+/**
+ * DELETE 쓰기 계약 필드. 이 라우트는 본문을 쓰지 않으므로 쿼리로 전달한다
+ * (서버 `deleteDocumentQuerySchema`와 짝).
+ */
+export type DeleteDocumentParams = {
+  guideHash?: string;
+  idempotencyKey?: string;
+  expectedUpdatedAt?: string;
+};
+
 export async function deleteDocument(
   apiUrl: string,
   projectId: string,
   headers: Record<string, string>,
   documentId: string,
+  params?: DeleteDocumentParams,
 ) {
+  const definedParams = Object.fromEntries(
+    Object.entries(params ?? {}).filter(([, value]) => value !== undefined && value !== ''),
+  );
   const response = await httpClient.delete(`${getBaseUrl(apiUrl, projectId)}/${documentId}`, {
     headers: withoutJsonContentType(headers),
+    ...(Object.keys(definedParams).length > 0 ? { params: definedParams } : {}),
   });
   return response.data;
 }

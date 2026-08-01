@@ -111,8 +111,9 @@ describe('CLI Integration Tests', () => {
             ],
           },
         } as any)
-        .mockResolvedValueOnce({ data: { data: [] } } as any)
-        .mockResolvedValueOnce({ data: { data: { hash: 'platform-guides-hash-init-1' } } } as any);
+        // 가이드 해시는 컨벤션 유무와 무관하게 확보하므로 컨벤션 목록보다 먼저 조회된다.
+        .mockResolvedValueOnce({ data: { data: { hash: 'platform-guides-hash-init-1' } } } as any)
+        .mockResolvedValueOnce({ data: { data: [] } } as any);
 
       const mockStartLocalAuthServer = jest.fn().mockReturnValue({
         server: {
@@ -253,8 +254,8 @@ describe('CLI Integration Tests', () => {
             ],
           },
         } as any)
-        .mockResolvedValueOnce({ data: { data: [] } } as any)
-        .mockResolvedValueOnce({ data: { data: { hash: 'platform-guides-hash-init-default-api' } } } as any);
+        .mockResolvedValueOnce({ data: { data: { hash: 'platform-guides-hash-init-default-api' } } } as any)
+        .mockResolvedValueOnce({ data: { data: [] } } as any);
 
       const mockStartLocalAuthServer = jest.fn().mockReturnValue({
         server: {
@@ -324,6 +325,7 @@ describe('CLI Integration Tests', () => {
             ],
           },
         } as any)
+        .mockResolvedValueOnce({ data: { data: { hash: 'platform-guides-hash-1' } } } as any)
         .mockResolvedValueOnce({
           data: {
             data: [
@@ -331,8 +333,7 @@ describe('CLI Integration Tests', () => {
               { id: 'cv-2', title: 'API Rules', category: 'rules', contentMarkdown: '# api rules' },
             ],
           },
-        } as any)
-        .mockResolvedValueOnce({ data: { data: { hash: 'platform-guides-hash-1' } } } as any);
+        } as any);
 
       const originalCwd = process.cwd();
       const tempCwd = mkdtempSync(join(tmpdir(), 'agentteams-sync-download-'));
@@ -1358,6 +1359,7 @@ describe('CLI Integration Tests', () => {
             ],
           },
         } as any)
+        .mockResolvedValueOnce({ data: { data: { hash: 'platform-guides-hash-2' } } } as any)
         .mockResolvedValueOnce({
           data: {
             data: [
@@ -1365,8 +1367,7 @@ describe('CLI Integration Tests', () => {
               { id: 'cv-2', title: 'API Rule', category: 'rules', contentMarkdown: '# downloaded convention 2' },
             ],
           },
-        } as any)
-        .mockResolvedValueOnce({ data: { data: { hash: 'platform-guides-hash-2' } } } as any);
+        } as any);
 
       const originalCwd = process.cwd();
       const tempCwd = mkdtempSync(join(tmpdir(), 'agentteams-convention-update-'));
@@ -1927,6 +1928,8 @@ describe('CLI Integration Tests', () => {
             ],
           },
         } as any)
+        // 컨벤션이 하나도 없어도 가이드 해시는 조회·기록된다(없으면 변경을 영영 감지하지 못한다).
+        .mockResolvedValueOnce({ data: { data: { hash: 'platform-guides-hash-template-only' } } } as any)
         .mockResolvedValueOnce({ data: { data: [] } } as any);
 
       const originalCwd = process.cwd();
@@ -1971,6 +1974,7 @@ describe('CLI Integration Tests', () => {
         .mockResolvedValueOnce({ data: { data: [{ id: 'ag-1' }] } } as any)
         .mockResolvedValueOnce({ data: { data: { content: '# reporting template\n' } } } as any)
         .mockResolvedValueOnce({ data: { data: [] } } as any)
+        .mockResolvedValueOnce({ data: { data: { hash: 'platform-guides-hash-3' } } } as any)
         .mockResolvedValueOnce({
           data: {
             data: [
@@ -1978,8 +1982,7 @@ describe('CLI Integration Tests', () => {
               { id: 'cv-2', title: 'Rules', category: 'rules', contentMarkdown: '# rules 2' },
             ],
           },
-        } as any)
-        .mockResolvedValueOnce({ data: { data: { hash: 'platform-guides-hash-3' } } } as any);
+        } as any);
 
       const originalCwd = process.cwd();
       const tempCwd = mkdtempSync(join(tmpdir(), 'agentteams-convention-duplicate-'));
@@ -2314,12 +2317,12 @@ describe('CLI Integration Tests', () => {
         .mockResolvedValueOnce({ data: { data: [{ id: 'ag-1' }] } } as any)
         .mockResolvedValueOnce({ data: { data: { content: '# reporting template\n' } } } as any)
         .mockResolvedValueOnce({ data: { data: [] } } as any)
+        .mockResolvedValueOnce({ data: { data: { hash: 'platform-guides-hash-4' } } } as any)
         .mockResolvedValueOnce({
           data: {
             data: [{ id: 'cv-1', title: 'Rules', category: 'rules', contentMarkdown: '# latest rules' }],
           },
-        } as any)
-        .mockResolvedValueOnce({ data: { data: { hash: 'platform-guides-hash-4' } } } as any);
+        } as any);
 
       const originalCwd = process.cwd();
       const tempCwd = mkdtempSync(join(tmpdir(), 'agentteams-convention-cleanup-'));

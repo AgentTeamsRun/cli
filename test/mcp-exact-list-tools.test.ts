@@ -189,7 +189,7 @@ describe('mcp exact list and missing detail tools', () => {
     jest.restoreAllMocks();
   });
 
-  it('exposes exactly eight list, nine get, and one search tool without duplicates', async () => {
+  it('exposes exactly eight list, ten get, and one search tool without duplicates', async () => {
     const { client, handle } = connect();
     openHandle = handle;
 
@@ -197,10 +197,11 @@ describe('mcp exact list and missing detail tools', () => {
     const response = await client.request('tools/list', { _meta: MODERN_META });
     const names = (response.result?.tools ?? []).map((tool: { name: string }) => tool.name);
 
-    expect(names).toHaveLength(18);
-    expect(new Set(names).size).toBe(18);
+    // 18 read tools + 4 write tools; agentteams_guide_get also ends in `_get`.
+    expect(names).toHaveLength(22);
+    expect(new Set(names).size).toBe(22);
     expect(names.filter((name: string) => name.endsWith('_list'))).toHaveLength(8);
-    expect(names.filter((name: string) => name.endsWith('_get'))).toHaveLength(9);
+    expect(names.filter((name: string) => name.endsWith('_get'))).toHaveLength(10);
     expect(names.filter((name: string) => name === 'agentteams_search')).toHaveLength(1);
     expect(names.filter((name: string) => name === 'agentteams_codereview_get')).toHaveLength(1);
     expect(names).not.toContain('agentteams_code_review_get');

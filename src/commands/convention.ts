@@ -33,6 +33,9 @@ type ConventionDownloadManifestV1 = {
   version: 1;
   generatedAt: string;
   platformGuidesHash?: string;
+  // 가이드 파일명 → 해시. 선택 필드이므로 이 키가 없는 구버전 manifest는 "알 수 없음"으로 취급한다.
+  // (집계 해시만 쓰면 다른 가이드 변경만으로도 문서 쓰기가 GUIDE_OUTDATED로 오탐된다.)
+  platformGuideHashes?: Record<string, string>;
   entries: Array<{
     conventionId: string;
     fileRelativePath: string;
@@ -96,6 +99,8 @@ type PlatformGuide = {
   fileName?: string;
   category?: string;
   content?: string;
+  // 가이드 1건의 해시. 쓰기 계약(guideHash)의 값이며 구버전 서버에는 없다.
+  hash?: string;
 };
 
 function findProjectRoot(cwd?: string): string | null {
@@ -309,6 +314,24 @@ async function fetchPlatformGuidesHash(apiUrl: string, headers: Record<string, s
   }
 
   return hash;
+}
+
+/**
+ * 다운로드 경로 전용: 이 엔드포인트가 없는 구버전 서버(404)면 "해시 없음"으로 계속한다.
+ * 그 외 실패는 그대로 던진다 — 조용히 넘기면 파일과 해시가 어긋난 manifest가 남는다.
+ */
+async function fetchPlatformGuidesHashIfAvailable(
+  apiUrl: string,
+  headers: Record<string, string>,
+): Promise<string | undefined> {
+  try {
+    return await fetchPlatformGuidesHash(apiUrl, headers);
+  } catch (error) {
+    if (isAxiosError(error) && error.response?.status === 404) {
+      return undefined;
+    }
+    throw error;
+  }
 }
 
 function toConventionName(convention: { title?: string; fileName?: string | null; id: string }): string {
@@ -690,17 +713,25 @@ function buildPlatformGuideFileName(guide: PlatformGuide): string {
   return 'guide.md';
 }
 
+type PlatformGuideDownloadResult = {
+  written: number;
+  // 로컬에 쓴 파일명 → 서버가 내려준 가이드별 해시. 쓰기 계약의 guideHash가 이 값을 그대로 쓴다.
+  // 서버가 hash를 아직 안 내려주는 구버전이면 빈 맵이고, 그 경우 manifest에도 아무것도 남기지 않아
+  // 로더가 "알 수 없음"으로 판정하고 재동기화를 유도한다.
+  hashes: Record<string, string>;
+};
+
 async function downloadPlatformGuides(
   projectRoot: string,
   apiUrl: string,
   headers: Record<string, string>,
-): Promise<number> {
+): Promise<PlatformGuideDownloadResult> {
   try {
     const response = await httpClient.get(`${apiUrl}/api/platform/guides`, { headers });
 
     const guides = response.data?.data;
     if (!Array.isArray(guides) || guides.length === 0) {
-      return 0;
+      return { written: 0, hashes: {} };
     }
 
     const baseDir = join(projectRoot, CONVENTION_DIR, 'platform');
@@ -708,6 +739,7 @@ async function downloadPlatformGuides(
     mkdirSync(baseDir, { recursive: true });
 
     const fileNameCount = new Map<string, number>();
+    const hashes: Record<string, string> = {};
     let written = 0;
 
     for (const guide of guides as PlatformGuide[]) {
@@ -723,17 +755,55 @@ async function downloadPlatformGuides(
 
       const filePath = join(baseDir, fileName);
       atomicWriteFileSync(filePath, guide.content, 'utf-8');
+      if (typeof guide.hash === 'string' && guide.hash.trim().length > 0) {
+        hashes[fileName] = guide.hash.trim();
+      }
       written += 1;
     }
 
-    return written;
+    return { written, hashes };
   } catch (error) {
     if (isAxiosError(error) && error.response?.status === 404) {
-      return 0;
+      return { written: 0, hashes: {} };
     }
 
     throw error;
   }
+}
+
+/**
+ * 이번 다운로드의 플랫폼 가이드 해시를 manifest에 보존한다.
+ *
+ * 컨벤션 다운로드 블록은 프로젝트 컨벤션이 하나도 없으면 manifest를 쓰지 않고 빠져나가므로,
+ * 그 경로에서도 해시가 남도록 별도로 load-or-create 해서 병합한다.
+ *
+ * 두 해시를 **항상 함께** 기록한다. 집계 해시(`platformGuidesHash`)가 비면
+ * `checkConventionFreshness`가 가이드 변경을 영원히 감지하지 못하고(문자열일 때만 비교한다),
+ * 가이드별 해시(`platformGuideHashes`)가 낡으면 방금 덮어쓴 본문과 짝이 맞지 않는 해시를
+ * `guideHash`로 보내 원인 파악이 어려운 GUIDE_OUTDATED가 난다.
+ * 그래서 해시를 못 받은 경우(구버전 서버)는 조기 반환이 아니라 키 삭제로 처리한다 —
+ * 파일 내용과 해시는 언제나 같은 다운로드에서 나와야 한다.
+ */
+function persistPlatformGuideHashes(
+  projectRoot: string,
+  hashes: Record<string, string>,
+  platformGuidesHash: string | undefined,
+): void {
+  const manifest = loadManifestOrCreate(projectRoot);
+
+  if (platformGuidesHash) {
+    manifest.platformGuidesHash = platformGuidesHash;
+  } else {
+    delete manifest.platformGuidesHash;
+  }
+
+  if (Object.keys(hashes).length > 0) {
+    manifest.platformGuideHashes = hashes;
+  } else {
+    delete manifest.platformGuideHashes;
+  }
+
+  writeManifest(projectRoot, manifest);
 }
 
 async function downloadReportingTemplate(
@@ -787,9 +857,14 @@ export async function conventionDownload(options?: ConventionCommandOptions): Pr
   const hasReportingTemplate = await withSpinner('Downloading reporting template...', () =>
     downloadReportingTemplate(projectRoot, config, apiUrl, headers),
   );
-  const platformGuideCount = await withSpinner('Downloading platform guides...', () =>
+  const platformGuides = await withSpinner('Downloading platform guides...', () =>
     downloadPlatformGuides(projectRoot, apiUrl, headers),
   );
+  const platformGuideCount = platformGuides.written;
+  // 컨벤션 유무와 무관하게 가이드 해시를 확보한다. 컨벤션 블록 안에서만 가져오면
+  // 컨벤션이 없는 프로젝트의 manifest에는 집계 해시가 영원히 비고,
+  // `convention status`가 플랫폼 가이드 변경을 절대 감지하지 못한다.
+  const platformGuidesHash = await fetchPlatformGuidesHashIfAvailable(apiUrl, headers);
 
   const conventions = await withSpinner('Downloading conventions...', async () => {
     const conventionList = await fetchConventionsWithContent(apiUrl, config.projectId, headers);
@@ -812,11 +887,11 @@ export async function conventionDownload(options?: ConventionCommandOptions): Pr
     }
 
     const fileNameCount = new Map<string, number>();
-    const platformGuidesHash = await fetchPlatformGuidesHash(apiUrl, headers);
     const manifest: ConventionDownloadManifestV1 = {
       version: 1,
       generatedAt: new Date().toISOString(),
       platformGuidesHash,
+      ...(Object.keys(platformGuides.hashes).length > 0 ? { platformGuideHashes: platformGuides.hashes } : {}),
       entries: [],
     };
 
@@ -851,6 +926,9 @@ export async function conventionDownload(options?: ConventionCommandOptions): Pr
     writeManifest(projectRoot, manifest);
     return conventionList;
   });
+
+  // 컨벤션이 없어 위 블록이 manifest를 쓰지 않고 빠져나간 경우에도 가이드 해시는 남겨야 한다.
+  persistPlatformGuideHashes(projectRoot, platformGuides.hashes, platformGuidesHash);
 
   if (!conventions || conventions.length === 0) {
     if (hasReportingTemplate) {

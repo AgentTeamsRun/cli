@@ -1,4 +1,5 @@
 import { describe, it, expect } from '@jest/globals';
+import { getContextToolDefinitions } from '@agentteams/context-tools';
 import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -44,4 +45,20 @@ describe('mcp sdk boundary', () => {
       expect(filesWithRegistration).toEqual(['mcp/server.ts']);
     },
   );
+});
+
+/**
+ * `desktop/src/main/localAgent/directRunner.ts` advertises every context-tool
+ * definition to the model with no filter. So the moment a write tool is added to
+ * `@agentteams/context-tools`, a Direct BYOK (`DESKTOP_LIMITED`) conversation
+ * gets project write access it was never granted. Write tools therefore live in
+ * `cli/src/mcp/writeTools.ts` and nowhere else.
+ */
+describe('shared context-tools package boundary', () => {
+  it('advertises read tools only — no create/update/delete', () => {
+    const names = getContextToolDefinitions().map((definition) => definition.name);
+
+    expect(names.filter((name) => /_(create|update|delete)$/.test(name))).toEqual([]);
+    expect(names).not.toContain('agentteams_guide_get');
+  });
 });

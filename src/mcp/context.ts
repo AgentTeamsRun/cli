@@ -1,6 +1,7 @@
 import { getPersonalTokenClient } from '../auth/personalTokenClient.js';
 import { getConfigurationNotFoundMessage, loadConfigWithCredential, loadProjectConfig } from '../utils/config.js';
 import { buildAuthHeaders, buildConfigOverrides, resolveApiContext } from '../utils/apiContext.js';
+import { findGuideProjectRoot } from './guides.js';
 
 /** Everything a tool handler needs to reach the AgentTeams API. */
 export interface McpToolContext {
@@ -11,6 +12,15 @@ export interface McpToolContext {
    * story; for a credential that expires it is only the first value.
    */
   headers: Record<string, string>;
+  /**
+   * Absolute root of the local checkout this session is bound to, when there is
+   * one. Present only if a local `.agentteams/config.json` names the same project
+   * the tools write to — an MCP server spawned from an arbitrary cwd may sit
+   * outside the project, or inside a different one, and reading that project's
+   * guides would hand the agent the wrong rules and the wrong `guideHash`.
+   * Absent means "no verified local copy": guide reads fall back to the server.
+   */
+  projectRoot?: string;
   /**
    * Present only when the credential can go stale.
    *
@@ -103,15 +113,18 @@ export async function resolveMcpToolContext(options: Record<string, unknown> = {
   });
 
   const { apiUrl, headers } = resolveApiContext(config);
+  // Only a checkout that names this very project may serve local guides.
+  const projectRoot = localProjectId === config.projectId ? (findGuideProjectRoot() ?? undefined) : undefined;
 
   if (config.credentialSource !== 'personal-token') {
-    return { apiUrl, projectId: config.projectId, headers };
+    return { apiUrl, projectId: config.projectId, projectRoot, headers };
   }
 
   const client = getPersonalTokenClient(apiUrl);
   return {
     apiUrl,
     projectId: config.projectId,
+    projectRoot,
     headers,
     resolveHeaders: async () => {
       const accessToken = await client.getAccessToken();
