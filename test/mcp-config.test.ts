@@ -127,23 +127,42 @@ describe('mcp credential resolution', () => {
 
     const { resolveMcpToolContext } = await import('../src/commands/mcp.js');
 
-    const context = await resolveMcpToolContext({
-      apiKey: 'key_override',
-      projectId: 'project-override',
-      apiUrl: 'http://localhost:3001/',
-      unrelated: 'ignored',
-    });
+    // 도구 축은 환경변수에서 온다. 러너 안에서 테스트를 돌리면 부모 프로세스의 값이
+    // 새어 들어오므로, 여기서는 부재를 명시적으로 만들어 결과를 결정적으로 고정한다.
+    const previousAgentName = process.env.AGENTTEAMS_AGENT_NAME;
+    delete process.env.AGENTTEAMS_AGENT_NAME;
 
-    expect(loadConfigWithCredential).toHaveBeenCalledWith({
-      apiKey: 'key_override',
-      projectId: 'project-override',
-      apiUrl: 'http://localhost:3001/',
-    });
-    expect(context).toEqual({
-      apiUrl: 'http://localhost:3001',
-      projectId: 'project-override',
-      headers: { 'X-API-Key': 'key_override', 'Content-Type': 'application/json' },
-    });
+    try {
+      const context = await resolveMcpToolContext({
+        apiKey: 'key_override',
+        projectId: 'project-override',
+        apiUrl: 'http://localhost:3001/',
+        unrelated: 'ignored',
+      });
+
+      expect(loadConfigWithCredential).toHaveBeenCalledWith({
+        apiKey: 'key_override',
+        projectId: 'project-override',
+        apiUrl: 'http://localhost:3001/',
+      });
+      expect(context).toEqual({
+        apiUrl: 'http://localhost:3001',
+        projectId: 'project-override',
+        headers: { 'X-API-Key': 'key_override', 'Content-Type': 'application/json' },
+      });
+      expect(context.agentConfigId).toBeUndefined();
+
+      process.env.AGENTTEAMS_AGENT_NAME = 'agent-config-1';
+      const daemonContext = await resolveMcpToolContext({
+        apiKey: 'key_override',
+        projectId: 'project-override',
+        apiUrl: 'http://localhost:3001/',
+      });
+      expect(daemonContext.agentConfigId).toBe('agent-config-1');
+    } finally {
+      if (previousAgentName === undefined) delete process.env.AGENTTEAMS_AGENT_NAME;
+      else process.env.AGENTTEAMS_AGENT_NAME = previousAgentName;
+    }
   });
 
   // MCP clients substitute ${VAR} in their server config before spawning; when

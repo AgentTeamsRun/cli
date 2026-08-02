@@ -2,7 +2,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, unlinkSync,
 import { join, dirname, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import type { Config } from '../types/index.js';
-import { setActiveCredential } from '../auth/activeCredential.js';
+import { setActiveCredential, setInjectedPersonalTokenRefreshBlockReason } from '../auth/activeCredential.js';
 import {
   getPersonalTokenClient,
   type PersonalTokenClient,
@@ -222,6 +222,8 @@ export interface ResolvedCredential {
    */
   apiKey: string;
   expiresAt?: number;
+  /** True when long-running callers can resolve a replacement access token. */
+  refreshable?: true;
 }
 
 export class CredentialResolutionError extends Error {
@@ -231,7 +233,9 @@ export class CredentialResolutionError extends Error {
   }
 }
 
-export type ResolvedConfig = Config & { credentialSource: CredentialSource };
+export type ResolvedConfig = Config & { credentialSource: CredentialSource; credentialRefreshable: boolean };
+
+export const INJECTED_PERSONAL_TOKEN_MEMBER_ID_ENV = 'AGENTTEAMS_MCP_MEMBER_ID';
 
 export interface ResolveCredentialDeps {
   /** Injection point for tests; production always uses the per-server singleton. */
@@ -339,6 +343,59 @@ export async function resolveCredential(
   const plan = planCredential(options);
 
   if (plan.source === 'explicit-api-key') {
+    if (plan.apiKey.startsWith('atp_')) {
+      const expectedMemberId = process.env[INJECTED_PERSONAL_TOKEN_MEMBER_ID_ENV]?.trim();
+      if (!expectedMemberId) {
+        setActiveCredential(null);
+        setInjectedPersonalTokenRefreshBlockReason('IDENTITY_MISSING');
+        return { source: 'explicit-api-key', apiKey: plan.apiKey };
+      }
+
+      const client = (deps.getClient ?? getPersonalTokenClient)(plan.apiUrl);
+      if (!client.hasCredential()) {
+        setActiveCredential(null);
+        setInjectedPersonalTokenRefreshBlockReason('CLI_CREDENTIAL_MISSING');
+        return { source: 'explicit-api-key', apiKey: plan.apiKey };
+      }
+
+      const resolveMatchingToken = async (): Promise<string | null> => {
+        const accessToken = await client.getAccessToken();
+        if (!accessToken) {
+          setInjectedPersonalTokenRefreshBlockReason('CLI_CREDENTIAL_UNAVAILABLE');
+          return null;
+        }
+        if (client.state().identity?.memberId !== expectedMemberId) {
+          client.invalidateAccessToken();
+          setActiveCredential(null);
+          setInjectedPersonalTokenRefreshBlockReason('IDENTITY_MISMATCH');
+          return null;
+        }
+        setActiveCredential(refreshableCredential);
+        return accessToken;
+      };
+
+      const refreshableCredential = {
+        resolve: resolveMatchingToken,
+        refresh: async () => {
+          client.invalidateAccessToken();
+          return resolveMatchingToken();
+        },
+      };
+      // 일시 실패여도 MCP 컨텍스트가 같은 resolver로 재시도할 수 있어야 한다.
+      setActiveCredential(refreshableCredential);
+      const accessToken = await resolveMatchingToken();
+      if (!accessToken) {
+        if (client.state().identity && client.state().identity?.memberId !== expectedMemberId) {
+          throw new CredentialResolutionError(
+            "The Desktop personal token and the stored CLI login belong to different members. Run 'agentteams auth login' with the same account used in AgentTeams Desktop.",
+          );
+        }
+        return { source: 'explicit-api-key', apiKey: plan.apiKey, refreshable: true };
+      }
+
+      return { source: 'explicit-api-key', apiKey: plan.apiKey, refreshable: true };
+    }
+
     setActiveCredential(null);
     return { source: 'explicit-api-key', apiKey: plan.apiKey };
   }
@@ -363,6 +420,7 @@ export async function resolveCredential(
         // Only this branch arms the HTTP layer's 401 retry. A `key_` has nothing
         // to refresh, so leaving the slot empty is the guard.
         setActiveCredential({
+          resolve: () => client.getAccessToken(),
           refresh: async () => {
             client.invalidateAccessToken();
             return client.getAccessToken();
@@ -370,8 +428,8 @@ export async function resolveCredential(
         });
         const expiresAt = client.state().expiresAt;
         return expiresAt === null
-          ? { source: 'personal-token', apiKey: accessToken }
-          : { source: 'personal-token', apiKey: accessToken, expiresAt };
+          ? { source: 'personal-token', apiKey: accessToken, refreshable: true }
+          : { source: 'personal-token', apiKey: accessToken, expiresAt, refreshable: true };
       }
 
       // A stored-but-unusable token is only fatal when there is nothing else to
@@ -407,7 +465,12 @@ export async function loadConfigWithCredential(
   const credential = await resolveCredential(options, deps);
   if (!credential) return null;
 
-  return { ...merged, apiKey: credential.apiKey, credentialSource: credential.source } as ResolvedConfig;
+  return {
+    ...merged,
+    apiKey: credential.apiKey,
+    credentialSource: credential.source,
+    credentialRefreshable: credential.refreshable === true,
+  } as ResolvedConfig;
 }
 
 /**

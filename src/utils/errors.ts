@@ -1,5 +1,9 @@
 import { AxiosError, isAxiosError } from 'axios';
-import { getActiveCredential } from '../auth/activeCredential.js';
+import {
+  getActiveCredential,
+  getInjectedPersonalTokenRefreshBlockReason,
+  type InjectedPersonalTokenRefreshBlockReason,
+} from '../auth/activeCredential.js';
 
 type ApiErrorPayload = {
   message?: unknown;
@@ -91,6 +95,27 @@ function formatUpgradeRequiredMessage(options: { message: string; minimumVersion
   return lines.join('\n');
 }
 
+function formatInjectedPersonalToken401(reason: InjectedPersonalTokenRefreshBlockReason, details: string): string {
+  switch (reason) {
+    case 'CLI_CREDENTIAL_MISSING':
+      return `The personal token injected by AgentTeams Desktop expired, and no CLI login is available to refresh it.
+Next: Run 'agentteams auth login' with the same account used in AgentTeams Desktop, then restart the Desktop agent session.
+Details: ${details}`;
+    case 'IDENTITY_MISMATCH':
+      return `The AgentTeams Desktop session and stored CLI login belong to different members, so automatic refresh was blocked.
+Next: Run 'agentteams auth login' with the same account used in AgentTeams Desktop, then restart the Desktop agent session.
+Details: ${details}`;
+    case 'IDENTITY_MISSING':
+      return `The personal token injected by AgentTeams Desktop expired, but its member identity was not provided, so automatic refresh was blocked.
+Next: Update or restart AgentTeams Desktop, then start a new agent session.
+Details: ${details}`;
+    case 'CLI_CREDENTIAL_UNAVAILABLE':
+      return `The personal token injected by AgentTeams Desktop expired, and the stored CLI login could not be refreshed.
+Next: Check the network, retry, or run 'agentteams auth login' with the same Desktop account, then restart the Desktop agent session.
+Details: ${details}`;
+  }
+}
+
 export function handleError(error: unknown, context?: ErrorContext): string {
   const resolvedContext = getErrorContext(error, context);
 
@@ -116,7 +141,7 @@ Next: Verify required options (e.g., --id/--plan-id) and request parameters.
 Details: ${message}`;
           }
           return `Bad request. Check your flags and payload.\nNext: Verify required options (e.g., --id/--plan-id) and try again.\nDetails: ${message}`;
-        case 401:
+        case 401: {
           // An agent key that ran out its 30-day TTL is not a wrong key, and telling
           // someone to check AGENTTEAMS_API_KEY sends them looking at a value that is
           // exactly right. This is the only signal a runner gets, so it has to name
@@ -125,6 +150,10 @@ Details: ${message}`;
             return `This agent API key is no longer valid: it expired or was revoked.
 Next: Reissue it in the AgentTeams web app (project settings → agents) and update .agentteams/config.json, or re-run 'agentteams init' to switch this project to a personal login that refreshes itself.
 Details: ${message}`;
+          }
+          const injectedRefreshBlockReason = getInjectedPersonalTokenRefreshBlockReason();
+          if (injectedRefreshBlockReason) {
+            return formatInjectedPersonalToken401(injectedRefreshBlockReason, message);
           }
           // A personal login that still fails after the automatic refresh is a
           // different problem from a wrong API key, and needs a different fix.
@@ -137,6 +166,7 @@ Next: Verify your AGENTTEAMS_API_KEY and ensure credentials are configured.
 Details: ${message}`;
           }
           return `Invalid API key. Please check your AGENTTEAMS_API_KEY environment variable.\nNext: Re-run 'agentteams init' or set AGENTTEAMS_API_KEY.\nDetails: ${message}`;
+        }
         case 403:
           if (errorCode === 'CROSS_PROJECT_ACCESS_DENIED') {
             return `Cross-project access denied. You don't have permission to access this resource.

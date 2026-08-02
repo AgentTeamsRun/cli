@@ -1,11 +1,15 @@
 import { afterEach, describe, expect, it } from '@jest/globals';
 import { AxiosError } from 'axios';
 import { attachErrorContext, handleError } from '../src/utils/errors.js';
-import { resetActiveCredentialForTests, setActiveCredential } from '../src/auth/activeCredential.js';
+import {
+  resetActiveCredentialForTests,
+  setActiveCredential,
+  setInjectedPersonalTokenRefreshBlockReason,
+} from '../src/auth/activeCredential.js';
 
 function makeAxiosError(
   status: number,
-  data?: { message?: string; errorCode?: string; minimumVersion?: string },
+  data?: { message?: string; errorCode?: string; errorDetailCode?: string; minimumVersion?: string },
 ): AxiosError {
   return new AxiosError(data?.message ?? `HTTP ${status}`, undefined, undefined, undefined, {
     status,
@@ -150,5 +154,62 @@ describe('errors with a personal login', () => {
     const message = handleError(makeAxiosError(401, { message: 'Unauthorized' }));
     expect(message).toContain('agentteams auth login');
     expect(message).not.toContain('AGENTTEAMS_API_KEY');
+  });
+
+  it('keeps a transient Desktop refresh failure distinct while its retry resolver stays armed', () => {
+    setActiveCredential({ refresh: async () => null });
+    setInjectedPersonalTokenRefreshBlockReason('CLI_CREDENTIAL_UNAVAILABLE');
+
+    const message = handleError(makeAxiosError(401, { message: 'Unauthorized' }));
+
+    expect(message).toContain('stored CLI login could not be refreshed');
+    expect(message).toContain('Check the network');
+    expect(message).not.toContain('login is no longer valid');
+  });
+
+  it('explains when an injected Desktop token has no stored CLI login', () => {
+    setInjectedPersonalTokenRefreshBlockReason('CLI_CREDENTIAL_MISSING');
+
+    const message = handleError(makeAxiosError(401, { message: 'Unauthorized' }));
+
+    expect(message).toContain('no CLI login');
+    expect(message).toContain('agentteams auth login');
+    expect(message).toContain('restart the Desktop agent session');
+    expect(message).not.toContain('AGENTTEAMS_API_KEY');
+    expect(message).not.toContain('atp_desktop_secret');
+  });
+
+  it('explains that automatic refresh was blocked for different members', () => {
+    setInjectedPersonalTokenRefreshBlockReason('IDENTITY_MISMATCH');
+
+    const message = handleError(makeAxiosError(401, { message: 'Unauthorized' }));
+
+    expect(message).toContain('different members');
+    expect(message).toContain('same account used in AgentTeams Desktop');
+    expect(message).not.toContain('AGENTTEAMS_API_KEY');
+    expect(message).not.toContain('atp_desktop_secret');
+  });
+
+  it('keeps the agent-key-expired guidance unchanged', () => {
+    expect(
+      handleError(
+        makeAxiosError(401, {
+          message: 'expired',
+          errorDetailCode: 'AGENT_API_KEY_EXPIRED',
+        }),
+      ),
+    ).toBe(`This agent API key is no longer valid: it expired or was revoked.
+Next: Reissue it in the AgentTeams web app (project settings → agents) and update .agentteams/config.json, or re-run 'agentteams init' to switch this project to a personal login that refreshes itself.
+Details: expired`);
+  });
+
+  it('keeps the post-refresh personal-login guidance unchanged', () => {
+    setActiveCredential({ refresh: async () => null });
+
+    expect(handleError(makeAxiosError(401, { message: 'Unauthorized' }))).toBe(
+      `Your AgentTeams login is no longer valid.
+Next: Run 'agentteams auth login' to sign in again.
+Details: Unauthorized`,
+    );
   });
 });

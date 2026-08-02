@@ -1,5 +1,6 @@
 import { InMemoryTransport } from '@modelcontextprotocol/server';
 import { serveStdio, type StdioServerHandle } from '@modelcontextprotocol/server/stdio';
+import type { ToolProfile } from '@agentteams/context-tools';
 import { createMcpServer, type McpToolContext } from '../../src/commands/mcp.js';
 
 export const MODERN_PROTOCOL_VERSION = '2026-07-28';
@@ -61,12 +62,15 @@ export function createTestClient(transport: InMemoryTransport): McpTestClient {
   };
 }
 
-export function connect(context: McpToolContext = TEST_TOOL_CONTEXT): {
+export function connect(
+  context: McpToolContext = TEST_TOOL_CONTEXT,
+  toolProfile: ToolProfile = 'full',
+): {
   client: McpTestClient;
   handle: StdioServerHandle;
 } {
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-  const handle = serveStdio(() => createMcpServer(context, '9.9.9'), { transport: serverTransport });
+  const handle = serveStdio(() => createMcpServer(context, '9.9.9', toolProfile), { transport: serverTransport });
   return { client: createTestClient(clientTransport), handle };
 }
 

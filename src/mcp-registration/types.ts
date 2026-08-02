@@ -14,6 +14,16 @@ export type McpClientId = (typeof MCP_CLIENT_IDS)[number];
 
 export type McpScope = 'user' | 'project';
 
+export type McpNativeDiscoveryStatus = 'verified' | 'unsupported' | 'unknown';
+
+export interface McpNativeDiscoveryCapability {
+  status: McpNativeDiscoveryStatus;
+  verifiedAt: string;
+  evidenceUrl?: string;
+  version?: string;
+  reason?: string;
+}
+
 /** How the AgentTeams entry reaches the client's configuration. */
 export type McpInstallStrategy =
   /** The client owns the format; we shell out to its documented non-interactive command. */
@@ -86,6 +96,8 @@ export interface McpClientDefinition {
   docsUrl: string;
   /** Date the contract above was verified against the vendor's docs and a local install. */
   verifiedAt: string;
+  /** Native host-side progressive discovery; never changes the profile automatically. */
+  nativeDiscovery: McpNativeDiscoveryCapability;
   scopes: Record<McpScope, McpScopeDefinition>;
 }
 

@@ -1,7 +1,13 @@
-import { getPersonalTokenClient } from '../auth/personalTokenClient.js';
-import { getConfigurationNotFoundMessage, loadConfigWithCredential, loadProjectConfig } from '../utils/config.js';
+import { getActiveCredential } from '../auth/activeCredential.js';
+import {
+  getConfigurationNotFoundMessage,
+  loadConfigWithCredential,
+  loadProjectConfig,
+  type ResolveCredentialDeps,
+} from '../utils/config.js';
 import { buildAuthHeaders, buildConfigOverrides, resolveApiContext } from '../utils/apiContext.js';
 import { findGuideProjectRoot } from './guides.js';
+import { resolveSessionAgentConfigId } from '../utils/agentIdentity.js';
 
 /** Everything a tool handler needs to reach the AgentTeams API. */
 export interface McpToolContext {
@@ -21,6 +27,15 @@ export interface McpToolContext {
    * Absent means "no verified local copy": guide reads fall back to the server.
    */
   projectRoot?: string;
+  /**
+   * Which agent config (tool) this MCP session runs as, when the daemon spawned it.
+   *
+   * The tool axis of attribution: with a personal token the request carries no proven
+   * agent identity, so without this the record silently loses "what it was written
+   * with". Absent outside a daemon-spawned session — write tools must then omit the
+   * field entirely rather than send an empty value.
+   */
+  agentConfigId?: string;
   /**
    * Present only when the credential can go stale.
    *
@@ -87,8 +102,14 @@ function assertNoUnresolvedPlaceholders(credentials: Record<string, string>): vo
  * trusted to sit inside the project: CLI overrides and `AGENTTEAMS_*`
  * environment variables are the reliable paths here.
  */
-export async function resolveMcpToolContext(options: Record<string, unknown> = {}): Promise<McpToolContext> {
-  const config = await loadConfigWithCredential(buildConfigOverrides(options));
+export async function resolveMcpToolContext(
+  options: Record<string, unknown> = {},
+  credentialDeps?: ResolveCredentialDeps,
+): Promise<McpToolContext> {
+  const overrides = buildConfigOverrides(options);
+  const config = credentialDeps
+    ? await loadConfigWithCredential(overrides, credentialDeps)
+    : await loadConfigWithCredential(overrides);
   if (!config) {
     throw new Error(getConfigurationNotFoundMessage());
   }
@@ -115,19 +136,23 @@ export async function resolveMcpToolContext(options: Record<string, unknown> = {
   const { apiUrl, headers } = resolveApiContext(config);
   // Only a checkout that names this very project may serve local guides.
   const projectRoot = localProjectId === config.projectId ? (findGuideProjectRoot() ?? undefined) : undefined;
+  // Same env channel every other CLI command reads. Undefined outside a daemon session.
+  const agentConfigId = resolveSessionAgentConfigId();
 
-  if (config.credentialSource !== 'personal-token') {
-    return { apiUrl, projectId: config.projectId, projectRoot, headers };
+  const credentialRefreshable = config.credentialRefreshable ?? config.credentialSource === 'personal-token';
+  if (!credentialRefreshable) {
+    return { apiUrl, projectId: config.projectId, projectRoot, agentConfigId, headers };
   }
 
-  const client = getPersonalTokenClient(apiUrl);
+  const credential = getActiveCredential();
   return {
     apiUrl,
     projectId: config.projectId,
     projectRoot,
+    agentConfigId,
     headers,
     resolveHeaders: async () => {
-      const accessToken = await client.getAccessToken();
+      const accessToken = await credential?.resolve?.();
       // A refresh that cannot complete right now must not blank the credential:
       // returning the last known headers lets the request fail as a normal 401
       // (which the HTTP layer then retries once) instead of as an unauthenticated

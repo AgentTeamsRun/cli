@@ -10,6 +10,7 @@ import { createCliContextToolsClient, getToolSpecs, type McpToolSpec } from './t
  */
 export interface McpResourceSpec {
   name: string;
+  toolName: string;
   uriTemplate: string;
   title: string;
   description: string;
@@ -39,6 +40,7 @@ function createEntityResourceSpec(options: {
   const toolSpec = findToolSpec(options.toolName);
   return {
     name: options.name,
+    toolName: options.toolName,
     uriTemplate: options.uriTemplate,
     title: options.title,
     description: options.description,

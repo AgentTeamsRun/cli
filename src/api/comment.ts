@@ -10,6 +10,14 @@ export type CommentWriteContract = {
   idempotencyKey?: string;
 };
 
+/**
+ * create 전용 도구 축. 서버 `authorAgentConfigIdProperty`와 짝을 이룬다.
+ * 행위 주체 축과 직교하며, 값이 없으면 키 자체를 보내지 않는다(빈 문자열은 400을 부른다).
+ */
+export type CommentAuthorAttribution = {
+  agentConfigId?: string;
+};
+
 /** update/delete 전용 낙관적 잠금 값까지 포함한 형태. */
 export type CommentMutationParams = CommentWriteContract & {
   expectedUpdatedAt?: string;
@@ -59,7 +67,8 @@ export async function createComment(
     type: string;
     content: string;
     affectedFiles?: string[];
-  } & CommentWriteContract,
+  } & CommentWriteContract &
+    CommentAuthorAttribution,
 ): Promise<any> {
   const baseUrl = `${apiUrl}/api/projects/${projectId}/plans/${planId}/comments`;
   const response = await httpClient.post(baseUrl, body, { headers });
@@ -84,7 +93,7 @@ export async function createFindingComment(
   projectId: string,
   headers: any,
   findingId: string,
-  body: { content: string } & CommentWriteContract,
+  body: { content: string } & CommentWriteContract & CommentAuthorAttribution,
 ): Promise<any> {
   const baseUrl = `${apiUrl}/api/projects/${projectId}/code-reviews/findings/${findingId}/comments`;
   const response = await httpClient.post(baseUrl, body, { headers });
@@ -109,7 +118,7 @@ export async function createTaskComment(
   projectId: string,
   headers: any,
   taskId: string,
-  body: { content: string } & CommentWriteContract,
+  body: { content: string } & CommentWriteContract & CommentAuthorAttribution,
   planId?: string,
 ): Promise<any> {
   const baseUrl = `${apiUrl}/api/projects/${projectId}/plans/tasks/${taskId}/comments`;
@@ -174,7 +183,7 @@ export async function createReply(
   projectId: string,
   headers: any,
   commentId: string,
-  body: { content: string } & CommentWriteContract,
+  body: { content: string } & CommentWriteContract & CommentAuthorAttribution,
 ): Promise<any> {
   const baseUrl = `${apiUrl}/api/projects/${projectId}/comments/${commentId}/replies`;
   const response = await httpClient.post(baseUrl, body, { headers });

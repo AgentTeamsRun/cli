@@ -1,5 +1,6 @@
 import { existsSync } from 'node:fs';
 import { delimiter, isAbsolute, join, resolve } from 'node:path';
+import type { ToolProfile } from '@agentteams/context-tools';
 import type { McpPathContext, McpServerSpec } from './types.js';
 
 /** Server name registered in every client. Kept stable so re-runs update rather than duplicate. */
@@ -34,6 +35,12 @@ export interface BuildServerSpecOptions {
   context?: McpPathContext;
   /** Injection seam so tests drive a fake PATH instead of the developer's machine. */
   fileExists?: (path: string) => boolean;
+  /** `full` stays implicit for compatibility; limited profiles are explicit argv. */
+  toolProfile?: ToolProfile;
+}
+
+function profileArgs(toolProfile: ToolProfile = 'full'): string[] {
+  return toolProfile === 'full' ? [] : ['--tool-profile', toolProfile];
 }
 
 function executableSuffixes(): string[] {
@@ -69,15 +76,16 @@ export function hasGlobalExecutable(
 export function buildServerSpec(options: BuildServerSpecOptions): McpServerSpec {
   const { serverEntry } = options;
   const env: Record<string, string> = {};
+  const args = profileArgs(options.toolProfile);
 
   if (serverEntry) {
     const entryPath = isAbsolute(serverEntry) ? serverEntry : resolve(serverEntry);
-    return { command: 'node', args: [entryPath, 'mcp'], env };
+    return { command: 'node', args: [entryPath, 'mcp', ...args], env };
   }
 
   if (options.context && !hasGlobalExecutable(options.context, options.fileExists)) {
-    return { command: 'npx', args: ['-y', MCP_RUNTIME_PACKAGE, 'mcp'], env };
+    return { command: 'npx', args: ['-y', MCP_RUNTIME_PACKAGE, 'mcp', ...args], env };
   }
 
-  return { command: MCP_GLOBAL_EXECUTABLE, args: ['mcp'], env };
+  return { command: MCP_GLOBAL_EXECUTABLE, args: ['mcp', ...args], env };
 }

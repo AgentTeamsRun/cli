@@ -45,7 +45,6 @@ function envFlags(spec: McpServerSpec, flag: string): string[] {
 }
 
 const ALREADY_REGISTERED = [/already exists/i];
-
 export const MCP_CLIENTS: McpClientDefinition[] = [
   {
     id: 'claude-code',
@@ -55,6 +54,13 @@ export const MCP_CLIENTS: McpClientDefinition[] = [
     configSignals: (context) => [join(context.homeDir, '.claude.json'), join(context.homeDir, '.claude')],
     docsUrl: 'https://code.claude.com/docs/en/mcp',
     verifiedAt: '2026-07-25',
+    nativeDiscovery: {
+      status: 'verified',
+      verifiedAt: '2026-08-02',
+      evidenceUrl: 'https://code.claude.com/docs/en/mcp#scale-with-mcp-tool-search',
+      version: '2.1.220',
+      reason: 'Tool Search is enabled by default and defers MCP tool definitions until they are needed.',
+    },
     scopes: {
       user: {
         configPath: (context) => join(context.homeDir, '.claude.json'),
@@ -95,6 +101,13 @@ export const MCP_CLIENTS: McpClientDefinition[] = [
     configSignals: (context) => [join(codexHome(context), 'config.toml'), codexHome(context)],
     docsUrl: 'https://developers.openai.com/codex/mcp',
     verifiedAt: '2026-07-25',
+    nativeDiscovery: {
+      status: 'unknown',
+      verifiedAt: '2026-08-02',
+      evidenceUrl: 'https://developers.openai.com/codex/mcp',
+      version: '0.144.5',
+      reason: 'The official Codex MCP feature list does not document host-side progressive tool discovery.',
+    },
     scopes: {
       user: {
         configPath: (context) => join(codexHome(context), 'config.toml'),
@@ -120,6 +133,14 @@ export const MCP_CLIENTS: McpClientDefinition[] = [
     configSignals: (context) => [join(copilotHome(context), 'mcp-config.json'), copilotHome(context)],
     docsUrl: 'https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-mcp-servers',
     verifiedAt: '2026-07-25',
+    nativeDiscovery: {
+      status: 'verified',
+      verifiedAt: '2026-08-02',
+      evidenceUrl: 'https://docs.github.com/en/copilot/concepts/agents/copilot-cli/tool-search',
+      version: '1.0.75',
+      reason:
+        'Tool search defers external tools on supported models once the client tool inventory crosses its threshold.',
+    },
     scopes: {
       user: {
         configPath: (context) => join(copilotHome(context), 'mcp-config.json'),
@@ -149,6 +170,13 @@ export const MCP_CLIENTS: McpClientDefinition[] = [
     ],
     docsUrl: 'https://opencode.ai/docs/mcp-servers',
     verifiedAt: '2026-07-25',
+    nativeDiscovery: {
+      status: 'unsupported',
+      verifiedAt: '2026-08-02',
+      evidenceUrl: 'https://opencode.ai/docs/mcp-servers#caveats',
+      version: '1.17.7',
+      reason: 'The official guide says MCP tools add directly to model context and recommends enabling fewer servers.',
+    },
     scopes: {
       user: {
         configPath: (context) => join(xdgConfigHome(context), 'opencode', 'opencode.jsonc'),
@@ -177,6 +205,14 @@ export const MCP_CLIENTS: McpClientDefinition[] = [
     ],
     docsUrl: 'https://ampcode.com/manual',
     verifiedAt: '2026-07-25',
+    nativeDiscovery: {
+      status: 'unsupported',
+      verifiedAt: '2026-08-02',
+      evidenceUrl: 'https://ampcode.com/manual#mcp',
+      version: '0.0.1783228622-g9b591b',
+      reason:
+        'MCP servers registered in Amp settings stay available in context; on-demand loading is limited to MCP servers bundled in skills.',
+    },
     scopes: {
       user: {
         configPath: (context) => join(xdgConfigHome(context), 'amp', 'settings.json'),
@@ -216,6 +252,13 @@ export const MCP_CLIENTS: McpClientDefinition[] = [
     configSignals: (context) => [join(context.homeDir, '.cursor', 'mcp.json'), join(context.homeDir, '.cursor')],
     docsUrl: 'https://docs.cursor.com/context/model-context-protocol',
     verifiedAt: '2026-07-25',
+    nativeDiscovery: {
+      status: 'verified',
+      verifiedAt: '2026-08-02',
+      evidenceUrl: 'https://cursor.com/blog/dynamic-context-discovery#4-efficiently-loading-only-the-mcp-tools-needed',
+      version: '2026.07.16-899851b',
+      reason: 'Cursor syncs MCP tool descriptions outside the prompt and loads matching definitions when needed.',
+    },
     scopes: {
       // Verified 2026.07.16: `cursor-agent mcp` exposes only login/list/enable/
       // disable — there is no `add`, so the config file is the only contract.
@@ -244,6 +287,13 @@ export const MCP_CLIENTS: McpClientDefinition[] = [
     configSignals: (context) => [join(kimiHome(context), 'mcp.json'), kimiHome(context)],
     docsUrl: 'https://www.kimi.com/code/docs/en/kimi-code-cli/customization/mcp.html',
     verifiedAt: '2026-07-25',
+    nativeDiscovery: {
+      status: 'unknown',
+      verifiedAt: '2026-08-02',
+      evidenceUrl: 'https://www.kimi.com/code/docs/en/kimi-code-cli/customization/mcp.html',
+      reason:
+        'The official MCP guide documents allowlists and exposure to the agent, but not progressive definition loading.',
+    },
     scopes: {
       // Verified 0.29.0: kimi-code exposes no `mcp` subcommand at all; it loads
       // `<KIMI_CODE_HOME>/mcp.json` and `<cwd>/.kimi-code/mcp.json` directly.
@@ -274,6 +324,14 @@ export const MCP_CLIENTS: McpClientDefinition[] = [
     ],
     docsUrl: 'https://antigravity.google/docs/mcp',
     verifiedAt: '2026-07-25',
+    nativeDiscovery: {
+      status: 'unknown',
+      verifiedAt: '2026-08-02',
+      evidenceUrl: 'https://antigravity.google/docs/mcp',
+      version: '1.1.8',
+      reason:
+        'The official MCP guide documents automatic availability and permissions, but not progressive definition loading.',
+    },
     scopes: {
       // Verified 1.1.2: the `agy` CLI has no `mcp` subcommand; `mcp_config.json`
       // with an `mcpServers` map is the documented contract.

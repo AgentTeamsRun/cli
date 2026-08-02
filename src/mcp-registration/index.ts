@@ -1,12 +1,20 @@
 import { homedir } from 'node:os';
 import { getConfigurationNotFoundMessage, loadConfigIdentity } from '../utils/config.js';
 import { buildConfigOverrides } from '../utils/apiContext.js';
-import { findClient, listClientIds, MCP_CLIENTS } from './clients.js';
+import { parseToolProfile } from '../mcp/toolProfile.js';
+import { findClient, listClientIds } from './clients.js';
 import type { DetectionDependencies } from './detect.js';
 import { buildBatchPlan, installClient, resolveInstallExitCode, runBatchInstall, type BatchPlan } from './install.js';
 import { renderConfigSnippet, renderVendorCommandLine } from './render.js';
 import { buildServerSpec, MCP_SERVER_NAME, type McpCredentials } from './serverSpec.js';
-import type { InstallResult, McpClientId, McpPathContext, McpScope, McpServerSpec } from './types.js';
+import type {
+  InstallResult,
+  McpClientDefinition,
+  McpClientId,
+  McpPathContext,
+  McpScope,
+  McpServerSpec,
+} from './types.js';
 import type { VendorRunner } from './vendorCommand.js';
 
 export { MCP_CLIENTS, findClient, listClientIds } from './clients.js';
@@ -39,6 +47,7 @@ export interface McpRegistrationCommandOptions {
   apiUrl?: string;
   projectId?: string;
   teamId?: string;
+  toolProfile?: string;
 }
 
 /** Injection seams so tests drive a temporary HOME/cwd and a fake vendor CLI. */
@@ -109,6 +118,25 @@ function describeRuntime(spec: McpServerSpec): string {
     : 'The entry runs the globally installed `agentteams` executable.';
 }
 
+function describeNativeDiscovery(client: McpClientDefinition, toolProfile: string): string {
+  const capability = client.nativeDiscovery;
+  const version = capability.version ? ` (${capability.version})` : '';
+  const evidence = capability.evidenceUrl ? ` Evidence: ${capability.evidenceUrl}` : '';
+
+  if (capability.status === 'verified') {
+    return `Native tool discovery: verified${version}. The full profile preserves the complete catalog while the client loads definitions on demand.${evidence}`;
+  }
+
+  const recommendation =
+    toolProfile === 'full'
+      ? 'If upfront schema cost matters, re-run with --tool-profile read, documents, or comments.'
+      : `The explicit ${toolProfile} profile limits the catalog exposed to this client.`;
+  return `Native tool discovery: ${capability.status}${version}. ${capability.reason ?? ''} ${recommendation}${evidence}`.replace(
+    /\s+/g,
+    ' ',
+  );
+}
+
 function parseClientId(value: string): McpClientId {
   const client = findClient(value);
   if (!client) {
@@ -130,9 +158,10 @@ export function runMcpConfigCommand(
   const credentials = resolveCredentials(options, dependencies);
   const context = resolvePathContext(dependencies?.context);
   const scope = parseScope(options.scope);
+  const toolProfile = parseToolProfile(options.toolProfile);
   const clientIds = options.client ? [parseClientId(options.client)] : MCP_CLIENT_ID_LIST;
 
-  const spec = buildServerSpec({ serverEntry: options.serverEntry, context });
+  const spec = buildServerSpec({ serverEntry: options.serverEntry, context, toolProfile });
 
   const sections = clientIds.map((clientId) => {
     const client = findClient(clientId);
@@ -147,6 +176,10 @@ export function runMcpConfigCommand(
       strategy: definition.strategy,
       docsUrl: client.docsUrl,
       verifiedAt: client.verifiedAt,
+      nativeDiscovery: client.nativeDiscovery,
+      profileGuidance: describeNativeDiscovery(client, toolProfile),
+      toolProfile,
+      server: spec,
       snippet: renderConfigSnippet(client, scope, spec, MCP_SERVER_NAME),
       vendorCommand: renderVendorCommandLine(client, scope, spec, MCP_SERVER_NAME),
       configOnlyReason: definition.configOnlyReason ?? null,
@@ -156,6 +189,7 @@ export function runMcpConfigCommand(
   const lines: string[] = [
     `AgentTeams MCP config (${scope} scope) — project ${credentials.projectId}, team ${credentials.teamId}`,
     'No credentials or project binding are embedded. The MCP server resolves local configuration and the OS credential store at request time.',
+    `Tool profile: ${toolProfile}${toolProfile === 'full' ? ' (default; all tools)' : ' (explicit limited catalog)'}.`,
     describeRuntime(spec),
   ];
 
@@ -166,10 +200,11 @@ export function runMcpConfigCommand(
     if (section.configOnlyReason) lines.push(`Note: ${section.configOnlyReason}`);
     if (section.vendorCommand) lines.push(`Command: ${section.vendorCommand}`);
     lines.push(section.snippet);
+    lines.push(section.profileGuidance);
     lines.push(`Docs: ${section.docsUrl} (verified ${section.verifiedAt})`);
   }
 
-  return { text: lines.join('\n'), json: { scope, clients: sections }, exitCode: 0 };
+  return { text: lines.join('\n'), json: { scope, toolProfile, server: spec, clients: sections }, exitCode: 0 };
 }
 
 function formatDetectionEvidence(entry: BatchPlan['entries'][number]): string {
@@ -205,6 +240,8 @@ export function runMcpInstallCommand(
   const credentials = resolveCredentials(options, dependencies);
   const context = resolvePathContext(dependencies?.context);
   const scope = parseScope(options.scope);
+  const toolProfile = parseToolProfile(options.toolProfile);
+  const spec = buildServerSpec({ serverEntry: options.serverEntry, context, toolProfile });
 
   if (options.client) {
     const client = findClient(parseClientId(options.client));
@@ -216,6 +253,7 @@ export function runMcpInstallCommand(
       credentials,
       context,
       serverEntry: options.serverEntry,
+      toolProfile,
       vendorRunner: dependencies?.vendorRunner,
     });
 
@@ -223,7 +261,8 @@ export function runMcpInstallCommand(
       `AgentTeams MCP install — ${client.label} (${scope} scope)`,
       `Project ${credentials.projectId}, team ${credentials.teamId}`,
       'The server entry contains no credentials or project binding; runtime resolution uses local configuration and the OS credential store.',
-      describeRuntime(buildServerSpec({ serverEntry: options.serverEntry, context })),
+      `Tool profile: ${toolProfile}${toolProfile === 'full' ? ' (default; all tools)' : ' (explicit limited catalog)'}.`,
+      describeRuntime(spec),
     ];
     lines.push(renderResultLine(result));
     if (result.backupPath) lines.push(`Backup: ${result.backupPath}`);
@@ -234,7 +273,7 @@ export function runMcpInstallCommand(
 
     return {
       text: lines.join('\n'),
-      json: { scope, results: [result], summary: summarize([result]) },
+      json: { scope, toolProfile, server: spec, results: [result], summary: summarize([result]) },
       exitCode: resolveInstallExitCode([result]),
     };
   }
@@ -257,7 +296,8 @@ export function runMcpInstallCommand(
       'AgentTeams MCP install — dry run (no files were changed)',
       `Plan: register "${MCP_SERVER_NAME}" at ${scope} scope for project ${plan.binding.projectId}, team ${plan.binding.teamId}`,
       'The server entries contain no credentials or project binding; runtime resolution uses local configuration and the OS credential store.',
-      describeRuntime(buildServerSpec({ serverEntry: options.serverEntry, context })),
+      `Tool profile: ${toolProfile}${toolProfile === 'full' ? ' (default; all tools)' : ' (explicit limited catalog)'}.`,
+      describeRuntime(spec),
       '',
     ];
 
@@ -274,7 +314,7 @@ export function runMcpInstallCommand(
         : 'Choose one client and run `agentteams mcp install --client <id> --scope project`, or use `agentteams mcp config --client <id> --scope project` for a manual snippet.',
     );
 
-    return { text: lines.join('\n'), json: { scope, dryRun: true, plan }, exitCode: 0 };
+    return { text: lines.join('\n'), json: { scope, toolProfile, server: spec, dryRun: true, plan }, exitCode: 0 };
   }
 
   const { plan, results } = runBatchInstall({
@@ -282,6 +322,7 @@ export function runMcpInstallCommand(
     credentials,
     scope,
     serverEntry: options.serverEntry,
+    toolProfile,
     vendorRunner: dependencies?.vendorRunner,
     detectionDependencies: dependencies?.detectionDependencies,
   });
@@ -289,7 +330,8 @@ export function runMcpInstallCommand(
   const summary = summarize(results);
   const lines = [
     `AgentTeams MCP install — applied at ${scope} scope for project ${plan.binding.projectId}, team ${plan.binding.teamId}`,
-    describeRuntime(buildServerSpec({ serverEntry: options.serverEntry, context })),
+    `Tool profile: ${toolProfile}${toolProfile === 'full' ? ' (default; all tools)' : ' (explicit limited catalog)'}.`,
+    describeRuntime(spec),
     ...results.map(renderResultLine),
     '',
     `Summary: ${summary.applied} registered, ${summary.skipped} skipped, ${summary.failed} failed.`,
@@ -297,7 +339,7 @@ export function runMcpInstallCommand(
 
   return {
     text: lines.join('\n'),
-    json: { scope, dryRun: false, plan, results, summary },
+    json: { scope, toolProfile, server: spec, dryRun: false, plan, results, summary },
     exitCode: resolveInstallExitCode(results),
   };
 }

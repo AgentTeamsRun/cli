@@ -1236,6 +1236,11 @@ program
 const mcpCommand = program
   .command('mcp')
   .description('Run an MCP server over stdio, exposing AgentTeams reads to MCP-capable coding agents')
+  .option(
+    '--tool-profile <profile>',
+    'Tool catalog profile (full, read, documents, comments); full is the compatibility default, limited profiles reduce upfront schemas',
+    'full',
+  )
   .option('--api-url <url>', 'Override API URL (optional)')
   .addOption(createApiKeyOption())
   .addOption(createApiKeyFileOption())
@@ -1255,6 +1260,7 @@ const mcpCommand = program
         apiKey: options.apiKey,
         projectId: options.projectId,
         teamId: options.teamId,
+        toolProfile: options.toolProfile,
       });
     } catch (error) {
       // Staying alive without credentials would make the client retry forever.
@@ -1269,6 +1275,10 @@ function addMcpRegistrationOptions(command: Command): Command {
   return command
     .option('--client <id>', `Target client (${MCP_CLIENT_CHOICES})`)
     .option('--scope <scope>', 'Configuration scope (user, project)', 'project')
+    .option(
+      '--tool-profile <profile>',
+      'Tool catalog profile (full, read, documents, comments); full is the compatibility default, limited profiles reduce upfront schemas',
+    )
     .option(
       '--server-entry <path>',
       'Use a local `cli/dist/index.js` instead of the published package (for pre-release testing)',

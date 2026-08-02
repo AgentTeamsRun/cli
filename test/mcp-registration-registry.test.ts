@@ -61,9 +61,24 @@ describe('mcp client registry', () => {
   });
 
   it('records an official documentation URL and a verification date for every client', () => {
+    expect(Object.fromEntries(MCP_CLIENTS.map((client) => [client.id, client.nativeDiscovery.status]))).toEqual({
+      'claude-code': 'verified',
+      codex: 'unknown',
+      'copilot-cli': 'verified',
+      opencode: 'unsupported',
+      amp: 'unsupported',
+      'cursor-cli': 'verified',
+      'kimi-cli': 'unknown',
+      antigravity: 'unknown',
+    });
+
     for (const client of MCP_CLIENTS) {
       expect(client.docsUrl).toMatch(/^https:\/\//);
       expect(client.verifiedAt).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      expect(['verified', 'unsupported', 'unknown']).toContain(client.nativeDiscovery.status);
+      expect(client.nativeDiscovery.verifiedAt).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      expect(client.nativeDiscovery.evidenceUrl).toMatch(/^https:\/\//);
+      if (client.nativeDiscovery.status === 'unknown') expect(client.nativeDiscovery.reason).toBeTruthy();
     }
   });
 
@@ -150,6 +165,32 @@ describe('mcp config output', () => {
     expect(run({ scope: 'user' }).text).toEqual(run({ scope: 'user' }).text);
   });
 
+  it('reports native discovery evidence and profile guidance for every client', () => {
+    const output = run({ scope: 'user' }) as {
+      text: string;
+      json: {
+        clients: {
+          clientId: string;
+          nativeDiscovery: { status: string; evidenceUrl: string };
+          profileGuidance: string;
+        }[];
+      };
+    };
+
+    expect(output.json.clients).toHaveLength(8);
+    for (const client of output.json.clients) {
+      expect(client.profileGuidance).toContain(`Native tool discovery: ${client.nativeDiscovery.status}`);
+      expect(client.profileGuidance).toContain(client.nativeDiscovery.evidenceUrl);
+      expect(output.text).toContain(client.profileGuidance);
+    }
+    expect(output.json.clients.find((client) => client.clientId === 'claude-code')?.profileGuidance).toContain(
+      'full profile preserves the complete catalog',
+    );
+    expect(output.json.clients.find((client) => client.clientId === 'opencode')?.profileGuidance).toContain(
+      '--tool-profile read, documents, or comments',
+    );
+  });
+
   it('renders the documented snippet for each client at user scope', () => {
     const output = run({ scope: 'user' }) as {
       json: { clients: { clientId: string; snippet: string; configPath: string }[] };
@@ -213,6 +254,40 @@ describe('mcp config output', () => {
     const output = run({ scope: 'user', client: 'cursor-cli', serverEntry: '/opt/agentteams/cli/dist/index.js' });
     expect(output.text).toContain('"command": "node"');
     expect(output.text).toContain('/opt/agentteams/cli/dist/index.js');
+  });
+
+  it.each([
+    ['global', undefined, false],
+    ['npx', undefined, true],
+    ['local', '/opt/agentteams/cli/dist/index.js', false],
+  ])(
+    'preserves an explicit profile in the %s server argv and reports it in text/JSON',
+    (_mode, serverEntry, useNpx) => {
+      const output = run(
+        { client: 'cursor-cli', scope: 'user', toolProfile: 'documents', ...(serverEntry ? { serverEntry } : {}) },
+        { homeDir: home, cwd, env: { PATH: useNpx ? '' : bin } as NodeJS.ProcessEnv },
+      ) as {
+        text: string;
+        json: {
+          toolProfile: string;
+          server: { args: string[] };
+          clients: { toolProfile: string; server: { args: string[] } }[];
+        };
+      };
+
+      expect(output.text).toContain('Tool profile: documents');
+      expect(output.json.toolProfile).toBe('documents');
+      expect(output.json.server.args.slice(-2)).toEqual(['--tool-profile', 'documents']);
+      expect(output.json.clients[0].toolProfile).toBe('documents');
+      expect(output.json.clients[0].server.args).toEqual(output.json.server.args);
+      expect(output.text).toContain('--tool-profile');
+    },
+  );
+
+  it('rejects an unsupported profile with the closed list of values', () => {
+    expect(() => run({ toolProfile: 'tiny' })).toThrow(
+      'Unsupported tool profile: tiny. Use full, read, documents, comments.',
+    );
   });
 
   it('does not pin API URLs because the MCP server resolves local configuration itself', () => {

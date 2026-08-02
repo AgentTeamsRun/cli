@@ -1,20 +1,29 @@
 import { afterEach, describe, expect, it, jest } from '@jest/globals';
 import axios from 'axios';
 import type { StdioServerHandle } from '@modelcontextprotocol/server/stdio';
+import { getActiveCredential, resetActiveCredentialForTests } from '../src/auth/activeCredential.js';
+import { PersonalTokenClient } from '../src/auth/personalTokenClient.js';
+import type { PersonalTokenStore } from '../src/auth/personalTokenStore.js';
 import { createCliContextToolsClient } from '../src/mcp/tools.js';
-import type { McpToolContext } from '../src/mcp/context.js';
+import { resolveMcpToolContext, type McpToolContext } from '../src/mcp/context.js';
 import { MODERN_META, connect, discover } from './helpers/mcp.js';
 
 const API_URL = 'http://localhost:3001';
 const PROJECT_ID = 'project-1';
 
 let openHandle: StdioServerHandle | undefined;
+let originalEnv: NodeJS.ProcessEnv | undefined;
 
 afterEach(async () => {
   if (openHandle) {
     await openHandle.close();
     openHandle = undefined;
   }
+  if (originalEnv) {
+    process.env = originalEnv;
+    originalEnv = undefined;
+  }
+  resetActiveCredentialForTests();
   jest.restoreAllMocks();
 });
 
@@ -41,7 +50,124 @@ function expiringContext(tokens: string[]): { context: McpToolContext; resolveCo
   };
 }
 
+function tokenStore(value: string | null): PersonalTokenStore {
+  let stored = value;
+  return {
+    status: () => ({ backend: 'macos-keychain', persisted: true, reason: 'OK' }),
+    read: () => stored,
+    save: (token: string) => {
+      stored = token;
+      return { persisted: true, reason: 'OK' };
+    },
+    remove: () => {
+      stored = null;
+    },
+  };
+}
+
+const jsonResponse = (body: unknown): Response =>
+  new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
+
 describe('MCP credential resolution boundary', () => {
+  function scriptedClient(tokens: Array<string | null>) {
+    let index = 0;
+    let identity: { memberId: string } | null = null;
+    return {
+      hasCredential: () => true,
+      getAccessToken: jest.fn(async () => {
+        const token = tokens[Math.min(index++, tokens.length - 1)] ?? null;
+        if (token) identity = { memberId: 'member-1' };
+        return token;
+      }),
+      invalidateAccessToken: jest.fn(),
+      state: () => ({ identity }),
+    };
+  }
+
+  async function resolveScriptedContext(tokens: Array<string | null>): Promise<McpToolContext> {
+    originalEnv = { ...process.env };
+    process.env.AGENTTEAMS_API_KEY = 'atp_desktop_snapshot';
+    process.env.AGENTTEAMS_API_URL = API_URL;
+    process.env.AGENTTEAMS_TEAM_ID = 'team-1';
+    process.env.AGENTTEAMS_PROJECT_ID = PROJECT_ID;
+    process.env.AGENTTEAMS_MCP_BINDING_SOURCE = 'desktop';
+    process.env.AGENTTEAMS_MCP_MEMBER_ID = 'member-1';
+
+    const client = scriptedClient(tokens);
+    return resolveMcpToolContext({}, { getClient: () => client as never });
+  }
+
+  async function resolveInjectedPersonalTokenContext(includeIdentity = true): Promise<McpToolContext> {
+    originalEnv = { ...process.env };
+    process.env.AGENTTEAMS_API_KEY = 'atp_desktop_snapshot';
+    process.env.AGENTTEAMS_API_URL = API_URL;
+    process.env.AGENTTEAMS_TEAM_ID = 'team-1';
+    process.env.AGENTTEAMS_PROJECT_ID = PROJECT_ID;
+    process.env.AGENTTEAMS_MCP_BINDING_SOURCE = 'desktop';
+    if (includeIdentity) process.env.AGENTTEAMS_MCP_MEMBER_ID = 'member-1';
+    else delete process.env.AGENTTEAMS_MCP_MEMBER_ID;
+
+    const client = new PersonalTokenClient({
+      apiUrl: API_URL,
+      store: tokenStore('atr_cli_refresh'),
+      now: () => 0,
+      fetch: (async () =>
+        jsonResponse({
+          data: {
+            accessToken: 'atp_cli_refreshed',
+            refreshToken: 'atr_cli_rotated',
+            expiresIn: 900,
+            identity: { memberId: 'member-1', email: 'member@example.com', nickname: 'member' },
+          },
+        })) as unknown as typeof fetch,
+    });
+    return resolveMcpToolContext({}, { getClient: () => client });
+  }
+
+  it('keeps an injected atp_ static when the identity gate cannot be evaluated', async () => {
+    const context = await resolveInjectedPersonalTokenContext(false);
+
+    expect(context.resolveHeaders).toBeUndefined();
+  });
+
+  it('adds a per-call header resolver for an injected atp_', async () => {
+    const context = await resolveInjectedPersonalTokenContext();
+
+    expect(context.resolveHeaders).toBeDefined();
+    await expect(context.resolveHeaders?.()).resolves.toEqual({
+      Authorization: 'Bearer atp_cli_refreshed',
+      'Content-Type': 'application/json',
+    });
+  });
+
+  it('keeps a resolver after a transient startup failure and rearms on recovery', async () => {
+    const context = await resolveScriptedContext([null, 'atp_recovered']);
+
+    expect(context.resolveHeaders).toBeDefined();
+    expect(getActiveCredential()).not.toBeNull();
+    await expect(context.resolveHeaders?.()).resolves.toEqual({
+      Authorization: 'Bearer atp_recovered',
+      'Content-Type': 'application/json',
+    });
+    expect(getActiveCredential()).not.toBeNull();
+  });
+
+  it('rearms the 401 retry after a runtime failure recovers', async () => {
+    const context = await resolveScriptedContext(['atp_initial', null, 'atp_recovered']);
+
+    expect(getActiveCredential()).not.toBeNull();
+    await expect(context.resolveHeaders?.()).resolves.toEqual({
+      Authorization: 'Bearer atp_desktop_snapshot',
+      'Content-Type': 'application/json',
+    });
+    expect(getActiveCredential()).not.toBeNull();
+    await expect(context.resolveHeaders?.()).resolves.toEqual({
+      Authorization: 'Bearer atp_recovered',
+      'Content-Type': 'application/json',
+    });
+    expect(getActiveCredential()).not.toBeNull();
+  });
+
   it('resolves the credential per tool call rather than once at startup', async () => {
     const getSpy = jest.spyOn(axios, 'get').mockResolvedValue({ data: { data: { id: 'plan-1' } } } as never);
     const { context, resolveCount } = expiringContext(['atp_first', 'atp_second', 'atp_third']);

@@ -34,6 +34,7 @@ import { conventionDownload } from './convention.js';
 import type { AuthMode, Config } from '../types/index.js';
 import { resolveGitTopLevel, resolveMainCheckoutRoot } from '../utils/git.js';
 import { canonicalizePath } from '../utils/path.js';
+import { readOrCreateMachineId } from '../utils/machineId.js';
 import { buildAuthHeaders } from '../utils/apiContext.js';
 import {
   DEFAULT_CONVENTION_REFERENCE,
@@ -183,6 +184,7 @@ export function buildAuthorizeUrl(
   authPathEnc?: string,
   osType?: string,
   state?: string,
+  machineId?: string,
 ): string {
   const params = new URLSearchParams({
     port: String(port),
@@ -193,6 +195,11 @@ export function buildAuthorizeUrl(
   }
   if (osType && osType.length > 0) {
     params.set('ot', osType);
+  }
+  // Machine identity, shared with the runner installed on this machine. It is not a secret and is
+  // only used to bind the agent to the runner that can actually reach this workspace.
+  if (machineId && machineId.length > 0) {
+    params.set('mid', machineId);
   }
   // The web page echoes this back through the callback; without it the local
   // server cannot tell this login apart from one someone else started.
@@ -818,7 +825,14 @@ async function executeInitCommandWithContext(options?: InitOptions): Promise<Ini
     authPathEnc = undefined;
   }
 
-  const authUrl = buildAuthorizeUrl(authContext.port, projectName, authPathEnc, detectOsType(), authContext.state);
+  const authUrl = buildAuthorizeUrl(
+    authContext.port,
+    projectName,
+    authPathEnc,
+    detectOsType(),
+    authContext.state,
+    readOrCreateMachineId() ?? undefined,
+  );
   await tryOpenBrowser(authUrl);
 
   const authSpinner = createSpinner('Waiting for authentication... (Ctrl+C to cancel)');

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll } from '@jest/globals';
-import { execFileSync, spawn } from 'node:child_process';
-import { existsSync, mkdtempSync } from 'node:fs';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -113,6 +113,37 @@ describe('agentteams mcp — built CLI entry point', () => {
     expect(stderr).toContain('[agentteams mcp]');
     expect(stdout).not.toContain('[agentteams mcp]');
   }, 60_000);
+
+  it.each([
+    [['mcp', '--tool-profile', 'read', 'config'], 'read'],
+    [['mcp', 'config', '--tool-profile', 'documents'], 'documents'],
+  ])('preserves %s option placement for registration commands', (prefix, expectedProfile) => {
+    const emptyHome = mkdtempSync(join(tmpdir(), 'agentteams-mcp-profile-home-'));
+    try {
+      const result = spawnSync(
+        process.execPath,
+        [distEntry, ...prefix, '--client', 'cursor-cli', '--scope', 'user', '--json'],
+        {
+          cwd: tmpdir(),
+          env: {
+            ...process.env,
+            HOME: emptyHome,
+            USERPROFILE: emptyHome,
+            AGENTTEAMS_API_URL: 'http://127.0.0.1:1',
+            AGENTTEAMS_TEAM_ID: 'team-smoke',
+            AGENTTEAMS_PROJECT_ID: 'project-smoke',
+          },
+          encoding: 'utf-8',
+        },
+      );
+
+      expect(result.status).toBe(0);
+      expect(result.stderr).toBe('');
+      expect(JSON.parse(result.stdout).toolProfile).toBe(expectedProfile);
+    } finally {
+      rmSync(emptyHome, { recursive: true, force: true });
+    }
+  });
 
   it('exits non-zero without writing to stdout when credentials are missing', async () => {
     const result = await new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve, reject) => {
