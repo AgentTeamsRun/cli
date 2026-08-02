@@ -61,4 +61,23 @@ describe('shared context-tools package boundary', () => {
     expect(names.filter((name) => /_(create|update|delete)$/.test(name))).toEqual([]);
     expect(names).not.toContain('agentteams_guide_get');
   });
+
+  // 답글 read 도구는 공유 패키지에 넣지만 write 도구는 넣지 않는다. 같은 엔티티의 도구가
+  // 한 파일에 섞여 있으면 다음 사람이 "여기 답글 도구가 있으니 나머지도 여기에" 로 읽기 쉽다.
+  it('carries the shared reply read tools but none of the comment write tools', () => {
+    const names = getContextToolDefinitions().map((definition) => definition.name);
+
+    expect(names).toContain('agentteams_comment_reply_list');
+    expect(names).toContain('agentteams_comment_reply_get');
+    for (const writeTool of [
+      'agentteams_comment_create',
+      'agentteams_comment_update',
+      'agentteams_comment_delete',
+      'agentteams_comment_reply_create',
+      'agentteams_comment_reply_update',
+      'agentteams_comment_reply_delete',
+    ]) {
+      expect(names).not.toContain(writeTool);
+    }
+  });
 });

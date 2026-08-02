@@ -3,9 +3,10 @@ import { createCliContextToolsClient, getToolSpecs, type McpToolSpec } from './t
 
 /**
  * SDK-agnostic resource-template description. The handler receives the URI
- * template variables and returns the upstream payload verbatim; only the SDK
- * adapter (`server.ts`) may build `ResourceTemplate` instances or the
- * `contents` envelope.
+ * template variables and returns the matching tool payload; only the SDK adapter
+ * (`server.ts`) may build `ResourceTemplate` instances or the `contents`
+ * envelope. Entity-specific tool projections still apply, so document reads
+ * omit the derived editor-only `bodyTiptap` mirror.
  */
 export interface McpResourceSpec {
   name: string;
@@ -60,7 +61,8 @@ export function getResourceSpecs(): McpResourceSpec[] {
       name: 'agentteams-document',
       uriTemplate: 'agentteams://document/{id}',
       title: 'AgentTeams Document',
-      description: 'Full document (body included) as JSON. Same payload as the agentteams_document_get tool.',
+      description:
+        'Full document Markdown body as JSON, without the derived editor-only bodyTiptap mirror. Same payload as the agentteams_document_get tool.',
       toolName: 'agentteams_document_get',
     }),
     createEntityResourceSpec({

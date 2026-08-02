@@ -35,6 +35,23 @@ const documentResponse = {
   },
 };
 
+/**
+ * 문서만 예외다. `bodyTiptap`은 서버가 매 응답 `body`에서 파생 생성하는 웹 에디터
+ * 전용 미러이고, 실측에서 원본의 약 6배로 부풀어 단건 조회가 토큰 한도를 넘겼다.
+ * 다른 엔티티는 그대로 통과시킨다 — 제외는 문서 도구 스펙 안에서만 한다.
+ */
+const documentResponseWithoutEditorMirror = {
+  data: {
+    id: documentResponse.data.id,
+    title: documentResponse.data.title,
+    body: documentResponse.data.body,
+    isFavorite: documentResponse.data.isFavorite,
+  },
+};
+
+const expectedPayload = (tool: string, response: unknown) =>
+  tool === 'agentteams_document_get' ? documentResponseWithoutEditorMirror : response;
+
 const ENTITY_GET_CASES = [
   {
     tool: 'agentteams_plan_get',
@@ -109,7 +126,7 @@ describe('mcp entity read tools', () => {
   });
 
   it.each(ENTITY_GET_CASES)(
-    '$tool normalizes prefixed ids and passes the upstream envelope through verbatim',
+    '$tool normalizes prefixed ids and passes the upstream envelope through',
     async (testCase) => {
       const getSpy = jest.spyOn(axios, 'get').mockResolvedValue({ data: testCase.response } as never);
       const { client, handle } = connect();
@@ -125,7 +142,7 @@ describe('mcp entity read tools', () => {
       expect(prefixed.error).toBeUndefined();
       expect(prefixed.result?.isError).toBeFalsy();
       expect(getSpy).toHaveBeenLastCalledWith(testCase.url, { headers: TEST_TOOL_CONTEXT.headers });
-      expect(JSON.parse(prefixed.result?.content[0].text)).toEqual(testCase.response);
+      expect(JSON.parse(prefixed.result?.content[0].text)).toEqual(expectedPayload(testCase.tool, testCase.response));
 
       const bare = await client.request('tools/call', {
         name: testCase.tool,
@@ -135,7 +152,7 @@ describe('mcp entity read tools', () => {
 
       // Bare and prefixed ids must resolve to the same request URL.
       expect(getSpy).toHaveBeenLastCalledWith(testCase.url, { headers: TEST_TOOL_CONTEXT.headers });
-      expect(JSON.parse(bare.result?.content[0].text)).toEqual(testCase.response);
+      expect(JSON.parse(bare.result?.content[0].text)).toEqual(expectedPayload(testCase.tool, testCase.response));
     },
   );
 

@@ -179,7 +179,7 @@ export async function createDocumentComment(
   projectId: string,
   headers: Record<string, string>,
   documentId: string,
-  body: { content: string },
+  body: { content: string; guideHash?: string; idempotencyKey?: string },
 ) {
   const response = await httpClient.post(`${getBaseUrl(apiUrl, projectId)}/${documentId}/comments`, body, { headers });
   return response.data;
@@ -191,7 +191,7 @@ export async function updateDocumentComment(
   headers: Record<string, string>,
   documentId: string,
   commentId: string,
-  body: { content: string },
+  body: { content: string; guideHash?: string; idempotencyKey?: string; expectedUpdatedAt?: string },
 ) {
   const response = await httpClient.put(`${getBaseUrl(apiUrl, projectId)}/${documentId}/comments/${commentId}`, body, {
     headers,
@@ -205,9 +205,15 @@ export async function deleteDocumentComment(
   headers: Record<string, string>,
   documentId: string,
   commentId: string,
+  params?: DeleteDocumentParams,
 ) {
+  // 문서 코멘트 삭제도 문서 삭제와 같은 쿼리 계약을 쓴다(서버 deleteDocumentCommentQuerySchema).
+  const definedParams = Object.fromEntries(
+    Object.entries(params ?? {}).filter(([, value]) => typeof value === 'string' && value.length > 0),
+  );
   const response = await httpClient.delete(`${getBaseUrl(apiUrl, projectId)}/${documentId}/comments/${commentId}`, {
     headers: withoutJsonContentType(headers),
+    ...(Object.keys(definedParams).length > 0 ? { params: definedParams } : {}),
   });
   return response.data;
 }

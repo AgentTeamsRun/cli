@@ -342,6 +342,7 @@ export async function executeDocumentCommand(
       if (!options.id) throw new Error('--id is required for document comment-create');
       const response = await createDocumentComment(apiUrl, projectId, headers, options.id, {
         content: getCommentContent(options, action),
+        ...writeContractFields(options),
       });
       return withMessage(response as Record<string, unknown>, 'Document comment created');
     }
@@ -351,6 +352,8 @@ export async function executeDocumentCommand(
       if (!options.commentId) throw new Error('--comment-id is required for document comment-update');
       const response = await updateDocumentComment(apiUrl, projectId, headers, options.id, options.commentId, {
         content: getCommentContent(options, action),
+        ...writeContractFields(options),
+        ...(options.expectedUpdatedAt ? { expectedUpdatedAt: options.expectedUpdatedAt } : {}),
       });
       return withMessage(response as Record<string, unknown>, 'Document comment updated');
     }
@@ -358,7 +361,10 @@ export async function executeDocumentCommand(
     case 'comment-delete': {
       if (!options.id) throw new Error('--id is required for document comment-delete');
       if (!options.commentId) throw new Error('--comment-id is required for document comment-delete');
-      await deleteDocumentComment(apiUrl, projectId, headers, options.id, options.commentId);
+      await deleteDocumentComment(apiUrl, projectId, headers, options.id, options.commentId, {
+        ...writeContractFields(options),
+        ...(options.expectedUpdatedAt ? { expectedUpdatedAt: options.expectedUpdatedAt } : {}),
+      });
       return {
         message: 'Document comment deleted',
         data: {

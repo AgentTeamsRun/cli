@@ -116,6 +116,12 @@ const expectedContract = [
   },
   { name: 'agentteams_comment_get', required: ['id'], properties: ['id'] },
   {
+    name: 'agentteams_comment_reply_list',
+    required: ['commentId'],
+    properties: ['commentId', 'order', 'page', 'pageSize'],
+  },
+  { name: 'agentteams_comment_reply_get', required: ['replyId'], properties: ['replyId'] },
+  {
     name: 'agentteams_codereview_finding_get',
     required: ['id'],
     properties: ['codeReviewId', 'id'],
@@ -181,7 +187,7 @@ describe('shared context-tools contract', () => {
     const specs = getContextToolSpecs();
     const listSpecs = specs.filter(({ name }) => name.endsWith('_list'));
 
-    expect(listSpecs).toHaveLength(8);
+    expect(listSpecs).toHaveLength(9);
     for (const spec of listSpecs) {
       expect(spec.description).toContain('one page');
       expect(spec.description).toContain('meta.total');
@@ -199,7 +205,7 @@ describe('shared context-tools contract', () => {
       ({ name }) => name === 'agentteams_search' || name.endsWith('_list') || name.endsWith('_get'),
     );
 
-    expect(readSpecs).toHaveLength(18);
+    expect(readSpecs).toHaveLength(20);
     for (const spec of readSpecs) {
       expect(spec.description).toContain('project bound to the current MCP server or context client');
       expect(spec.description).toContain('cannot read another project');
@@ -384,5 +390,74 @@ describe('shared context-tools contract', () => {
     });
     expect(getCodeReviewFinding).toHaveBeenCalledWith('finding-1', 'review-1');
     expect(getComment).toHaveBeenCalledWith('agentteams_pln_raw-comment-id');
+  });
+});
+
+describe('document payload trimming', () => {
+  // bodyTiptap은 서버가 body에서 매 응답 파생 생성하는 에디터 전용 미러다.
+  // 에이전트는 마크다운 body만 소비하는데 실측에서 원본의 약 6배로 부풀어
+  // 단건 조회 하나가 토큰 예산을 넘겼다. MCP 경로에서만 걷어낸다.
+  const documentPayload = () => ({
+    data: {
+      id: 'doc-1',
+      title: '문서',
+      body: '# 본문',
+      bodyTiptap: '{"type":"doc","content":[]}',
+      visibility: 'PRIVATE',
+      tags: ['mcp'],
+      updatedAt: '2026-08-02T00:00:00.000Z',
+      webUrl: 'https://agentteams.run/go?type=document&id=doc-1',
+    },
+  });
+
+  it('omits the editor-only bodyTiptap mirror from document_get', async () => {
+    const getDocument = jest.fn(async () => documentPayload());
+    const client = { getDocument } as unknown as ContextToolsClient;
+
+    const result = (await executeContextTool('agentteams_document_get', { id: 'agentteams_doc_doc-1' }, client)) as {
+      data: Record<string, unknown>;
+    };
+
+    expect(result.data).not.toHaveProperty('bodyTiptap');
+    expect(getDocument).toHaveBeenCalledWith('doc-1');
+  });
+
+  it('keeps the markdown body and every field a later write depends on', async () => {
+    const getDocument = jest.fn(async () => documentPayload());
+    const client = { getDocument } as unknown as ContextToolsClient;
+
+    const result = (await executeContextTool('agentteams_document_get', { id: 'doc-1' }, client)) as {
+      data: Record<string, unknown>;
+    };
+
+    // updatedAt이 빠지면 후속 수정의 expectedUpdatedAt 동시편집 가드가 조용히 무력화된다.
+    expect(result.data).toMatchObject({
+      id: 'doc-1',
+      title: '문서',
+      body: '# 본문',
+      visibility: 'PRIVATE',
+      tags: ['mcp'],
+      updatedAt: '2026-08-02T00:00:00.000Z',
+      webUrl: 'https://agentteams.run/go?type=document&id=doc-1',
+    });
+  });
+
+  it('does not claim the payload is returned verbatim', () => {
+    const spec = getContextToolSpecs().find((candidate) => candidate.name === 'agentteams_document_get');
+
+    expect(spec?.description).not.toContain('nothing is summarized or omitted');
+    expect(spec?.description).toContain('bodyTiptap');
+  });
+
+  it('leaves other entity get tools untouched', async () => {
+    // 제외는 문서 스펙 안에서만 한다. 공용 팩토리를 고치면 plan/report/coaction까지 함께 바뀐다.
+    const getPlan = jest.fn(async () => ({ data: { id: 'plan-1', bodyTiptap: 'kept' } }));
+    const client = { getPlan } as unknown as ContextToolsClient;
+
+    const result = (await executeContextTool('agentteams_plan_get', { id: 'plan-1' }, client)) as {
+      data: Record<string, unknown>;
+    };
+
+    expect(result.data).toHaveProperty('bodyTiptap', 'kept');
   });
 });

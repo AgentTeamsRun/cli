@@ -6,14 +6,31 @@ import {
   deleteComment,
   deleteReply,
   getComment,
+  getReply,
   listComments,
   listFindingComments,
   listReplies,
   listTaskComments,
   updateComment,
   updateReply,
+  type CommentMutationParams,
+  type CommentWriteContract,
 } from '../api/comment.js';
 import { toPositiveInteger } from '../utils/parsers.js';
+
+/**
+ * 계약 필드를 요청 본문/쿼리에 실을 형태로 모은다. 값이 없는 필드는 아예 넣지 않는다 —
+ * 빈 문자열을 보내면 서버가 그것을 "낡은 가이드 해시"로 읽어 정상 요청이 409 로 거절된다.
+ */
+const writeContract = (options: any): CommentWriteContract => ({
+  ...(options.guideHash ? { guideHash: options.guideHash } : {}),
+  ...(options.idempotencyKey ? { idempotencyKey: options.idempotencyKey } : {}),
+});
+
+const mutationContract = (options: any): CommentMutationParams => ({
+  ...writeContract(options),
+  ...(options.expectedUpdatedAt ? { expectedUpdatedAt: options.expectedUpdatedAt } : {}),
+});
 
 export async function executeCommentCommand(
   apiUrl: string,
@@ -73,6 +90,7 @@ export async function executeCommentCommand(
         }
         return createFindingComment(apiUrl, projectId, headers, options.findingId, {
           content: options.content,
+          ...writeContract(options),
         });
       }
 
@@ -85,14 +103,15 @@ export async function executeCommentCommand(
           projectId,
           headers,
           options.taskId,
-          { content: options.content },
+          { content: options.content, ...writeContract(options) },
           options.planId,
         );
       }
 
-      const body: { type: string; content: string; affectedFiles?: string[] } = {
+      const body: { type: string; content: string; affectedFiles?: string[] } & CommentWriteContract = {
         type: options.type,
         content: options.content,
+        ...writeContract(options),
       };
       if (options.affectedFiles) {
         body.affectedFiles = options.affectedFiles.split(',').map((f: string) => f.trim());
@@ -104,8 +123,9 @@ export async function executeCommentCommand(
       if (!options.id) throw new Error('--id is required for comment update');
       if (!options.content) throw new Error('--content is required for comment update');
 
-      const body: { content: string; affectedFiles?: string[] } = {
+      const body: { content: string; affectedFiles?: string[]; expectedUpdatedAt?: string } & CommentWriteContract = {
         content: options.content,
+        ...mutationContract(options),
       };
       if (options.affectedFiles) {
         body.affectedFiles = options.affectedFiles.split(',').map((f: string) => f.trim());
@@ -115,7 +135,7 @@ export async function executeCommentCommand(
     }
     case 'delete': {
       if (!options.id) throw new Error('--id is required for comment delete');
-      await deleteComment(apiUrl, projectId, headers, options.id);
+      await deleteComment(apiUrl, projectId, headers, options.id, mutationContract(options));
       return { message: `Comment ${options.id} deleted successfully` };
     }
     case 'reply-list': {
@@ -128,21 +148,31 @@ export async function executeCommentCommand(
 
       return listReplies(apiUrl, projectId, headers, options.id, params);
     }
+    case 'reply-get': {
+      if (!options.replyId) throw new Error('--reply-id is required for comment reply-get');
+      return getReply(apiUrl, projectId, headers, options.replyId);
+    }
     case 'reply-create': {
       if (!options.id) throw new Error('--id is required for comment reply-create');
       if (!options.content) throw new Error('--content is required for comment reply-create');
 
-      return createReply(apiUrl, projectId, headers, options.id, { content: options.content });
+      return createReply(apiUrl, projectId, headers, options.id, {
+        content: options.content,
+        ...writeContract(options),
+      });
     }
     case 'reply-update': {
       if (!options.replyId) throw new Error('--reply-id is required for comment reply-update');
       if (!options.content) throw new Error('--content is required for comment reply-update');
 
-      return updateReply(apiUrl, projectId, headers, options.replyId, { content: options.content });
+      return updateReply(apiUrl, projectId, headers, options.replyId, {
+        content: options.content,
+        ...mutationContract(options),
+      });
     }
     case 'reply-delete': {
       if (!options.replyId) throw new Error('--reply-id is required for comment reply-delete');
-      await deleteReply(apiUrl, projectId, headers, options.replyId);
+      await deleteReply(apiUrl, projectId, headers, options.replyId, mutationContract(options));
       return { message: `Reply ${options.replyId} deleted successfully` };
     }
     default:
