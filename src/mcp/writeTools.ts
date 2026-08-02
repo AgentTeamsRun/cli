@@ -1,4 +1,4 @@
-import { stripContextEntityIdPrefix } from '@agentteams/context-tools';
+import { omitDocumentEditorMirror, stripContextEntityIdPrefix } from '@agentteams/context-tools';
 import { z } from 'zod';
 import {
   createComment,
@@ -135,18 +135,22 @@ const documentCreateSpec: McpWriteToolSpec = {
     idempotencyKey: idempotencyKeyField,
   }),
   handler: async (args, context) => {
-    return createDocument(
-      context.apiUrl,
-      context.projectId,
-      await auth(context),
-      definedFields({
-        title: args.title,
-        body: args.body,
-        suggestedTags: args.suggestedTags,
-        visibility: args.visibility,
-        guideHash: args.guideHash,
-        idempotencyKey: args.idempotencyKey,
-      }),
+    // 쓰기 응답도 문서 상세와 같은 형태라 에디터 전용 bodyTiptap이 그대로 실린다.
+    // 조회와 같은 규칙을 공유해야 두 표면 중 한쪽만 부풀어 오르는 일이 없다.
+    return omitDocumentEditorMirror(
+      await createDocument(
+        context.apiUrl,
+        context.projectId,
+        await auth(context),
+        definedFields({
+          title: args.title,
+          body: args.body,
+          suggestedTags: args.suggestedTags,
+          visibility: args.visibility,
+          guideHash: args.guideHash,
+          idempotencyKey: args.idempotencyKey,
+        }),
+      ),
     );
   },
 };
@@ -172,20 +176,22 @@ const documentUpdateSpec: McpWriteToolSpec = {
     idempotencyKey: idempotencyKeyField,
   }),
   handler: async (args, context) => {
-    return updateDocument(
-      context.apiUrl,
-      context.projectId,
-      await auth(context),
-      stripContextEntityIdPrefix(args.id as string),
-      definedFields({
-        title: args.title,
-        body: args.body,
-        suggestedTags: args.suggestedTags,
-        visibility: args.visibility,
-        expectedUpdatedAt: args.expectedUpdatedAt,
-        guideHash: args.guideHash,
-        idempotencyKey: args.idempotencyKey,
-      }),
+    return omitDocumentEditorMirror(
+      await updateDocument(
+        context.apiUrl,
+        context.projectId,
+        await auth(context),
+        stripContextEntityIdPrefix(args.id as string),
+        definedFields({
+          title: args.title,
+          body: args.body,
+          suggestedTags: args.suggestedTags,
+          visibility: args.visibility,
+          expectedUpdatedAt: args.expectedUpdatedAt,
+          guideHash: args.guideHash,
+          idempotencyKey: args.idempotencyKey,
+        }),
+      ),
     );
   },
 };

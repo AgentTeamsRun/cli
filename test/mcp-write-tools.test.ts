@@ -18,6 +18,10 @@ const documentEnvelope = {
     title: '문서',
     updatedAt: '2026-08-01T00:00:00.000Z',
     webUrl: 'https://agentteams.run/go?type=document&id=doc-1',
+    // 실제 API는 쓰기 응답에도 에디터 전용 미러를 싣는다. 픽스처가 이를 빼면
+    // "응답에서 제외한다"는 계약을 테스트가 전혀 검증하지 못한다.
+    body: '본문',
+    bodyTiptap: '{"type":"doc","content":[]}',
   },
 };
 
@@ -478,6 +482,42 @@ describe('mcp write tools', () => {
     expect(tools.find((tool) => tool.name === 'agentteams_comment_reply_create')?.description).toContain(
       'one level deep',
     );
+  });
+
+  // 조회와 같은 규칙을 쓰기 응답에도 적용한다. 한쪽만 걷어내면 "읽기는 되는데
+  // 수정 응답에서 한도를 넘는" 비대칭이 남는다(실측 update 응답 65,297자).
+  it('omits bodyTiptap from the create response while keeping the write contract fields', async () => {
+    jest.spyOn(axios, 'post').mockResolvedValue({ data: documentEnvelope } as never);
+
+    const call = await callTool('agentteams_document_create', { title: '문서', body: '본문' });
+
+    const payload = JSON.parse(call.result?.content[0].text);
+    expect(payload.data).not.toHaveProperty('bodyTiptap');
+    expect(payload.data).toMatchObject({
+      id: 'doc-1',
+      body: '본문',
+      updatedAt: '2026-08-01T00:00:00.000Z',
+      webUrl: 'https://agentteams.run/go?type=document&id=doc-1',
+    });
+  });
+
+  it('omits bodyTiptap from the update response and keeps updatedAt for the next expectedUpdatedAt', async () => {
+    jest.spyOn(axios, 'put').mockResolvedValue({ data: documentEnvelope } as never);
+
+    const call = await callTool('agentteams_document_update', { id: 'doc-1', title: '수정' });
+
+    const payload = JSON.parse(call.result?.content[0].text);
+    expect(payload.data).not.toHaveProperty('bodyTiptap');
+    expect(payload.data.updatedAt).toBe('2026-08-01T00:00:00.000Z');
+  });
+
+  it('leaves the delete acknowledgement shape unchanged', async () => {
+    jest.spyOn(axios, 'delete').mockResolvedValue({ data: {} } as never);
+
+    const call = await callTool('agentteams_document_delete', { id: 'agentteams_doc_doc-1' });
+
+    // 삭제는 본문을 싣지 않으므로 걷어낼 대상이 없다. 계약이 바뀌지 않았음을 고정한다.
+    expect(JSON.parse(call.result?.content[0].text)).toEqual({ deleted: true, id: 'doc-1' });
   });
 });
 

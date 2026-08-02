@@ -16,7 +16,13 @@ const planRunbookResponse = {
 };
 
 const documentResponse = {
-  data: { id: 'doc-1', title: 'Design note', body: '# Full body' },
+  data: {
+    id: 'doc-1',
+    title: 'Design note',
+    body: '# Full body',
+    bodyTiptap: '{"type":"doc","content":[]}',
+    updatedAt: '2026-08-02T00:00:00.000Z',
+  },
 };
 
 const conventionResponse = {
@@ -66,7 +72,6 @@ describe('mcp read resources', () => {
 
   it.each([
     ['agentteams://plan/plan-1', `${apiUrl}/api/projects/${projectId}/plans/plan-1/runbook`, planRunbookResponse],
-    ['agentteams://document/doc-1', `${apiUrl}/api/projects/${projectId}/documents/doc-1`, documentResponse],
     ['agentteams://convention/conv-1', `${apiUrl}/api/projects/${projectId}/conventions/conv-1`, conventionResponse],
   ])('reads %s as application/json with the upstream envelope verbatim', async (uri, expectedUrl, response) => {
     const getSpy = jest.spyOn(axios, 'get').mockResolvedValue({ data: response } as never);
@@ -85,6 +90,29 @@ describe('mcp read resources', () => {
     expect(JSON.parse(contents[0].text)).toEqual(response);
   });
 
+  it('drops bodyTiptap from a document resource while keeping body and updatedAt', async () => {
+    const expectedUrl = `${apiUrl}/api/projects/${projectId}/documents/doc-1`;
+    const getSpy = jest.spyOn(axios, 'get').mockResolvedValue({ data: documentResponse } as never);
+    const { client, handle } = connect();
+    openHandle = handle;
+
+    await discover(client);
+    const read = await client.request('resources/read', {
+      uri: 'agentteams://document/doc-1',
+      _meta: MODERN_META,
+    });
+
+    expect(read.error).toBeUndefined();
+    expect(getSpy).toHaveBeenCalledWith(expectedUrl, { headers: TEST_TOOL_CONTEXT.headers });
+    const payload = JSON.parse(read.result?.contents[0].text);
+    expect(payload.data).not.toHaveProperty('bodyTiptap');
+    expect(payload.data).toMatchObject({
+      id: 'doc-1',
+      body: '# Full body',
+      updatedAt: '2026-08-02T00:00:00.000Z',
+    });
+  });
+
   it('returns the same payload for a resource read and the matching tool call', async () => {
     jest.spyOn(axios, 'get').mockResolvedValue({ data: documentResponse } as never);
     const { client, handle } = connect();
@@ -101,7 +129,17 @@ describe('mcp read resources', () => {
       _meta: MODERN_META,
     });
 
-    expect(JSON.parse(read.result?.contents[0].text)).toEqual(JSON.parse(toolCall.result?.content[0].text));
+    const resourcePayload = JSON.parse(read.result?.contents[0].text);
+    const toolPayload = JSON.parse(toolCall.result?.content[0].text);
+
+    expect(resourcePayload).toEqual(toolPayload);
+    for (const payload of [resourcePayload, toolPayload]) {
+      expect(payload.data).not.toHaveProperty('bodyTiptap');
+      expect(payload.data).toMatchObject({
+        body: '# Full body',
+        updatedAt: '2026-08-02T00:00:00.000Z',
+      });
+    }
   });
 
   it('resolves prefixed-id URIs to the same API id as bare URIs', async () => {
@@ -152,7 +190,13 @@ describe('mcp read resources', () => {
     });
 
     expect(recovered.error).toBeUndefined();
-    expect(JSON.parse(recovered.result?.contents[0].text)).toEqual(documentResponse);
+    const recoveredPayload = JSON.parse(recovered.result?.contents[0].text);
+    expect(recoveredPayload.data).not.toHaveProperty('bodyTiptap');
+    expect(recoveredPayload.data).toMatchObject({
+      id: 'doc-1',
+      body: '# Full body',
+      updatedAt: '2026-08-02T00:00:00.000Z',
+    });
   });
 
   it('reads resources on the legacy path too', async () => {
