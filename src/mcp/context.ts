@@ -7,6 +7,7 @@ import {
 } from '../utils/config.js';
 import { buildAuthHeaders, buildConfigOverrides, resolveApiContext } from '../utils/apiContext.js';
 import { findGuideProjectRoot } from './guides.js';
+import { resolveSessionAgentConfigId } from '../utils/agentIdentity.js';
 
 /** Everything a tool handler needs to reach the AgentTeams API. */
 export interface McpToolContext {
@@ -26,6 +27,15 @@ export interface McpToolContext {
    * Absent means "no verified local copy": guide reads fall back to the server.
    */
   projectRoot?: string;
+  /**
+   * Which agent config (tool) this MCP session runs as, when the daemon spawned it.
+   *
+   * The tool axis of attribution: with a personal token the request carries no proven
+   * agent identity, so without this the record silently loses "what it was written
+   * with". Absent outside a daemon-spawned session — write tools must then omit the
+   * field entirely rather than send an empty value.
+   */
+  agentConfigId?: string;
   /**
    * Present only when the credential can go stale.
    *
@@ -126,10 +136,12 @@ export async function resolveMcpToolContext(
   const { apiUrl, headers } = resolveApiContext(config);
   // Only a checkout that names this very project may serve local guides.
   const projectRoot = localProjectId === config.projectId ? (findGuideProjectRoot() ?? undefined) : undefined;
+  // Same env channel every other CLI command reads. Undefined outside a daemon session.
+  const agentConfigId = resolveSessionAgentConfigId();
 
   const credentialRefreshable = config.credentialRefreshable ?? config.credentialSource === 'personal-token';
   if (!credentialRefreshable) {
-    return { apiUrl, projectId: config.projectId, projectRoot, headers };
+    return { apiUrl, projectId: config.projectId, projectRoot, agentConfigId, headers };
   }
 
   const credential = getActiveCredential();
@@ -137,6 +149,7 @@ export async function resolveMcpToolContext(
     apiUrl,
     projectId: config.projectId,
     projectRoot,
+    agentConfigId,
     headers,
     resolveHeaders: async () => {
       const accessToken = await credential?.resolve?.();

@@ -179,7 +179,7 @@ export async function createDocumentComment(
   projectId: string,
   headers: Record<string, string>,
   documentId: string,
-  body: { content: string; guideHash?: string; idempotencyKey?: string },
+  body: { content: string; guideHash?: string; idempotencyKey?: string; agentConfigId?: string },
 ) {
   const response = await httpClient.post(`${getBaseUrl(apiUrl, projectId)}/${documentId}/comments`, body, { headers });
   return response.data;

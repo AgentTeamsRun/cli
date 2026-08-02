@@ -18,6 +18,7 @@ import {
   pruneStaleCacheFiles,
 } from '../utils/parsers.js';
 import { validatePlanPreviewHtmlSafety } from '../utils/planPreviewHtmlSafety.js';
+import { resolveSessionAgentConfigId } from '../utils/agentIdentity.js';
 import {
   createPlan,
   deletePlan,
@@ -77,27 +78,15 @@ type PlanRunbookDetailResponse = {
 };
 
 /**
- * Environment variable every daemon runner sets to the agentConfigId of the
- * session it is spawning (`daemon/src/runners/*`).
- */
-const AGENT_NAME_ENV = 'AGENTTEAMS_AGENT_NAME';
-
-/**
  * Which agent this run represents, for the lifecycle calls that record one.
- *
- * The server prefers the `agentConfigId` carried by an agent API key
- * (`key_{configId}_{secret}`) and ignores this value, because a proven identity
- * must not be overridable by the caller. It matters for credentials that carry no
- * agent: a personal token identifies a person, so without this the request has no
- * agent at all and the record would silently lose its attribution — a change in
- * how you authenticate must not change what gets recorded.
  *
  * `AGENTTEAMS_AGENT_NAME` is the existing channel for this: the daemon has always
  * exported it, and the CLI read it until the `--agent` flag was removed, which
- * left the producer without a consumer.
+ * left the producer without a consumer. The rationale for preferring a proven
+ * identity over a declared one lives with the shared resolver.
  */
 export function resolveAgentAssignee(options: Record<string, unknown>): string | undefined {
-  return toNonEmptyString(options.assignedTo) ?? toNonEmptyString(process.env[AGENT_NAME_ENV]);
+  return toNonEmptyString(options.assignedTo) ?? resolveSessionAgentConfigId();
 }
 
 // Lightweight, warning-only heuristic that flags an obvious mismatch between the declared

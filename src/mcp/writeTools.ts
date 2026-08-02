@@ -287,7 +287,13 @@ const commentCreateSpec: McpWriteToolSpec = {
   inputSchema: commentTargetSchema,
   handler: async (args, context) => {
     const headers = await auth(context);
-    const contract = definedFields({ guideHash: args.guideHash, idempotencyKey: args.idempotencyKey });
+    // 도구 축은 모델이 고르는 값이 아니라 세션의 속성이라 inputSchema에 노출하지 않는다.
+    // 데몬 밖 세션에는 값이 없고, 그때는 키 자체를 보내지 않아 현재 동작이 그대로 유지된다.
+    const contract = definedFields({
+      guideHash: args.guideHash,
+      idempotencyKey: args.idempotencyKey,
+      agentConfigId: context.agentConfigId,
+    });
 
     if ('planId' in args) {
       return createComment(
@@ -433,6 +439,7 @@ const commentReplyCreateSpec: McpWriteToolSpec = {
         content: args.content,
         guideHash: args.guideHash,
         idempotencyKey: args.idempotencyKey,
+        agentConfigId: context.agentConfigId,
       }) as { content: string },
     );
   },
