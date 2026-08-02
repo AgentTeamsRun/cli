@@ -1,5 +1,10 @@
-import { getPersonalTokenClient } from '../auth/personalTokenClient.js';
-import { getConfigurationNotFoundMessage, loadConfigWithCredential, loadProjectConfig } from '../utils/config.js';
+import { getActiveCredential } from '../auth/activeCredential.js';
+import {
+  getConfigurationNotFoundMessage,
+  loadConfigWithCredential,
+  loadProjectConfig,
+  type ResolveCredentialDeps,
+} from '../utils/config.js';
 import { buildAuthHeaders, buildConfigOverrides, resolveApiContext } from '../utils/apiContext.js';
 import { findGuideProjectRoot } from './guides.js';
 
@@ -87,8 +92,14 @@ function assertNoUnresolvedPlaceholders(credentials: Record<string, string>): vo
  * trusted to sit inside the project: CLI overrides and `AGENTTEAMS_*`
  * environment variables are the reliable paths here.
  */
-export async function resolveMcpToolContext(options: Record<string, unknown> = {}): Promise<McpToolContext> {
-  const config = await loadConfigWithCredential(buildConfigOverrides(options));
+export async function resolveMcpToolContext(
+  options: Record<string, unknown> = {},
+  credentialDeps?: ResolveCredentialDeps,
+): Promise<McpToolContext> {
+  const overrides = buildConfigOverrides(options);
+  const config = credentialDeps
+    ? await loadConfigWithCredential(overrides, credentialDeps)
+    : await loadConfigWithCredential(overrides);
   if (!config) {
     throw new Error(getConfigurationNotFoundMessage());
   }
@@ -116,18 +127,19 @@ export async function resolveMcpToolContext(options: Record<string, unknown> = {
   // Only a checkout that names this very project may serve local guides.
   const projectRoot = localProjectId === config.projectId ? (findGuideProjectRoot() ?? undefined) : undefined;
 
-  if (config.credentialSource !== 'personal-token') {
+  const credentialRefreshable = config.credentialRefreshable ?? config.credentialSource === 'personal-token';
+  if (!credentialRefreshable) {
     return { apiUrl, projectId: config.projectId, projectRoot, headers };
   }
 
-  const client = getPersonalTokenClient(apiUrl);
+  const credential = getActiveCredential();
   return {
     apiUrl,
     projectId: config.projectId,
     projectRoot,
     headers,
     resolveHeaders: async () => {
-      const accessToken = await client.getAccessToken();
+      const accessToken = await credential?.resolve?.();
       // A refresh that cannot complete right now must not blank the credential:
       // returning the last known headers lets the request fail as a normal 401
       // (which the HTTP layer then retries once) instead of as an unauthenticated

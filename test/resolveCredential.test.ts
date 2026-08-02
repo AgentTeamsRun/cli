@@ -10,6 +10,11 @@ import {
   type ResolveCredentialDeps,
 } from '../src/utils/config.js';
 import { PersonalTokenClient } from '../src/auth/personalTokenClient.js';
+import {
+  getActiveCredential,
+  getInjectedPersonalTokenRefreshBlockReason,
+  resetActiveCredentialForTests,
+} from '../src/auth/activeCredential.js';
 import type { PersonalTokenStore } from '../src/auth/personalTokenStore.js';
 import { buildAuthHeaders } from '../src/utils/apiContext.js';
 
@@ -86,13 +91,16 @@ const workingFetch = (async () => jsonResponse(200, tokenPayload)) as unknown as
 beforeEach(() => {
   originalCwd = process.cwd();
   originalEnv = { ...process.env };
+  resetActiveCredentialForTests();
   delete process.env.AGENTTEAMS_API_KEY;
   delete process.env.AGENTTEAMS_TEAM_ID;
   delete process.env.AGENTTEAMS_PROJECT_ID;
   delete process.env.AGENTTEAMS_API_URL;
+  delete process.env.AGENTTEAMS_MCP_MEMBER_ID;
 });
 
 afterEach(() => {
+  resetActiveCredentialForTests();
   process.chdir(originalCwd);
   process.env = originalEnv;
   while (tempDirs.length > 0) {
@@ -150,6 +158,78 @@ describe('resolveCredential priority', () => {
     const deps = clientDeps(tokenStore(null), workingFetch);
 
     expect(await resolveCredential(undefined, deps)).toBeNull();
+  });
+});
+
+describe('resolveCredential refresh registration', () => {
+  it('arms the 401 retry for an injected atp_ when the stored CLI login belongs to the same member', async () => {
+    createProject({ teamId: 't', projectId: 'p' });
+    process.env.AGENTTEAMS_API_KEY = 'atp_desktop_snapshot';
+    process.env.AGENTTEAMS_MCP_MEMBER_ID = 'm-1';
+    const deps = clientDeps(tokenStore('atr_stored'), workingFetch);
+
+    expect(await resolveCredential(undefined, deps)).toEqual({
+      source: 'explicit-api-key',
+      apiKey: 'atp_desktop_snapshot',
+      refreshable: true,
+    });
+    expect(getActiveCredential()).not.toBeNull();
+    expect(deps.calls()).toBe(1);
+  });
+
+  it('leaves an injected atp_ static when Desktop did not provide an identity', async () => {
+    createProject({ teamId: 't', projectId: 'p' });
+    process.env.AGENTTEAMS_API_KEY = 'atp_desktop_snapshot';
+    const deps = clientDeps(tokenStore('atr_stored'), workingFetch);
+
+    expect(await resolveCredential(undefined, deps)).toEqual({
+      source: 'explicit-api-key',
+      apiKey: 'atp_desktop_snapshot',
+    });
+    expect(getActiveCredential()).toBeNull();
+    expect(getInjectedPersonalTokenRefreshBlockReason()).toBe('IDENTITY_MISSING');
+    expect(deps.calls()).toBe(0);
+  });
+
+  it('leaves an injected atp_ static when no CLI credential is stored', async () => {
+    createProject({ teamId: 't', projectId: 'p' });
+    process.env.AGENTTEAMS_API_KEY = 'atp_desktop_snapshot';
+    process.env.AGENTTEAMS_MCP_MEMBER_ID = 'm-1';
+
+    await resolveCredential(undefined, clientDeps(tokenStore(null), workingFetch));
+
+    expect(getActiveCredential()).toBeNull();
+    expect(getInjectedPersonalTokenRefreshBlockReason()).toBe('CLI_CREDENTIAL_MISSING');
+  });
+
+  it('fails closed when the injected token and stored CLI login belong to different members', async () => {
+    createProject({ teamId: 't', projectId: 'p' });
+    process.env.AGENTTEAMS_API_KEY = 'atp_desktop_snapshot';
+    process.env.AGENTTEAMS_MCP_MEMBER_ID = 'different-member';
+
+    await expect(resolveCredential(undefined, clientDeps(tokenStore('atr_stored'), workingFetch))).rejects.toThrow(
+      /different members/,
+    );
+    expect(getActiveCredential()).toBeNull();
+    expect(getInjectedPersonalTokenRefreshBlockReason()).toBe('IDENTITY_MISMATCH');
+  });
+
+  it('keeps an injected key_ static and sends it through X-API-Key', async () => {
+    createProject({ teamId: 't', projectId: 'p' });
+    process.env.AGENTTEAMS_API_KEY = 'key_from_desktop';
+
+    const credential = await resolveCredential(undefined, clientDeps(tokenStore('atr_stored'), workingFetch));
+
+    expect(getActiveCredential()).toBeNull();
+    expect(buildAuthHeaders(credential?.apiKey ?? '')).toEqual({ 'X-API-Key': 'key_from_desktop' });
+  });
+
+  it('arms the 401 retry for a stored personal login', async () => {
+    createProject({ teamId: 't', projectId: 'p', authMode: 'personal-token' });
+
+    await resolveCredential(undefined, clientDeps(tokenStore('atr_stored'), workingFetch));
+
+    expect(getActiveCredential()).not.toBeNull();
   });
 });
 
