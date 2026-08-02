@@ -457,10 +457,10 @@ program
   .description('Manage plan, finding, and task comments with 1-depth replies')
   .argument(
     '<action>',
-    'Action to perform (list, get, create, update, delete, reply-list, reply-create, reply-update, reply-delete)',
+    'Action to perform (list, get, create, update, delete, reply-list, reply-get, reply-create, reply-update, reply-delete)',
   )
   .option('--id <id>', 'Comment ID (parent comment ID for reply-list/reply-create)')
-  .option('--reply-id <id>', 'Reply ID (for reply-update/reply-delete)')
+  .option('--reply-id <id>', 'Reply ID (for reply-get/reply-update/reply-delete)')
   .option('--plan-id <id>', 'Plan ID')
   .option('--finding-id <id>', 'Code review finding ID')
   .option('--task-id <id>', 'Plan task ID')
@@ -469,6 +469,18 @@ program
   .option('--affected-files <files>', 'Comma-separated list of affected file paths (create/update)')
   .option('--page <number>', 'Page number (list only)')
   .option('--page-size <number>', 'Page size (list only)')
+  .option(
+    '--guide-hash <hash>',
+    'Hash of the comment guide you followed (create/update/delete). Stale hash is rejected with GUIDE_OUTDATED.',
+  )
+  .option(
+    '--idempotency-key <key>',
+    'Retry-safe key (create/update/delete). Repeating the same key with the same request replays the first result.',
+  )
+  .option(
+    '--expected-updated-at <iso>',
+    "The comment's updatedAt as you last read it (update/delete). Rejects the write if it changed meanwhile.",
+  )
   .option('--format <format>', 'Output format (json)', 'json')
   .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
   .option('--verbose', 'Print full raw output to stdout; with --output-file, also echo it', false)
@@ -486,6 +498,9 @@ program
         affectedFiles: options.affectedFiles,
         page: options.page,
         pageSize: options.pageSize,
+        guideHash: options.guideHash,
+        idempotencyKey: options.idempotencyKey,
+        expectedUpdatedAt: options.expectedUpdatedAt,
       });
 
       printCommandResult({

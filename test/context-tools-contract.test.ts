@@ -116,6 +116,12 @@ const expectedContract = [
   },
   { name: 'agentteams_comment_get', required: ['id'], properties: ['id'] },
   {
+    name: 'agentteams_comment_reply_list',
+    required: ['commentId'],
+    properties: ['commentId', 'order', 'page', 'pageSize'],
+  },
+  { name: 'agentteams_comment_reply_get', required: ['replyId'], properties: ['replyId'] },
+  {
     name: 'agentteams_codereview_finding_get',
     required: ['id'],
     properties: ['codeReviewId', 'id'],
@@ -181,7 +187,7 @@ describe('shared context-tools contract', () => {
     const specs = getContextToolSpecs();
     const listSpecs = specs.filter(({ name }) => name.endsWith('_list'));
 
-    expect(listSpecs).toHaveLength(8);
+    expect(listSpecs).toHaveLength(9);
     for (const spec of listSpecs) {
       expect(spec.description).toContain('one page');
       expect(spec.description).toContain('meta.total');
@@ -199,7 +205,7 @@ describe('shared context-tools contract', () => {
       ({ name }) => name === 'agentteams_search' || name.endsWith('_list') || name.endsWith('_get'),
     );
 
-    expect(readSpecs).toHaveLength(18);
+    expect(readSpecs).toHaveLength(20);
     for (const spec of readSpecs) {
       expect(spec.description).toContain('project bound to the current MCP server or context client');
       expect(spec.description).toContain('cannot read another project');

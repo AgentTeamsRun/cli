@@ -26,9 +26,15 @@ const WRITE_TOOL_NAMES = [
   'agentteams_document_create',
   'agentteams_document_update',
   'agentteams_document_delete',
+  'agentteams_comment_create',
+  'agentteams_comment_update',
+  'agentteams_comment_delete',
+  'agentteams_comment_reply_create',
+  'agentteams_comment_reply_update',
+  'agentteams_comment_reply_delete',
 ];
 
-describe('mcp document write tools', () => {
+describe('mcp write tools', () => {
   let openHandle: StdioServerHandle | undefined;
   let projectRoot = '';
   let originalCwd = '';
@@ -49,11 +55,16 @@ describe('mcp document write tools', () => {
       'utf-8',
     );
     writeFileSync(
+      join(projectRoot, '.agentteams', 'platform', 'comment-guide.md'),
+      '# Comment Guide\n답글은 한 단계만 허용한다.\n',
+      'utf-8',
+    );
+    writeFileSync(
       join(projectRoot, '.agentteams', 'conventions.manifest.json'),
       JSON.stringify({
         version: 1,
         generatedAt: '2026-08-01T00:00:00.000Z',
-        platformGuideHashes: { 'document-guide.md': 'doc-hash' },
+        platformGuideHashes: { 'document-guide.md': 'doc-hash', 'comment-guide.md': 'comment-hash' },
         entries: [],
       }),
       'utf-8',
@@ -80,7 +91,7 @@ describe('mcp document write tools', () => {
     return client.request('tools/call', { name, arguments: args, _meta: MODERN_META });
   };
 
-  it('advertises exactly the four write tools alongside the read surface', async () => {
+  it('advertises exactly the document and comment write tools alongside the read surface', async () => {
     const { client, handle } = connect();
     openHandle = handle;
 
@@ -92,10 +103,20 @@ describe('mcp document write tools', () => {
     for (const writeTool of WRITE_TOOL_NAMES) {
       expect(names).toContain(writeTool);
     }
-    // 2단계 이후 엔티티의 쓰기 도구를 미리 만들지 않는다.
+    // 3단계 이후 엔티티(플랜·보고서 등)의 쓰기 도구를 미리 만들지 않는다.
     const writeSuffixed = names.filter((name: string) => /_(create|update|delete)$/.test(name));
     expect(writeSuffixed.sort()).toEqual(
-      ['agentteams_document_create', 'agentteams_document_delete', 'agentteams_document_update'].sort(),
+      [
+        'agentteams_document_create',
+        'agentteams_document_delete',
+        'agentteams_document_update',
+        'agentteams_comment_create',
+        'agentteams_comment_delete',
+        'agentteams_comment_update',
+        'agentteams_comment_reply_create',
+        'agentteams_comment_reply_delete',
+        'agentteams_comment_reply_update',
+      ].sort(),
     );
   });
 
@@ -314,6 +335,149 @@ describe('mcp document write tools', () => {
       const properties = withSchema.find((tool) => tool.name === name)?.inputSchema?.properties ?? {};
       expect(Object.keys(properties)).toEqual(expect.arrayContaining(['guideHash', 'idempotencyKey']));
     }
+  });
+  it('returns the local comment guide body and its hash', async () => {
+    const call = await callTool('agentteams_guide_get', { recordKind: 'comment' });
+
+    expect(call.result?.isError).toBeFalsy();
+    const payload = JSON.parse(call.result?.content[0].text);
+    expect(payload.fileName).toBe('comment-guide.md');
+    expect(payload.guideHash).toBe('comment-hash');
+    expect(payload.content).toContain('답글은 한 단계만 허용한다');
+  });
+
+  it('routes each comment target to its own endpoint and carries the contract fields', async () => {
+    const postSpy = jest.spyOn(axios, 'post').mockResolvedValue({ data: { data: { id: 'comment-1' } } } as never);
+    const contract = { guideHash: 'comment-hash', idempotencyKey: 'key-1' };
+    const base = `${apiUrl}/api/projects/${projectId}`;
+
+    await callTool('agentteams_comment_create', {
+      planId: 'agentteams_pln_plan-1',
+      type: 'RISK',
+      content: '위험',
+      affectedFiles: ['api/src/index.ts'],
+      ...contract,
+    });
+    await callTool('agentteams_comment_create', { taskId: 'agentteams_tsk_task-1', content: '태스크', ...contract });
+    await callTool('agentteams_comment_create', {
+      findingId: 'agentteams_rvf_finding-1',
+      content: '파인딩',
+      ...contract,
+    });
+    await callTool('agentteams_comment_create', { documentId: 'agentteams_doc_doc-1', content: '문서', ...contract });
+
+    expect(postSpy.mock.calls.map((call) => call[0])).toEqual([
+      `${base}/plans/plan-1/comments`,
+      `${base}/plans/tasks/task-1/comments`,
+      `${base}/code-reviews/findings/finding-1/comments`,
+      `${base}/documents/doc-1/comments`,
+    ]);
+    expect(postSpy.mock.calls[0]?.[1]).toEqual({
+      type: 'RISK',
+      content: '위험',
+      affectedFiles: ['api/src/index.ts'],
+      ...contract,
+    });
+    // PLAN 전용 필드는 나머지 target 에 실리지 않는다.
+    expect(postSpy.mock.calls[1]?.[1]).toEqual({ content: '태스크', ...contract });
+  });
+
+  it('rejects a create that names no target or more than one', async () => {
+    const postSpy = jest.spyOn(axios, 'post').mockResolvedValue({ data: { data: { id: 'comment-1' } } } as never);
+
+    const none = await callTool('agentteams_comment_create', { content: '부모 없음' });
+    expect(none.result?.isError).toBe(true);
+
+    const two = await callTool('agentteams_comment_create', {
+      planId: 'plan-1',
+      documentId: 'doc-1',
+      type: 'GENERAL',
+      content: '부모 둘',
+    });
+    expect(two.result?.isError).toBe(true);
+
+    // 스키마 단계에서 걸러야 서버까지 가지 않는다.
+    expect(postSpy).not.toHaveBeenCalled();
+  });
+
+  it('keeps root comment ids and reply ids on separate tools', async () => {
+    const putSpy = jest.spyOn(axios, 'put').mockResolvedValue({ data: { data: { id: 'comment-1' } } } as never);
+    const deleteSpy = jest.spyOn(axios, 'delete').mockResolvedValue({ data: null } as never);
+    const base = `${apiUrl}/api/projects/${projectId}`;
+
+    await callTool('agentteams_comment_update', {
+      commentId: 'comment-1',
+      content: '수정',
+      expectedUpdatedAt: '2026-08-01T00:00:00.000Z',
+      guideHash: 'comment-hash',
+    });
+    await callTool('agentteams_comment_reply_update', {
+      replyId: 'reply-1',
+      content: '답글 수정',
+      expectedUpdatedAt: '2026-08-01T00:00:00.000Z',
+    });
+
+    expect(putSpy.mock.calls.map((call) => call[0])).toEqual([
+      `${base}/comments/comment-1`,
+      `${base}/comment-replies/reply-1`,
+    ]);
+
+    const deleted = await callTool('agentteams_comment_reply_delete', {
+      replyId: 'reply-1',
+      idempotencyKey: 'del-1',
+    });
+    expect(deleteSpy.mock.calls[0]?.[0]).toBe(`${base}/comment-replies/reply-1`);
+    expect((deleteSpy.mock.calls[0]?.[1] as { params?: unknown })?.params).toEqual({ idempotencyKey: 'del-1' });
+    expect(JSON.parse(deleted.result?.content[0].text)).toEqual({ deleted: true, id: 'reply-1' });
+
+    // 반대로 답글 id 를 루트 도구에 넣는 실수는 스키마 이름부터 다르므로 인자가 거부된다.
+    const wrongField = await callTool('agentteams_comment_update', { replyId: 'reply-1', content: '수정' });
+    expect(wrongField.result?.isError).toBe(true);
+  });
+
+  it('states the guide-first, confirmation and contract rules in every comment write tool', async () => {
+    const { client, handle } = connect(boundContext());
+    openHandle = handle;
+
+    await discover(client);
+    const response = await client.request('tools/list', { _meta: MODERN_META });
+    const tools = (response.result?.tools ?? []) as Array<{
+      name: string;
+      description: string;
+      inputSchema?: Record<string, any>;
+    }>;
+    const commentWriteTools = [
+      'agentteams_comment_create',
+      'agentteams_comment_update',
+      'agentteams_comment_delete',
+      'agentteams_comment_reply_create',
+      'agentteams_comment_reply_update',
+      'agentteams_comment_reply_delete',
+    ];
+
+    for (const name of commentWriteTools) {
+      const tool = tools.find((candidate) => candidate.name === name);
+      expect(tool?.description).toContain('agentteams_guide_get("comment")');
+      // 계약 필드가 한 도구에서만 빠지면 그 표면의 멱등·최신성 검사가 조용히 사라진다.
+      const schema = tool?.inputSchema ?? {};
+      const properties = Object.keys(schema.properties ?? {});
+      const unionProperties = (schema.anyOf ?? []).flatMap((branch: any) => Object.keys(branch.properties ?? {}));
+      expect([...properties, ...unionProperties]).toEqual(expect.arrayContaining(['guideHash', 'idempotencyKey']));
+    }
+
+    for (const name of ['agentteams_comment_delete', 'agentteams_comment_reply_delete']) {
+      const description = tools.find((tool) => tool.name === name)?.description ?? '';
+      expect(description).toContain('destructive');
+      expect(description).toContain('unconditional delete');
+      expect(description).toContain('Confirm with the user');
+    }
+
+    expect(tools.find((tool) => tool.name === 'agentteams_comment_delete')?.description).toContain(
+      'every reply under it disappears',
+    );
+    expect(tools.find((tool) => tool.name === 'agentteams_comment_reply_create')?.description).toContain(
+      'one level deep',
+    );
   });
 });
 
