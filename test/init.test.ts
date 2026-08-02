@@ -148,6 +148,18 @@ describe('init helpers', () => {
     expect(new URL(url).searchParams.get('state')).toBe('state-token');
   });
 
+  test('buildAuthorizeUrl carries the machine id so the server can bind this machine runner', () => {
+    const url = buildAuthorizeUrl(9876, 'demo', undefined, undefined, undefined, 'machine-1');
+
+    expect(new URL(url).searchParams.get('mid')).toBe('machine-1');
+  });
+
+  test('buildAuthorizeUrl omits the machine id when it could not be resolved', () => {
+    const url = buildAuthorizeUrl(9876, 'demo', 'enc-value', 'LINUX', 'state-token');
+
+    expect(new URL(url).searchParams.has('mid')).toBe(false);
+  });
+
   test('detectOsType maps process.platform to supported values', () => {
     const result = detectOsType();
 
