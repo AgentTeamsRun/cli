@@ -3,6 +3,8 @@ import axios from 'axios';
 import { executeCommentCommand } from '../src/commands/comment.js';
 import { executeDocumentCommand } from '../src/commands/document.js';
 import { handleError } from '../src/utils/errors.js';
+import { readFileSync } from 'node:fs';
+import { getWriteToolSpecs } from '../src/mcp/writeTools.js';
 
 const apiUrl = 'http://localhost:3001';
 const projectId = 'project-1';
@@ -229,5 +231,30 @@ describe('comment write contract fields', () => {
       },
     };
     expect(handleError(stale)).toContain('Conflict');
+  });
+});
+
+// Sentry AGENTTEAMS-API-2: 어떤 생산자가 코멘트 생성에 `type: "ISSUE"`(플랜 타입)를 보내
+// 서버 검증이 실패했다. 서버 enum을 넓히는 대신, 공식 생산자 표면이 세 값만 노출하는지 고정한다.
+describe('plan comment type producer contract', () => {
+  const commentCreateSchema = getWriteToolSpecs().find(
+    (spec) => spec.name === 'agentteams_comment_create',
+  )?.inputSchema;
+
+  it('MCP comment_create는 RISK | MODIFICATION | GENERAL만 허용한다', () => {
+    expect(commentCreateSchema).toBeDefined();
+    for (const type of ['RISK', 'MODIFICATION', 'GENERAL']) {
+      expect(commentCreateSchema!.safeParse({ planId: 'plan-1', type, content: '본문' }).success).toBe(true);
+    }
+    // 플랜 타입은 코멘트 타입이 아니다.
+    for (const type of ['ISSUE', 'FEATURE', 'BUG_FIX', 'REFACTOR', 'CHORE']) {
+      expect(commentCreateSchema!.safeParse({ planId: 'plan-1', type, content: '본문' }).success).toBe(false);
+    }
+  });
+
+  it('CLI --type 도움말도 같은 세 값만 안내한다', () => {
+    const source = readFileSync(new URL('../src/index.ts', import.meta.url), 'utf8');
+    const help = source.match(/'--type <type>', 'Comment type \(([^)]+)\)'/);
+    expect(help?.[1]).toBe('RISK, MODIFICATION, GENERAL');
   });
 });
