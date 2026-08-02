@@ -1,11 +1,13 @@
 import { createRequire } from 'node:module';
+import type { ToolProfile } from '@agentteams/context-tools';
 import { McpServer, ResourceTemplate } from '@modelcontextprotocol/server';
 import { serveStdio, type StdioServerHandle } from '@modelcontextprotocol/server/stdio';
 import { handleError } from '../utils/errors.js';
 import { resolveMcpToolContext, type McpToolContext } from './context.js';
 import { getResourceSpecs } from './resources.js';
-import { createCliContextToolsClient, getToolSpecs } from './tools.js';
-import { getWriteToolSpecs } from './writeTools.js';
+import { getProfileToolSpecs } from './catalog.js';
+import { createCliContextToolsClient } from './tools.js';
+import { parseToolProfile } from './toolProfile.js';
 
 const require = createRequire(import.meta.url);
 const pkg = require('../../package.json') as { version: string };
@@ -21,12 +23,16 @@ export const MCP_SERVER_NAME = '@agentteams/cli';
  * response envelopes: domain handlers stay SDK-agnostic so upgrading the
  * pinned beta only touches this adapter.
  */
-export function createMcpServer(context: McpToolContext, version: string = pkg.version): McpServer {
+export function createMcpServer(
+  context: McpToolContext,
+  version: string = pkg.version,
+  toolProfile: ToolProfile = 'full',
+): McpServer {
   // Tools (read + document writes) plus single-entity resource templates.
   // Prompts and Extensions stay out of scope.
   const server = new McpServer({ name: MCP_SERVER_NAME, version }, { capabilities: { tools: {}, resources: {} } });
-  registerTools(server, context);
-  registerResources(server, context);
+  registerTools(server, context, toolProfile);
+  registerResources(server, context, toolProfile);
   return server;
 }
 
@@ -37,13 +43,14 @@ export function createMcpServer(context: McpToolContext, version: string = pkg.v
  * specs are CLI-local by design (see `writeTools.ts`). Both are flattened to the
  * same `(args) => unknown` shape first so there is still exactly one loop.
  */
-function registerTools(server: McpServer, context: McpToolContext): void {
+function registerTools(server: McpServer, context: McpToolContext, toolProfile: ToolProfile): void {
   const client = createCliContextToolsClient(context);
-  const readTools = getToolSpecs().map((spec) => ({
+  const profileSpecs = getProfileToolSpecs(toolProfile);
+  const readTools = profileSpecs.readTools.map((spec) => ({
     ...spec,
     invoke: (args: Record<string, unknown>) => spec.handler(args, client),
   }));
-  const writeTools = getWriteToolSpecs().map((spec) => ({
+  const writeTools = profileSpecs.writeTools.map((spec) => ({
     ...spec,
     invoke: (args: Record<string, unknown>) => spec.handler(args, context),
   }));
@@ -80,8 +87,9 @@ function registerTools(server: McpServer, context: McpToolContext): void {
  * entity listing is the search/list tools' job, and a full dump would be
  * unbounded.
  */
-function registerResources(server: McpServer, context: McpToolContext): void {
-  for (const spec of getResourceSpecs()) {
+function registerResources(server: McpServer, context: McpToolContext, toolProfile: ToolProfile): void {
+  const includedReadTools = new Set(getProfileToolSpecs(toolProfile).readTools.map(({ name }) => name));
+  for (const spec of getResourceSpecs().filter(({ toolName }) => includedReadTools.has(toolName))) {
     server.registerResource(
       spec.name,
       new ResourceTemplate(spec.uriTemplate, { list: undefined }),
@@ -121,19 +129,23 @@ function normalizeVariables(variables: Record<string, string | string[]>): Recor
  * diagnostic goes to stderr.
  */
 export async function startMcpServer(options: Record<string, unknown> = {}): Promise<StdioServerHandle> {
+  // 프로필 오류는 자격 증명 확인이나 stdio 프레임보다 먼저 결정적으로 거부한다.
+  const toolProfile = parseToolProfile(options.toolProfile);
   // Startup still resolves once — that is where the `${VAR}` and project-binding
   // refusals must happen, before a single tool is advertised. What changed is
   // that the credential inside the context can now be re-resolved per request.
   const context = await resolveMcpToolContext(options);
 
-  writeDiagnostic(`serving stdio (cli ${pkg.version}) apiUrl=${context.apiUrl} projectId=${context.projectId}`);
+  writeDiagnostic(
+    `serving stdio (cli ${pkg.version}) apiUrl=${context.apiUrl} projectId=${context.projectId} toolProfile=${toolProfile}`,
+  );
 
   return serveStdio((ctx) => {
     // The era tells us whether the client negotiated the modern
     // (`server/discover`) or legacy (`initialize`) revision — the key
     // observation this spike has to record.
     writeDiagnostic(`connection era=${ctx.era}`);
-    return createMcpServer(context);
+    return createMcpServer(context, pkg.version, toolProfile);
   });
 }
 

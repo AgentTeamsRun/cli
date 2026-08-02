@@ -1,4 +1,9 @@
-import { omitDocumentEditorMirror, stripContextEntityIdPrefix } from '@agentteams/context-tools';
+import {
+  defineToolDiscoveryMetadata,
+  omitDocumentEditorMirror,
+  stripContextEntityIdPrefix,
+  type ToolDiscoveryMetadata,
+} from '@agentteams/context-tools';
 import { z } from 'zod';
 import {
   createComment,
@@ -32,6 +37,7 @@ export interface McpWriteToolSpec {
   title: string;
   description: string;
   inputSchema: z.ZodType<Record<string, unknown>>;
+  discovery: ToolDiscoveryMetadata;
   handler(args: Record<string, unknown>, context: McpToolContext): Promise<unknown>;
 }
 
@@ -74,6 +80,19 @@ const visibilityField = z
   .optional()
   .describe('PRIVATE (default) is author-only; PROJECT is visible to every project member.');
 
+const guideDiscovery = defineToolDiscoveryMetadata({
+  domain: 'guides',
+  profiles: ['full', 'documents', 'comments'],
+});
+const documentWriteDiscovery = defineToolDiscoveryMetadata({
+  domain: 'documents',
+  profiles: ['full', 'documents'],
+});
+const commentWriteDiscovery = defineToolDiscoveryMetadata({
+  domain: 'comments',
+  profiles: ['full', 'comments'],
+});
+
 /** Credentials can expire mid-session, so headers are resolved per call, never captured. */
 const auth = (context: McpToolContext): Promise<Record<string, string>> =>
   context.resolveHeaders?.() ?? Promise.resolve(context.headers);
@@ -92,6 +111,7 @@ const guideGetSpec: McpWriteToolSpec = {
     'Read this before any AgentTeams write tool call — the rules it states (visibility, tag policy, structure) are enforced server-side.',
     'If it reports that the local guide hash is unknown, run `agentteams convention download` in the project.',
   ].join(' '),
+  discovery: guideDiscovery,
   inputSchema: z.strictObject({
     recordKind: z
       .enum(GUIDE_RECORD_KINDS)
@@ -126,6 +146,7 @@ const documentCreateSpec: McpWriteToolSpec = {
     PROJECT_SCOPE,
     'Returns the created document id and webUrl.',
   ].join(' '),
+  discovery: documentWriteDiscovery,
   inputSchema: z.strictObject({
     title: z.string().min(1).max(255).describe('Document title.'),
     body: z.string().min(1).describe('Document body in Markdown.'),
@@ -165,6 +186,7 @@ const documentUpdateSpec: McpWriteToolSpec = {
     'Pass expectedUpdatedAt (from agentteams_document_get) so a concurrent edit is rejected rather than silently overwritten.',
     PROJECT_SCOPE,
   ].join(' '),
+  discovery: documentWriteDiscovery,
   inputSchema: z.strictObject({
     id: z.string().min(1).describe('Document id (bare uuid or agentteams_doc_-prefixed).'),
     title: z.string().min(1).max(255).optional().describe('New title.'),
@@ -207,6 +229,7 @@ const documentDeleteSpec: McpWriteToolSpec = {
     'Confirm with the user before deleting anything you did not just create.',
     PROJECT_SCOPE,
   ].join(' '),
+  discovery: documentWriteDiscovery,
   inputSchema: z.strictObject({
     id: z.string().min(1).describe('Document id (bare uuid or agentteams_doc_-prefixed).'),
     expectedUpdatedAt: expectedUpdatedAtField,
@@ -284,6 +307,7 @@ const commentCreateSpec: McpWriteToolSpec = {
     PROJECT_SCOPE,
     'Returns the created comment id and the webUrl of the parent screen a human can open.',
   ].join(' '),
+  discovery: commentWriteDiscovery,
   inputSchema: commentTargetSchema,
   handler: async (args, context) => {
     const headers = await auth(context);
@@ -349,6 +373,7 @@ const commentUpdateSpec: McpWriteToolSpec = {
     'Pass expectedUpdatedAt (from agentteams_comment_get) so a concurrent edit is rejected rather than silently overwritten.',
     PROJECT_SCOPE,
   ].join(' '),
+  discovery: commentWriteDiscovery,
   inputSchema: z.strictObject({
     commentId: commentIdField,
     content: z.string().min(1).describe('New body in Markdown. Replaces the whole comment.'),
@@ -390,6 +415,7 @@ const commentDeleteSpec: McpWriteToolSpec = {
     'This refuses a reply id — use agentteams_comment_reply_delete for a reply.',
     PROJECT_SCOPE,
   ].join(' '),
+  discovery: commentWriteDiscovery,
   inputSchema: z.strictObject({
     commentId: commentIdField,
     expectedUpdatedAt: commentExpectedUpdatedAtField,
@@ -423,6 +449,7 @@ const commentReplyCreateSpec: McpWriteToolSpec = {
     PROJECT_SCOPE,
     'Returns the created reply id and the webUrl of the parent screen a human can open.',
   ].join(' '),
+  discovery: commentWriteDiscovery,
   inputSchema: z.strictObject({
     commentId: commentIdField,
     content: z.string().min(1).describe('Reply body in Markdown.'),
@@ -454,6 +481,7 @@ const commentReplyUpdateSpec: McpWriteToolSpec = {
     'Pass expectedUpdatedAt (from agentteams_comment_reply_get) so a concurrent edit is rejected rather than silently overwritten.',
     PROJECT_SCOPE,
   ].join(' '),
+  discovery: commentWriteDiscovery,
   inputSchema: z.strictObject({
     replyId: replyIdField,
     content: z.string().min(1).describe('New body in Markdown. Replaces the whole reply.'),
@@ -488,6 +516,7 @@ const commentReplyDeleteSpec: McpWriteToolSpec = {
     'This refuses a root comment id — use agentteams_comment_delete for a root comment.',
     PROJECT_SCOPE,
   ].join(' '),
+  discovery: commentWriteDiscovery,
   inputSchema: z.strictObject({
     replyId: replyIdField,
     expectedUpdatedAt: commentExpectedUpdatedAtField,

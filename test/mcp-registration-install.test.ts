@@ -128,6 +128,19 @@ describe('mcp install', () => {
       expect(entry).toEqual({ command: 'npx', args: ['-y', '@agentteams/cli', 'mcp'], env: {} });
     });
 
+    it('writes an explicitly selected profile into the installed argv and reports the same value', () => {
+      const result = install({ client: 'cursor-cli', scope: 'user', toolProfile: 'comments' }) as {
+        text: string;
+        json: { toolProfile: string; server: { args: string[] } };
+      };
+      const entry = JSON.parse(readFileSync(cursorUserConfig(), 'utf-8')).mcpServers.agentteams;
+
+      expect(entry.args).toEqual(['mcp', '--tool-profile', 'comments']);
+      expect(result.text).toContain('Tool profile: comments');
+      expect(result.json.toolProfile).toBe('comments');
+      expect(result.json.server.args).toEqual(entry.args);
+    });
+
     it('does not rewrite an existing secret-free entry when credentials change', () => {
       install({ client: 'cursor-cli', scope: 'user' });
       const before = readFileSync(cursorUserConfig(), 'utf-8');

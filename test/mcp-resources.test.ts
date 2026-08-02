@@ -1,4 +1,5 @@
 import { describe, it, expect, afterEach, jest } from '@jest/globals';
+import type { ToolProfile } from '@agentteams/context-tools';
 import axios from 'axios';
 import type { StdioServerHandle } from '@modelcontextprotocol/server/stdio';
 import { connect, discover, initializeLegacy, MODERN_META, TEST_TOOL_CONTEXT } from './helpers/mcp.js';
@@ -6,6 +7,12 @@ import { connect, discover, initializeLegacy, MODERN_META, TEST_TOOL_CONTEXT } f
 const { apiUrl, projectId } = TEST_TOOL_CONTEXT;
 
 const EXPECTED_TEMPLATES = ['agentteams://plan/{id}', 'agentteams://document/{id}', 'agentteams://convention/{id}'];
+const EXPECTED_PROFILE_TEMPLATES: Record<ToolProfile, string[]> = {
+  full: EXPECTED_TEMPLATES,
+  read: EXPECTED_TEMPLATES,
+  documents: ['agentteams://document/{id}'],
+  comments: [],
+};
 
 const planRunbookResponse = {
   data: {
@@ -49,6 +56,35 @@ describe('mcp read resources', () => {
     const templates = (list.result?.resourceTemplates ?? []).map((entry: any) => entry.uriTemplate);
     expect(templates).toHaveLength(3);
     expect(templates).toEqual(expect.arrayContaining(EXPECTED_TEMPLATES));
+  });
+
+  it.each(Object.entries(EXPECTED_PROFILE_TEMPLATES) as [ToolProfile, string[]][])(
+    'limits %s resource templates to matching profile tools',
+    async (profile, expectedTemplates) => {
+      const { client, handle } = connect(TEST_TOOL_CONTEXT, profile);
+      openHandle = handle;
+
+      await discover(client);
+      const list = await client.request('resources/templates/list', { _meta: MODERN_META });
+      const templates = (list.result?.resourceTemplates ?? []).map((entry: any) => entry.uriTemplate);
+
+      expect(templates).toEqual(expectedTemplates);
+    },
+  );
+
+  it('rejects a resource read whose matching tool is outside the selected profile', async () => {
+    jest.spyOn(axios, 'get').mockResolvedValue({ data: planRunbookResponse } as never);
+    const { client, handle } = connect(TEST_TOOL_CONTEXT, 'comments');
+    openHandle = handle;
+
+    await discover(client);
+    const read = await client.request('resources/read', {
+      uri: 'agentteams://plan/plan-1',
+      _meta: MODERN_META,
+    });
+
+    expect(read.result).toBeUndefined();
+    expect(read.error).toBeDefined();
   });
 
   it('lists the same three templates on the legacy path and keeps resources/list empty', async () => {

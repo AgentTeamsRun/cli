@@ -1,6 +1,16 @@
 import { afterEach, describe, expect, it, jest } from '@jest/globals';
 import type { StdioServerHandle } from '@modelcontextprotocol/server/stdio';
 import axios from 'axios';
+import {
+  buildToolCatalog,
+  getContextToolDefinitions,
+  getContextToolSpecs,
+  getToolNamesForProfile,
+  measureToolDefinitionBudget,
+} from '@agentteams/context-tools';
+import { z } from 'zod';
+import { startMcpServer } from '../src/mcp/server.js';
+import { getWriteToolSpecs } from '../src/mcp/writeTools.js';
 import { connect, discover, MODERN_META, TEST_TOOL_CONTEXT } from './helpers/mcp.js';
 
 const { apiUrl, projectId } = TEST_TOOL_CONTEXT;
@@ -180,6 +190,39 @@ const READ_ERROR_CASES = [
   })),
 ];
 
+const PROFILE_CASES: Array<['read' | 'documents' | 'comments', readonly string[]]> = [
+  ['read', getContextToolSpecs().map(({ name }) => name)],
+  [
+    'documents',
+    [
+      'agentteams_search',
+      'agentteams_document_list',
+      'agentteams_document_get',
+      'agentteams_guide_get',
+      'agentteams_document_create',
+      'agentteams_document_update',
+      'agentteams_document_delete',
+    ],
+  ],
+  [
+    'comments',
+    [
+      'agentteams_search',
+      'agentteams_comment_list',
+      'agentteams_comment_get',
+      'agentteams_comment_reply_list',
+      'agentteams_comment_reply_get',
+      'agentteams_guide_get',
+      'agentteams_comment_create',
+      'agentteams_comment_update',
+      'agentteams_comment_delete',
+      'agentteams_comment_reply_create',
+      'agentteams_comment_reply_update',
+      'agentteams_comment_reply_delete',
+    ],
+  ],
+];
+
 describe('mcp exact list and missing detail tools', () => {
   let openHandle: StdioServerHandle | undefined;
 
@@ -205,6 +248,97 @@ describe('mcp exact list and missing detail tools', () => {
     expect(names.filter((name: string) => name === 'agentteams_search')).toHaveLength(1);
     expect(names.filter((name: string) => name === 'agentteams_codereview_get')).toHaveLength(1);
     expect(names).not.toContain('agentteams_code_review_get');
+  });
+
+  it('classifies the complete catalog into stable public profiles and reports its definition budget', () => {
+    const readSpecs = getContextToolSpecs();
+    const writeSpecs = getWriteToolSpecs();
+    const catalog = buildToolCatalog([
+      { kind: 'read', specs: readSpecs },
+      { kind: 'write', specs: writeSpecs },
+    ]);
+    const definitions = [
+      ...getContextToolDefinitions(),
+      ...writeSpecs.map((spec) => ({
+        name: spec.name,
+        title: spec.title,
+        description: spec.description,
+        inputSchema: z.toJSONSchema(spec.inputSchema),
+      })),
+    ];
+    const budget = measureToolDefinitionBudget(definitions);
+
+    expect(catalog).toHaveLength(30);
+    expect(new Set(catalog.map(({ name }) => name)).size).toBe(30);
+    expect(getToolNamesForProfile(catalog, 'full')).toEqual(catalog.map(({ name }) => name));
+    expect(getToolNamesForProfile(catalog, 'read')).toEqual(readSpecs.map(({ name }) => name));
+    expect(getToolNamesForProfile(catalog, 'documents')).toEqual([
+      'agentteams_search',
+      'agentteams_document_list',
+      'agentteams_document_get',
+      'agentteams_guide_get',
+      'agentteams_document_create',
+      'agentteams_document_update',
+      'agentteams_document_delete',
+    ]);
+    expect(getToolNamesForProfile(catalog, 'comments')).toEqual([
+      'agentteams_search',
+      'agentteams_comment_list',
+      'agentteams_comment_get',
+      'agentteams_comment_reply_list',
+      'agentteams_comment_reply_get',
+      'agentteams_guide_get',
+      'agentteams_comment_create',
+      'agentteams_comment_update',
+      'agentteams_comment_delete',
+      'agentteams_comment_reply_create',
+      'agentteams_comment_reply_update',
+      'agentteams_comment_reply_delete',
+    ]);
+    expect(catalog.filter(({ discovery }) => discovery.alwaysOn).map(({ name }) => name)).toEqual([
+      'agentteams_search',
+      'agentteams_plan_get',
+      'agentteams_document_get',
+    ]);
+    expect(budget).toMatchObject({ toolCount: 30 });
+    expect(budget.descriptionChars).toBeGreaterThan(15_000);
+    expect(budget.schemaChars).toBeGreaterThan(25_000);
+    expect(budget.totalChars).toBeGreaterThan(43_000);
+    expect(budget.totalChars).toBeLessThan(48_000);
+    expect(budget.estimatedTokens).toBe(Math.ceil(budget.totalChars / 4));
+    process.stderr.write(`[mcp catalog budget] ${JSON.stringify(budget)}\n`);
+  });
+
+  it('keeps provider-facing context definitions free of internal discovery metadata', () => {
+    for (const definition of getContextToolDefinitions()) {
+      expect(Object.keys(definition).sort()).toEqual(['description', 'inputSchema', 'name', 'title']);
+    }
+  });
+
+  it.each(PROFILE_CASES)(
+    'registers exactly the %s profile and rejects calls outside it',
+    async (profile, expectedNames) => {
+      const { client, handle } = connect(TEST_TOOL_CONTEXT, profile);
+      openHandle = handle;
+
+      await discover(client);
+      const response = await client.request('tools/list', { _meta: MODERN_META });
+      expect((response.result?.tools ?? []).map((tool: { name: string }) => tool.name)).toEqual(expectedNames);
+
+      const excludedTool = profile === 'documents' ? 'agentteams_comment_get' : 'agentteams_document_create';
+      const call = await client.request('tools/call', {
+        name: excludedTool,
+        arguments: {},
+        _meta: MODERN_META,
+      });
+      expect(call.error?.message).toBe(`Tool ${excludedTool} not found`);
+    },
+  );
+
+  it('rejects an invalid profile before resolving credentials or starting stdio', async () => {
+    await expect(startMcpServer({ toolProfile: 'everything' })).rejects.toThrow(
+      'Unsupported tool profile: everything. Use full, read, documents, comments.',
+    );
   });
 
   it.each(LIST_CASES)('$tool passes all filters to its existing HTTP endpoint', async (testCase) => {

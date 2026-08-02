@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from 'node:fs';
+import type { ToolProfile } from '@agentteams/context-tools';
 import { PROJECT_SCOPE_FILE_MODE, USER_SCOPE_FILE_MODE, writeConfigFileAtomically } from './atomicWrite.js';
 import { findClient, MCP_CLIENTS } from './clients.js';
 import { detectClients, type DetectionDependencies } from './detect.js';
@@ -16,6 +17,7 @@ export interface InstallClientOptions {
   serverEntry?: string;
   serverName?: string;
   vendorRunner?: VendorRunner;
+  toolProfile?: ToolProfile;
 }
 
 function firstLines(text: string, limit = 4): string {
@@ -41,6 +43,7 @@ function installViaVendorCommand(
   const spec = buildServerSpec({
     serverEntry: options.serverEntry,
     context: options.context,
+    toolProfile: options.toolProfile,
   });
 
   const executable = client.executables[0];
@@ -103,6 +106,7 @@ function installViaJsonMerge(options: InstallClientOptions, configPath: string, 
   const spec = buildServerSpec({
     serverEntry: options.serverEntry,
     context: options.context,
+    toolProfile: options.toolProfile,
   });
 
   let source = '';
@@ -179,6 +183,7 @@ export function installClient(options: InstallClientOptions): InstallResult {
   const displaySpec = buildServerSpec({
     serverEntry: options.serverEntry,
     context: options.context,
+    toolProfile: options.toolProfile,
   });
   const manualSnippet = renderConfigSnippet(client, scope, displaySpec, serverName);
 
@@ -273,6 +278,7 @@ export interface RunBatchInstallOptions extends BuildBatchPlanOptions {
   serverEntry?: string;
   serverName?: string;
   vendorRunner?: VendorRunner;
+  toolProfile?: ToolProfile;
 }
 
 /**
@@ -310,6 +316,7 @@ export function runBatchInstall(options: RunBatchInstallOptions): { plan: BatchP
         serverEntry: options.serverEntry,
         serverName: options.serverName,
         vendorRunner: options.vendorRunner,
+        toolProfile: options.toolProfile,
       }),
     );
   }

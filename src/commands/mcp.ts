@@ -9,4 +9,5 @@
  */
 export { resolveMcpToolContext, type McpToolContext } from '../mcp/context.js';
 export { SEARCH_TOOL_NAME } from '../mcp/tools.js';
+export { parseToolProfile } from '../mcp/toolProfile.js';
 export { MCP_SERVER_NAME, createMcpServer, startMcpServer } from '../mcp/server.js';
