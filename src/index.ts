@@ -898,7 +898,8 @@ program
     false,
   )
   .option('--status <status>', 'Co-action status (OPEN, CLOSED)')
-  .option('--visibility <visibility>', 'Co-action visibility (PRIVATE, PROJECT)')
+  .option('--visibility <visibility>', 'Co-action visibility (PRIVATE, PROJECT; also filters list)')
+  .option('--source <source>', 'Filter by source (MANUAL, AUTO_SESSION, ALL; list only, default MANUAL)')
   .option('--page <number>', 'Page number (list only)')
   .option('--page-size <number>', 'Page size (list only)')
   .option('--search <text>', 'Title keyword search (list only)')
@@ -926,6 +927,7 @@ program
         file: options.file,
         status: options.status,
         visibility: options.visibility,
+        source: options.source,
         page: options.page,
         pageSize: options.pageSize,
         search: options.search,

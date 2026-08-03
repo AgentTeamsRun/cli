@@ -382,6 +382,41 @@ describe('mcp exact list and missing detail tools', () => {
     });
   });
 
+  it.each([
+    ['defaults an omitted source to MANUAL', {}, { source: 'MANUAL' }],
+    ['preserves an explicit AUTO_SESSION source', { source: 'AUTO_SESSION' }, { source: 'AUTO_SESSION' }],
+    ['drops the source filter for ALL', { source: 'ALL' }, {}],
+    ['keeps other filters alongside the default source', { status: 'OPEN' }, { status: 'OPEN', source: 'MANUAL' }],
+    ['keeps other filters when ALL removes the source', { status: 'OPEN', source: 'ALL' }, { status: 'OPEN' }],
+  ])('coaction_list %s', async (_label, toolArguments, expectedParams) => {
+    const getSpy = jest.spyOn(axios, 'get').mockResolvedValue({ data: listEnvelope } as never);
+    const { client, handle } = connect();
+    openHandle = handle;
+
+    await discover(client);
+    const call = await client.request('tools/call', {
+      name: 'agentteams_coaction_list',
+      arguments: toolArguments,
+      _meta: MODERN_META,
+    });
+
+    expect(call.error).toBeUndefined();
+    expect(call.result?.isError).toBeFalsy();
+    // An empty filter set omits `params` entirely (existing api/coaction.ts behavior).
+    expect(getSpy).toHaveBeenCalledWith(`${projectUrl}/co-actions`, {
+      headers: TEST_TOOL_CONTEXT.headers,
+      ...(Object.keys(expectedParams).length > 0 ? { params: expectedParams } : {}),
+    });
+  });
+
+  it('documents the coaction_list source default in the tool description body', () => {
+    const definition = getContextToolDefinitions().find(({ name }) => name === 'agentteams_coaction_list');
+
+    expect(definition?.description).toContain('MANUAL');
+    expect(definition?.description).toContain('AUTO_SESSION');
+    expect(definition?.description).toContain('ALL');
+  });
+
   it('routes plan, finding, task, and document comments to their parent-scoped endpoints', async () => {
     const getSpy = jest.spyOn(axios, 'get').mockResolvedValue({ data: listEnvelope } as never);
     const { client, handle } = connect();
