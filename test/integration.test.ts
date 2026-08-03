@@ -2759,6 +2759,7 @@ describe('CLI Integration Tests', () => {
       expect(cliIndex).toContain('--assigned-to <id>');
       expect(cliIndex).toContain('--page <number>');
       expect(cliIndex).toContain('--page-size <number>');
+      expect(cliIndex).toContain('Co-action visibility (PRIVATE, PROJECT; also filters list)');
       expect(cliIndex).toContain('Action to perform (list, get, show, create');
       expect(cliIndex).toContain('--template <name>');
       expect(cliIndex).toContain('--include-deps');

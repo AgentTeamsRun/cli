@@ -93,4 +93,81 @@ describe('coaction command', () => {
 
     expect(result).toBe('Monthly limit reached: 100/100 used. Resets next month (UTC).');
   });
+
+  describe('list filters', () => {
+    const apiUrl = 'http://localhost:3001';
+    const headers = { 'X-API-Key': 'key_test123', 'Content-Type': 'application/json' };
+    const listUrl = `${apiUrl}/api/projects/project_1/co-actions`;
+
+    /**
+     * `list` runs a silent freshness check before the list request, so the
+     * list call has to be selected by URL rather than by call order.
+     */
+    function listRequestParams(): unknown {
+      const call = axiosGetSpy.mock.calls.find(([url]) => url === listUrl);
+      expect(call).toBeDefined();
+      return (call?.[1] as { params?: unknown } | undefined)?.params;
+    }
+
+    beforeEach(() => {
+      axiosGetSpy.mockResolvedValue({
+        data: { data: [], meta: { total: 0, page: 1, pageSize: 20, totalPages: 0 } },
+      } as any);
+    });
+
+    it('defaults the source filter to MANUAL when --source is omitted', async () => {
+      await executeCoActionCommand(apiUrl, headers, 'list', { projectId: 'project_1' });
+
+      expect(listRequestParams()).toEqual({ source: 'MANUAL' });
+    });
+
+    it('preserves an explicit --source AUTO_SESSION', async () => {
+      await executeCoActionCommand(apiUrl, headers, 'list', {
+        projectId: 'project_1',
+        source: 'AUTO_SESSION',
+      });
+
+      expect(listRequestParams()).toEqual({ source: 'AUTO_SESSION' });
+    });
+
+    it('sends no source filter for --source ALL', async () => {
+      await executeCoActionCommand(apiUrl, headers, 'list', {
+        projectId: 'project_1',
+        source: 'ALL',
+        status: 'OPEN',
+      });
+
+      expect(listRequestParams()).toEqual({ status: 'OPEN' });
+    });
+
+    it('normalizes lowercase --source all to the ALL escape hatch', async () => {
+      await executeCoActionCommand(apiUrl, headers, 'list', {
+        projectId: 'project_1',
+        source: ' all ',
+        status: 'OPEN',
+      });
+
+      expect(listRequestParams()).toEqual({ status: 'OPEN' });
+    });
+
+    it('rejects an unsupported --source value before listing co-actions', async () => {
+      await expect(
+        executeCoActionCommand(apiUrl, headers, 'list', {
+          projectId: 'project_1',
+          source: 'manul',
+        }),
+      ).rejects.toThrow('--source must be one of: MANUAL, AUTO_SESSION, ALL');
+
+      expect(axiosGetSpy).not.toHaveBeenCalledWith(listUrl, expect.anything());
+    });
+
+    it('passes --visibility through to the list request', async () => {
+      await executeCoActionCommand(apiUrl, headers, 'list', {
+        projectId: 'project_1',
+        visibility: 'PRIVATE',
+      });
+
+      expect(listRequestParams()).toEqual({ visibility: 'PRIVATE', source: 'MANUAL' });
+    });
+  });
 });

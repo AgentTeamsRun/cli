@@ -75,11 +75,24 @@ export async function executeCoActionCommand(apiUrl: string, headers: any, actio
 
   switch (action) {
     case 'list': {
+      const source = String(options.source ?? 'MANUAL')
+        .trim()
+        .toUpperCase();
+      if (source !== 'MANUAL' && source !== 'AUTO_SESSION' && source !== 'ALL') {
+        throw new Error('--source must be one of: MANUAL, AUTO_SESSION, ALL');
+      }
+
       await runFreshnessCheckSilent(apiUrl, options.projectId, headers);
 
       const params: Record<string, string | number> = {};
       if (options.status) params.status = options.status;
       if (options.search) params.search = options.search;
+      if (options.visibility) params.visibility = options.visibility;
+
+      // Runner session dumps dominate the raw list, so an omitted --source
+      // lists manual handoffs only. `ALL` is consumed here because the API
+      // enum rejects it.
+      if (source !== 'ALL') params.source = source;
 
       const page = toPositiveInteger(options.page);
       const limitVal = toPositiveInteger(options.limit);
