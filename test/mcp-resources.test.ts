@@ -12,6 +12,9 @@ const EXPECTED_PROFILE_TEMPLATES: Record<ToolProfile, string[]> = {
   read: EXPECTED_TEMPLATES,
   documents: ['agentteams://document/{id}'],
   comments: [],
+  // `minimal` carries plan_get and document_get, so their templates come along and the
+  // convention template — whose tool is not in the profile — drops out.
+  minimal: ['agentteams://plan/{id}', 'agentteams://document/{id}'],
 };
 
 const planRunbookResponse = {

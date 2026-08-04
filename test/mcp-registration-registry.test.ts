@@ -187,7 +187,7 @@ describe('mcp config output', () => {
       'full profile preserves the complete catalog',
     );
     expect(output.json.clients.find((client) => client.clientId === 'opencode')?.profileGuidance).toContain(
-      '--tool-profile read, documents, or comments',
+      '--tool-profile read, documents, comments, or minimal',
     );
   });
 
@@ -284,9 +284,28 @@ describe('mcp config output', () => {
     },
   );
 
+  it('preserves the minimal profile in the server argv while full stays implicit', () => {
+    const context = { homeDir: home, cwd, env: { PATH: bin } as NodeJS.ProcessEnv };
+    const minimal = run({ client: 'cursor-cli', scope: 'user', toolProfile: 'minimal' }, context) as {
+      text: string;
+      json: { toolProfile: string; server: { args: string[] }; clients: { server: { args: string[] } }[] };
+    };
+
+    expect(minimal.json.toolProfile).toBe('minimal');
+    expect(minimal.json.server.args.slice(-2)).toEqual(['--tool-profile', 'minimal']);
+    expect(minimal.json.clients[0].server.args).toEqual(minimal.json.server.args);
+    expect(minimal.text).toContain('Tool profile: minimal');
+
+    // The compatibility default is unchanged: `full` still emits no profile argv.
+    const full = run({ client: 'cursor-cli', scope: 'user', toolProfile: 'full' }, context) as {
+      json: { server: { args: string[] } };
+    };
+    expect(full.json.server.args).not.toContain('--tool-profile');
+  });
+
   it('rejects an unsupported profile with the closed list of values', () => {
     expect(() => run({ toolProfile: 'tiny' })).toThrow(
-      'Unsupported tool profile: tiny. Use full, read, documents, comments.',
+      'Unsupported tool profile: tiny. Use full, read, documents, comments, minimal.',
     );
   });
 

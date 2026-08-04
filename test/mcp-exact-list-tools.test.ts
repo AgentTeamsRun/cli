@@ -3,6 +3,7 @@ import type { StdioServerHandle } from '@modelcontextprotocol/server/stdio';
 import axios from 'axios';
 import {
   buildToolCatalog,
+  defineToolDiscoveryMetadata,
   getContextToolDefinitions,
   getContextToolSpecs,
   getToolNamesForProfile,
@@ -190,7 +191,26 @@ const READ_ERROR_CASES = [
   })),
 ];
 
-const PROFILE_CASES: Array<['read' | 'documents' | 'comments', readonly string[]]> = [
+/**
+ * The `minimal` profile is defined as "the always-on set and nothing else", so this
+ * list must stay identical to the tools flagged `alwaysOn` in the catalog — the
+ * classification test below asserts that equality rather than trusting this literal.
+ * Desktop's Direct BYOK engine already exposes exactly these three tools upfront.
+ */
+const MINIMAL_PROFILE_TOOLS = ['agentteams_search', 'agentteams_plan_get', 'agentteams_document_get'] as const;
+
+/**
+ * Definition-budget baseline measured on 2026-08-05. `estimatedTokens` from
+ * `measureToolDefinitionBudget` is the chars/4 heuristic, NOT a model tokenizer
+ * count; `o200kTokens` below is the separately measured `o200k_base` figure and is
+ * recorded here as a documented reference, not as a computed assertion.
+ */
+const BUDGET_BASELINE = {
+  full: { totalChars: 45_240, heuristicTokens: 11_310, o200kTokens: 10_906 },
+  minimal: { totalChars: 3_407, heuristicTokens: 852, o200kTokens: 782 },
+} as const;
+
+const PROFILE_CASES: Array<['read' | 'documents' | 'comments' | 'minimal', readonly string[]]> = [
   ['read', getContextToolSpecs().map(({ name }) => name)],
   [
     'documents',
@@ -221,6 +241,7 @@ const PROFILE_CASES: Array<['read' | 'documents' | 'comments', readonly string[]
       'agentteams_comment_reply_delete',
     ],
   ],
+  ['minimal', MINIMAL_PROFILE_TOOLS],
 ];
 
 describe('mcp exact list and missing detail tools', () => {
@@ -309,6 +330,78 @@ describe('mcp exact list and missing detail tools', () => {
     process.stderr.write(`[mcp catalog budget] ${JSON.stringify(budget)}\n`);
   });
 
+  it('scopes the minimal profile to the always-on set and keeps its definition budget under 4,000 chars', () => {
+    const readSpecs = getContextToolSpecs();
+    const writeSpecs = getWriteToolSpecs();
+    const catalog = buildToolCatalog([
+      { kind: 'read', specs: readSpecs },
+      { kind: 'write', specs: writeSpecs },
+    ]);
+    const minimalNames = getToolNamesForProfile(catalog, 'minimal');
+
+    // `minimal` is *defined* as the always-on set: assert the equality rather than
+    // a hand-written literal, so a newly always-on tool cannot silently diverge.
+    expect(minimalNames).toEqual(catalog.filter(({ discovery }) => discovery.alwaysOn).map(({ name }) => name));
+    expect(minimalNames).toEqual([...MINIMAL_PROFILE_TOOLS]);
+
+    // Adding `minimal` must not pull any tool into or out of the four existing profiles.
+    expect(getToolNamesForProfile(catalog, 'full')).toEqual(catalog.map(({ name }) => name));
+    expect(getToolNamesForProfile(catalog, 'read')).toEqual(readSpecs.map(({ name }) => name));
+
+    const minimalDefinitions = getContextToolDefinitions().filter((definition) =>
+      minimalNames.includes(definition.name),
+    );
+    const minimalBudget = measureToolDefinitionBudget(minimalDefinitions);
+    const fullBudget = measureToolDefinitionBudget([
+      ...getContextToolDefinitions(),
+      ...writeSpecs.map((spec) => ({
+        name: spec.name,
+        title: spec.title,
+        description: spec.description,
+        inputSchema: z.toJSONSchema(spec.inputSchema),
+      })),
+    ]);
+
+    expect(minimalBudget.toolCount).toBe(3);
+    expect(minimalBudget.totalChars).toBeLessThan(4_000);
+    expect(minimalBudget.totalChars).toBeLessThan(fullBudget.totalChars / 10);
+    // `estimatedTokens` is the chars/4 heuristic; the o200k_base column of
+    // BUDGET_BASELINE is the separately measured tokenizer figure. Keep them apart.
+    expect(minimalBudget.estimatedTokens).toBe(Math.ceil(minimalBudget.totalChars / 4));
+    process.stderr.write(
+      `[mcp minimal budget] ${JSON.stringify({
+        measured: { full: fullBudget, minimal: minimalBudget },
+        baseline_2026_08_05: BUDGET_BASELINE,
+      })}\n`,
+    );
+  });
+
+  /**
+   * The equality above is asserted on the *current* catalog; this asserts the rule that
+   * produces it. `defineToolDiscoveryMetadata` refuses any tool whose `alwaysOn` flag and
+   * `minimal` membership disagree, so the contract holds at import time in every consumer
+   * — including a PR that only touches `packages/context-tools` and never runs this suite.
+   */
+  it('rejects a tool whose always-on flag and minimal membership disagree', () => {
+    expect(() => defineToolDiscoveryMetadata({ domain: 'search', profiles: ['full', 'minimal'] })).toThrow(
+      'The "minimal" profile must contain exactly the always-on tools',
+    );
+    expect(() =>
+      defineToolDiscoveryMetadata({ domain: 'search', profiles: ['full'], deferable: false, alwaysOn: true }),
+    ).toThrow('The "minimal" profile must contain exactly the always-on tools');
+
+    // The two consistent shapes still pass.
+    expect(() =>
+      defineToolDiscoveryMetadata({
+        domain: 'search',
+        profiles: ['full', 'minimal'],
+        deferable: false,
+        alwaysOn: true,
+      }),
+    ).not.toThrow();
+    expect(() => defineToolDiscoveryMetadata({ domain: 'search', profiles: ['full'] })).not.toThrow();
+  });
+
   it('keeps provider-facing context definitions free of internal discovery metadata', () => {
     for (const definition of getContextToolDefinitions()) {
       expect(Object.keys(definition).sort()).toEqual(['description', 'inputSchema', 'name', 'title']);
@@ -337,7 +430,7 @@ describe('mcp exact list and missing detail tools', () => {
 
   it('rejects an invalid profile before resolving credentials or starting stdio', async () => {
     await expect(startMcpServer({ toolProfile: 'everything' })).rejects.toThrow(
-      'Unsupported tool profile: everything. Use full, read, documents, comments.',
+      'Unsupported tool profile: everything. Use full, read, documents, comments, minimal.',
     );
   });
 
