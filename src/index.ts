@@ -1240,7 +1240,7 @@ const mcpCommand = program
   .description('Run an MCP server over stdio, exposing AgentTeams reads to MCP-capable coding agents')
   .option(
     '--tool-profile <profile>',
-    'Tool catalog profile (full, read, documents, comments); full is the compatibility default, limited profiles reduce upfront schemas',
+    'Tool catalog profile (full, read, documents, comments, minimal); full is the compatibility default, limited profiles reduce upfront schemas',
     'full',
   )
   .option('--api-url <url>', 'Override API URL (optional)')
@@ -1279,7 +1279,7 @@ function addMcpRegistrationOptions(command: Command): Command {
     .option('--scope <scope>', 'Configuration scope (user, project)', 'project')
     .option(
       '--tool-profile <profile>',
-      'Tool catalog profile (full, read, documents, comments); full is the compatibility default, limited profiles reduce upfront schemas',
+      'Tool catalog profile (full, read, documents, comments, minimal); full is the compatibility default, limited profiles reduce upfront schemas',
     )
     .option(
       '--server-entry <path>',

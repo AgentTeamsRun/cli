@@ -129,7 +129,7 @@ function describeNativeDiscovery(client: McpClientDefinition, toolProfile: strin
 
   const recommendation =
     toolProfile === 'full'
-      ? 'If upfront schema cost matters, re-run with --tool-profile read, documents, or comments.'
+      ? 'If upfront schema cost matters, re-run with --tool-profile read, documents, comments, or minimal.'
       : `The explicit ${toolProfile} profile limits the catalog exposed to this client.`;
   return `Native tool discovery: ${capability.status}${version}. ${capability.reason ?? ''} ${recommendation}${evidence}`.replace(
     /\s+/g,
