@@ -28,7 +28,9 @@ export async function getConvention(
   headers: Record<string, string>,
   conventionId: string,
 ): Promise<any> {
-  const response = await httpClient.get(`${getBaseUrl(apiUrl, projectId)}/${conventionId}`, { headers });
+  const response = await httpClient.get(`${getBaseUrl(apiUrl, projectId)}/${encodeURIComponent(conventionId)}`, {
+    headers,
+  });
   return response.data;
 }
 

@@ -15,7 +15,9 @@ export async function listCodeReviews(
 
 export async function getCodeReview(apiUrl: string, projectId: string, headers: any, id: string): Promise<any> {
   const baseUrl = `${apiUrl}/api/projects/${projectId}/code-reviews`;
-  const response = await httpClient.get(`${baseUrl}/${id}`, { headers });
+  // Ids reach here from user-authored entity references; encoding keeps a
+  // crafted value a path segment instead of letting it re-target the request.
+  const response = await httpClient.get(`${baseUrl}/${encodeURIComponent(id)}`, { headers });
   return response.data;
 }
 
@@ -26,7 +28,7 @@ export async function getCodeReviewFinding(
   findingId: string,
   codeReviewId?: string,
 ): Promise<any> {
-  const baseUrl = `${apiUrl}/api/projects/${projectId}/code-reviews/findings/${findingId}`;
+  const baseUrl = `${apiUrl}/api/projects/${projectId}/code-reviews/findings/${encodeURIComponent(findingId)}`;
   const requestConfig = codeReviewId ? { headers, params: { codeReviewId } } : { headers };
   const response = await httpClient.get(baseUrl, requestConfig);
   return response.data;

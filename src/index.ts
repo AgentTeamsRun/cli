@@ -416,6 +416,44 @@ program
   });
 
 program
+  .command('resolve')
+  .description('Resolve an entity reference token to the right entity and fetch it')
+  .argument(
+    '<ref>',
+    'Reference token, e.g. "plan:agentteams_pln_<uuid>", "agentteams_doc_<uuid>", or a whole [label](type:id) link',
+  )
+  .option('--format <format>', 'Output format (json)')
+  .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
+  .option('--verbose', 'Print full raw output to stdout; with --output-file, also echo it', false)
+  .addHelpText(
+    'after',
+    `\nReturns a "kind" that tells you what to do next:\n  file       read "filePath" (the entity body was downloaded)\n  record     use "record" (structured payload, already inline)\n  localFile  read "filePath" (the reference carried a local path)\n  external   open "url" or run "suggestedCommand" (gh/glab)\n${CONVENTION_HINT}`,
+  )
+  .action(async (ref, options) => {
+    try {
+      const normalizedFormat = normalizeFormat(options.format);
+      const result = await executeCommand('resolve', 'get', {
+        ref,
+        format: normalizedFormat,
+        formatExplicit: typeof options.format === 'string',
+      });
+
+      printCommandResult({
+        result,
+        format: normalizedFormat,
+        outputFile: options.outputFile,
+        verbose: options.verbose,
+        resource: 'resolve',
+        action: 'get',
+        formatExplicit: typeof options.format === 'string',
+      });
+    } catch (error) {
+      console.error(handleError(error));
+      process.exit(1);
+    }
+  });
+
+program
   .command('task')
   .description('Manage plan tasks')
   .argument('<action>', 'Action to perform (get, start, finish)')

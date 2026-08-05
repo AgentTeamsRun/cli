@@ -1,7 +1,9 @@
 import httpClient from '../utils/httpClient.js';
 
 export async function getLinearIssue(apiUrl: string, headers: any, issueId: string): Promise<any> {
-  const baseUrl = `${apiUrl}/api/linear/issues/${issueId}`;
+  // A LINEAR_ISSUE reference locator is not an AgentTeams id, so it is not
+  // UUID-validated upstream — encode it so it stays a single path segment.
+  const baseUrl = `${apiUrl}/api/linear/issues/${encodeURIComponent(issueId)}`;
   const response = await httpClient.get(baseUrl, { headers });
   return response.data;
 }

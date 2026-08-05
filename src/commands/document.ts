@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { atomicWriteFileSync } from '../utils/atomicWrite.js';
-import { basename, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
+import { findProjectConfig } from '../utils/config.js';
 import {
   archiveDocument,
   createDocument,
@@ -83,6 +84,17 @@ type DocumentCommentRecord = {
 };
 
 const DOCUMENT_DOWNLOAD_DIR = join('.agentteams', 'cli', 'documents');
+
+/**
+ * Downloads land under the project root, not the current directory — running
+ * the command from a sub-package would otherwise scatter `.agentteams/cli/`
+ * trees around the repository. Falls back to cwd when no project is configured.
+ */
+const documentDownloadDir = (): string => {
+  const configPath = findProjectConfig(process.cwd());
+  const projectRoot = configPath ? resolve(dirname(configPath), '..') : process.cwd();
+  return resolve(projectRoot, DOCUMENT_DOWNLOAD_DIR);
+};
 const VISIBILITY_VALUES = ['PROJECT', 'PRIVATE'] as const;
 const ARCHIVED_VALUES = ['ACTIVE', 'ARCHIVED', 'ALL'] as const;
 const ORDER_VALUES = ['asc', 'desc'] as const;
@@ -188,6 +200,32 @@ const withMessage = <T extends Record<string, unknown>>(response: T, message: st
   };
 };
 
+/**
+ * Fetch a document body and write it under the local document download dir.
+ * Shared by `document download` (which formats the text below) and `resolve`,
+ * so the file naming stays in one place.
+ */
+export async function downloadDocumentToFile(
+  apiUrl: string,
+  projectId: string,
+  headers: Record<string, string>,
+  id: string,
+): Promise<{ filePath: string; id: string; title: string; webUrl?: string }> {
+  const documentResponse = await getDocument(apiUrl, projectId, headers, id);
+  const document = getDocumentData(documentResponse);
+  const body = await downloadDocumentBody(apiUrl, projectId, headers, id);
+  const outputDir = documentDownloadDir();
+  mkdirSync(outputDir, { recursive: true });
+  const outputPath = join(outputDir, safeFileName(document.title, document.id));
+  atomicWriteFileSync(outputPath, body ?? document.body ?? '', 'utf-8');
+  return {
+    filePath: outputPath,
+    id: document.id,
+    title: document.title,
+    ...(document.webUrl ? { webUrl: document.webUrl } : {}),
+  };
+}
+
 export async function executeDocumentCommand(
   apiUrl: string,
   projectId: string,
@@ -237,18 +275,12 @@ export async function executeDocumentCommand(
 
     case 'download': {
       if (!options.id) throw new Error('--id is required for document download');
-      const documentResponse = await getDocument(apiUrl, projectId, headers, options.id);
-      const document = getDocumentData(documentResponse);
-      const body = await downloadDocumentBody(apiUrl, projectId, headers, options.id);
-      const outputDir = resolve(DOCUMENT_DOWNLOAD_DIR);
-      mkdirSync(outputDir, { recursive: true });
-      const outputPath = join(outputDir, safeFileName(document.title, document.id));
-      atomicWriteFileSync(outputPath, body ?? document.body ?? '', 'utf-8');
+      const downloaded = await downloadDocumentToFile(apiUrl, projectId, headers, options.id);
       return [
-        `Document downloaded to ${outputPath}`,
-        `id: ${document.id}`,
-        `title: ${document.title}`,
-        document.webUrl ? `webUrl: ${document.webUrl}` : null,
+        `Document downloaded to ${downloaded.filePath}`,
+        `id: ${downloaded.id}`,
+        `title: ${downloaded.title}`,
+        downloaded.webUrl ? `webUrl: ${downloaded.webUrl}` : null,
       ]
         .filter(Boolean)
         .join('\n');

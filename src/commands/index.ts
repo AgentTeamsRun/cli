@@ -18,6 +18,7 @@ import { executeSearchCommand } from './search.js';
 import { executeLinearCommand } from './linear.js';
 import { executeAttachmentCommand } from './attachment.js';
 import { executeTaskCommand } from './task.js';
+import { executeResolveCommand } from './resolve.js';
 import { getConfigurationNotFoundMessage, loadConfigWithCredential } from '../utils/config.js';
 import { executeWorktreeCommand } from './worktree.js';
 import { normalizeCommandContext, withCommandContext } from '../utils/commandContext.js';
@@ -158,6 +159,24 @@ async function executeCommandWithContext(
           projectId: config.projectId,
         }),
       );
+    }
+    // Entity-reference resolution. The API context is loaded lazily because
+    // external markers and local convention paths resolve without a project
+    // config or any network access.
+    case 'resolve': {
+      let resolvedApiUrl: string | null = null;
+      const loadContext = async () => {
+        const config = await loadRequiredConfig(buildConfigOverrides(options));
+        const { apiUrl, headers } = resolveApiContext(config);
+        resolvedApiUrl = apiUrl;
+        return { apiUrl, projectId: config.projectId, headers };
+      };
+
+      try {
+        return await executeResolveCommand(options, loadContext);
+      } catch (error) {
+        throw resolvedApiUrl ? attachErrorContext(error, { apiUrl: resolvedApiUrl }) : error;
+      }
     }
     case 'dependency':
       return executeDependencyCommand(action, options);

@@ -24,16 +24,30 @@ export function stripEntityIdPrefix<T>(value: T): T {
  * Whether a CLI option key carries an entity id and should accept prefixed
  * input. We normalize the bare `id` flag plus every `*Id` option (e.g.
  * `planId`, `completionReportId`, `codeReviewId`, `sourcePlanId`,
- * `sourceCompletionReportId`). This matches the documented promise that any
- * `--id`/`--plan-id`/`--completion-report-id`/etc. value is normalized
- * automatically, instead of an allowlist that silently misses some flags.
+ * `sourceCompletionReportId`) and every comma-separated `*Ids` option
+ * (e.g. `findingIds`). This matches the documented promise that any
+ * `--id`/`--plan-id`/`--finding-ids`/etc. value is normalized automatically,
+ * instead of an allowlist that silently misses some flags.
  *
  * Non-AgentTeams id flags (`projectId`, `teamId`, `issueId`, ...) are safe to
  * pass through `stripEntityIdPrefix`: it only removes a leading canonical
  * `agentteams_<type>_` prefix, which those values never carry.
  */
 function isEntityIdOptionKey(key: string): boolean {
-  return key === 'id' || key.endsWith('Id');
+  return key === 'id' || key.endsWith('Id') || isEntityIdListOptionKey(key);
+}
+
+/** `*Ids` options carry a comma-separated list, so each item is stripped on its own. */
+function isEntityIdListOptionKey(key: string): boolean {
+  return key.endsWith('Ids');
+}
+
+function normalizeEntityIdValue(key: string, value: string): string {
+  if (!isEntityIdListOptionKey(key)) return stripEntityIdPrefix(value);
+  return value
+    .split(',')
+    .map((item) => stripEntityIdPrefix(item.trim()))
+    .join(',');
 }
 
 /**
@@ -47,7 +61,7 @@ export function normalizeEntityIdOptions(options: Record<string, unknown>): Reco
     if (!isEntityIdOptionKey(key)) continue;
     const value = next[key];
     if (typeof value !== 'string') continue;
-    const normalized = stripEntityIdPrefix(value);
+    const normalized = normalizeEntityIdValue(key, value);
     if (normalized !== value) {
       next[key] = normalized;
       mutated = true;

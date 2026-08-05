@@ -79,6 +79,20 @@ describe('normalizeEntityIdOptions', () => {
     expect(result.taskId).toBe(uuid);
   });
 
+  // `--finding-ids` is the one id flag that carries a list; without per-item
+  // stripping a prefixed value pasted from a web reference fails as not-found.
+  it('normalizes every item of a comma-separated *Ids flag', () => {
+    const uuid = 'f62762fc-730a-4201-8586-e2541505ed1b';
+    const otherUuid = '0a1b2c3d-4e5f-4a6b-8c9d-0e1f2a3b4c5d';
+    const result = normalizeEntityIdOptions({
+      id: `agentteams_rev_${uuid}`,
+      findingIds: `agentteams_rvf_${uuid}, agentteams_rvf_${otherUuid}`,
+    });
+
+    expect(result.id).toBe(uuid);
+    expect(result.findingIds).toBe(`${uuid},${otherUuid}`);
+  });
+
   it('leaves non-AgentTeams id flags untouched', () => {
     const result = normalizeEntityIdOptions({
       projectId: 'agentteams_proj_keep',

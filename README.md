@@ -323,6 +323,40 @@ agentteams search --query "refactor" --format json
 
 Searchable entity types: `PLAN`, `CO_ACTION`, `COMPLETION_REPORT`, `POST_MORTEM`, `CONVENTION`
 
+### `resolve`
+
+Resolve one entity reference. Pass the reference token exactly as it appears — `resolve` works out the type, strips the id prefix, and fetches the entity for you, so you do not have to pick the right per-type command yourself.
+
+```bash
+agentteams resolve "plan:agentteams_pln_f62762fc-730a-4201-8586-e2541505ed1b"
+agentteams resolve "agentteams_doc_f62762fc-730a-4201-8586-e2541505ed1b"
+agentteams resolve "convention:<id>:.agentteams/rules/context.md"
+agentteams resolve "codeReview:<reviewId>:<findingId>"
+agentteams resolve "GITHUB_ISSUE:owner/repo#12"
+
+# A whole markdown link works too
+agentteams resolve "[Safari pull-to-refresh](plan:agentteams_pln_<uuid>)"
+```
+
+Accepted forms: `type:id`, `type:id:path`, a bare prefixed id, an external marker (`LINEAR_ISSUE`, `GITHUB_ISSUE`, `GITHUB_PR`, `GITLAB_ISSUE`, `GITLAB_MERGE_REQUEST`, `BITBUCKET_ISSUE`, `BITBUCKET_PR`), or any of those wrapped in a `[label](...)` link. Three-part references are read by their parent type: `convention:id:path` carries a local path, while `codeReview:reviewId:findingId` and `plan:planId:taskId` address a child entity.
+
+The response `kind` tells you what to do next:
+
+| `kind`      | Types                                                            | What to do                                                  |
+| ----------- | ---------------------------------------------------------------- | ----------------------------------------------------------- |
+| `file`      | `plan`, `completionReport`, `postMortem`, `coAction`, `document` | Read `filePath` — the body was downloaded as a local `.md`. |
+| `record`    | `codeReview`, `codeReviewFinding`, `planTask`, `LINEAR_ISSUE`    | Use `record`, the structured payload returned inline.       |
+| `localFile` | `convention` with a path                                         | Read `filePath` (no network call was made).                 |
+| `external`  | `GITHUB_*`, `GITLAB_*`, `BITBUCKET_*`                            | Open `url` or run `suggestedCommand` (`gh` / `glab`).       |
+
+`filePath` is always absolute, so it opens the same way from any working directory.
+
+References are user-authored text, so `resolve` validates them before acting: an AgentTeams id (and the parent id of a three-part reference) must be a bare UUID, otherwise the reference is rejected instead of being sent to the API. The path in a `convention:id:path` reference must resolve inside the project's `.agentteams/` directory; anything else falls back to the server record rather than nominating a local file to read.
+
+External references are never fetched for you: `resolve` derives the URL and the `gh`/`glab` command from the locator and stops there. GitLab references return a command but no URL, because a self-managed GitLab host cannot be derived from the project path.
+
+Every response also carries `fallbackCommand`, the equivalent per-type command (`report download --id`, `code-review get --finding-id`, `task get --task-id`, `linear issue get --issue-id`, …) for older CLI versions that do not ship `resolve`.
+
 ### `config`
 
 ```bash
@@ -388,6 +422,8 @@ Entity references copied from the AgentTeams web UI carry a type prefix (e.g. `a
 agentteams plan get --id agentteams_pln_f62762fc-730a-4201-8586-e2541505ed1b
 # resolves to plan f62762fc-730a-4201-8586-e2541505ed1b
 ```
+
+This normalization only removes the prefix — you still choose the command that matches the entity type. [`resolve`](#resolve) sits one level above it: give it the whole reference token and it works out the type as well, then dispatches to the right lookup.
 
 ### Legacy V1 Plan HTML Preview
 
