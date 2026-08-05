@@ -9,7 +9,7 @@ export async function getPlanTask(
   taskId: string,
   planId?: string,
 ): Promise<unknown> {
-  const baseUrl = `${apiUrl}/api/projects/${projectId}/plans/tasks/${taskId}`;
+  const baseUrl = `${apiUrl}/api/projects/${projectId}/plans/tasks/${encodeURIComponent(taskId)}`;
   const requestConfig = planId ? { headers, params: { planId } } : { headers };
   const response = await httpClient.get(baseUrl, requestConfig);
   return response.data;
