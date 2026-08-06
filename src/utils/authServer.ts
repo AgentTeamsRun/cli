@@ -33,7 +33,60 @@ export type AuthorizationCodeResult = {
   state: string;
 };
 
-type AuthServerResult<T> = {
+/**
+ * The unified setup callback used by `agentteams init`.
+ *
+ * An authorization code plus the connection identifiers the CLI is about to
+ * write into `.agentteams/config.json` — and nothing else. `apiKey` and
+ * `apiUrl` stay off this list on purpose: keeping a long-lived secret and the
+ * server address out of the browser round trip is the whole reason this path
+ * exists, so a new field belongs here only if it may leak to the callback port.
+ */
+export type UnifiedSetupResult = AuthorizationCodeResult & {
+  teamId: string;
+  projectId: string;
+  configId: string;
+  agentName: string;
+  seedPlanId?: string | null;
+};
+
+/**
+ * A web build older than this CLI ignored `flow=setup` and answered with the
+ * plain `{ code, state }` of the personal-login path. The code is real but
+ * useless here — without the connection identifiers there is no project to
+ * configure — so it is deliberately left unredeemed and the login fails loudly.
+ *
+ * `legacyAgentKeyIssued` marks the *older* skew: a web that does not know the
+ * authorization code at all and answered with the agent-key callback. That page
+ * minted a 30-day key before posting, so the message has to say so.
+ */
+export type UnifiedSetupMetadataMissing = { metadataMissing: true; legacyAgentKeyIssued?: true };
+
+export type UnifiedSetupCallback = UnifiedSetupResult | UnifiedSetupMetadataMissing;
+
+export const SETUP_METADATA_MISSING_HINT =
+  'The AgentTeams web page completed a plain login instead of the project setup this CLI asked for, so it is older than this CLI. ' +
+  'Hard-refresh /cli/authorize and run `agentteams init` again; if it keeps failing, the web deploy has not caught up yet — ' +
+  'retry in a few minutes, or install a CLI version matching the deployed web. ' +
+  'Nothing was written to this project and the authorization code was discarded.';
+
+/**
+ * The same skew one deploy further back: the page answered with the legacy
+ * agent-key callback. Unlike {@link SETUP_METADATA_MISSING_HINT} this one cannot
+ * end with "nothing happened" — the key was already issued server-side and only
+ * the user can revoke it.
+ */
+export const SETUP_LEGACY_AGENT_KEY_HINT =
+  'The AgentTeams web page answered with the old agent-key callback instead of the project setup this CLI asked for, so it is older than this CLI. ' +
+  'Hard-refresh /cli/authorize and run `agentteams init` again; if it keeps failing, the web deploy has not caught up yet — ' +
+  'retry in a few minutes, or install a CLI version matching the deployed web. ' +
+  'Nothing was written to this project, but that page already issued an agent API key — revoke it in the web app (project settings → agents).';
+
+export function isUnifiedSetupMetadataMissing(value: UnifiedSetupCallback): value is UnifiedSetupMetadataMissing {
+  return (value as UnifiedSetupMetadataMissing).metadataMissing === true;
+}
+
+export type AuthServerResult<T> = {
   server: Server;
   waitForCallback: () => Promise<T>;
   port: number;
@@ -405,4 +458,78 @@ export function startAuthorizationCodeServer(
     (value) => (isAuthorizationCodeResult(value) ? { code: value.code, state: value.state } : null),
     options,
   );
+}
+
+function readNonEmptyString(candidate: Record<string, unknown>, key: string): string | null {
+  const value = candidate[key];
+  return typeof value === 'string' && value.length > 0 ? value : null;
+}
+
+/**
+ * The legacy `{ teamId, projectId, agentName, apiKey, configId }` callback,
+ * recognised only to fail fast. `apiKey` is the field that matters: it is both
+ * what makes the body unmistakably the old shape and the thing the user is told
+ * to revoke. Nothing here is ever copied into a result.
+ */
+function isLegacyAgentKeyCallback(value: unknown): boolean {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const candidate = value as Record<string, unknown>;
+  return Boolean(
+    readNonEmptyString(candidate, 'apiKey') &&
+    readNonEmptyString(candidate, 'configId') &&
+    readNonEmptyString(candidate, 'teamId'),
+  );
+}
+
+/**
+ * Copy only the fields the CLI trusts, exactly as {@link toAuthResult} does.
+ *
+ * Returning `null` means "this is not a callback for this login at all";
+ * returning the metadata-missing marker means "it is, but from a web build that
+ * cannot complete the setup" — the two need different answers upstream.
+ */
+export function parseUnifiedSetupPayload(value: unknown): UnifiedSetupCallback | null {
+  if (!isAuthorizationCodeResult(value)) {
+    // A web build that predates the authorization code ignores `flow=setup`
+    // outright and posts the legacy agent-key body. Answering `null` there would
+    // leave the callback unsettled — the CLI would sit through the full 60-second
+    // timeout and report it as a timeout, with no word about the key that page
+    // just minted. Classify it instead so the failure is immediate and named.
+    return isLegacyAgentKeyCallback(value) ? { metadataMissing: true, legacyAgentKeyIssued: true } : null;
+  }
+
+  const candidate = value as Record<string, unknown>;
+  const teamId = readNonEmptyString(candidate, 'teamId');
+  const projectId = readNonEmptyString(candidate, 'projectId');
+  const configId = readNonEmptyString(candidate, 'configId');
+  const agentName = readNonEmptyString(candidate, 'agentName');
+
+  if (!teamId || !projectId || !configId || !agentName) {
+    return { metadataMissing: true };
+  }
+
+  const result: UnifiedSetupResult = {
+    code: candidate.code as string,
+    state: typeof candidate.state === 'string' ? candidate.state : '',
+    teamId,
+    projectId,
+    configId,
+    agentName,
+  };
+
+  if (candidate.seedPlanId === null || typeof candidate.seedPlanId === 'string') {
+    result.seedPlanId = candidate.seedPlanId;
+  }
+
+  return result;
+}
+
+/** Unified setup callback: an authorization code plus the connection identifiers. */
+export function startUnifiedSetupServer(
+  options?: StartLocalAuthServerOptions,
+): Promise<AuthServerResult<UnifiedSetupCallback>> {
+  return startCallbackServer<UnifiedSetupCallback>(parseUnifiedSetupPayload, options);
 }

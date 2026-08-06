@@ -27,6 +27,9 @@ type ConventionCommandOptions = {
   config?: Config;
   currentCliVersion?: string;
   latestCliVersion?: string | null;
+  // 컨벤션 템플릿을 조회할 AgentConfig. 호출부(`init`)가 방금 연결한 에이전트를 알고 있을 때만
+  // 전달한다. 값이 있으면 목록 조회를 건너뛴다(아래 downloadReportingTemplate 참조).
+  agentConfigId?: string;
 };
 
 type ConventionDownloadManifestV1 = {
@@ -806,28 +809,56 @@ function persistPlatformGuideHashes(
   writeManifest(projectRoot, manifest);
 }
 
-async function downloadReportingTemplate(
-  projectRoot: string,
+/**
+ * 컨벤션 템플릿(`.agentteams/convention.md`)을 한 번 내려받아 덮어쓴다.
+ *
+ * `agentConfigId`를 아는 호출부(`init`)는 그 값을 넘겨 목록 조회를 통째로 건너뛴다.
+ */
+/**
+ * 어떤 에이전트를 쓸지 모를 때의 폴백: 프로젝트의 첫 AgentConfig를 고른다.
+ *
+ * `agentteams convention download`를 직접 실행하는 사용자에게는 고를 근거가 없어서 남겨둔 경로다.
+ * 오늘의 서버 응답이 config에 의존하지 않기 때문에(`api/src/routes/agent-configs/index.ts`의
+ * `/convention` 핸들러는 404 판정에만 config를 쓰고 본문은 프로젝트 컨벤션만으로 만든다)
+ * 아무 config나 골라도 결과가 같다. 그 가정이 깨지는 순간 이 폴백은 **조용히** 틀린 템플릿을
+ * 쓰게 되므로, 응답이 config에 의존하게 되면 이 함수부터 다시 봐야 한다.
+ */
+async function resolveFallbackAgentConfigId(
   config: Config,
   apiUrl: string,
   headers: Record<string, string>,
-): Promise<boolean> {
+): Promise<string | null> {
   const agentConfigResponse = await httpClient.get(`${apiUrl}/api/projects/${config.projectId}/agent-configs`, {
     headers,
   });
 
   const agentConfigs = agentConfigResponse.data?.data;
   if (!Array.isArray(agentConfigs) || agentConfigs.length === 0) {
-    return false;
+    return null;
   }
 
   const firstAgentConfig = agentConfigs[0];
   if (!firstAgentConfig?.id || typeof firstAgentConfig.id !== 'string') {
+    return null;
+  }
+
+  return firstAgentConfig.id;
+}
+
+async function downloadReportingTemplate(
+  projectRoot: string,
+  config: Config,
+  apiUrl: string,
+  headers: Record<string, string>,
+  agentConfigId?: string,
+): Promise<boolean> {
+  const resolvedAgentConfigId = agentConfigId ?? (await resolveFallbackAgentConfigId(config, apiUrl, headers));
+  if (!resolvedAgentConfigId) {
     return false;
   }
 
   const templateResponse = await httpClient.get(
-    `${apiUrl}/api/projects/${config.projectId}/agent-configs/${firstAgentConfig.id}/convention`,
+    `${apiUrl}/api/projects/${config.projectId}/agent-configs/${resolvedAgentConfigId}/convention`,
     { headers },
   );
 
@@ -855,8 +886,16 @@ export async function conventionDownload(options?: ConventionCommandOptions): Pr
   }
 
   const hasReportingTemplate = await withSpinner('Downloading reporting template...', () =>
-    downloadReportingTemplate(projectRoot, config, apiUrl, headers),
+    downloadReportingTemplate(projectRoot, config, apiUrl, headers, options?.agentConfigId),
   );
+  // `agentConfigId`를 명시한 호출부(`init`)에게 이 다운로드는 선택이 아니다. 예전 init은
+  // 템플릿 응답이 어긋나면 그 자리에서 실패했는데, 기록을 이쪽으로 넘기면서 조용히 넘어가면
+  // init은 성공으로 끝나고 `✓ Convention saved`까지 출력하지만 `.agentteams/convention.md`는
+  // 없는 상태가 된다. 모든 러너가 always_on으로 읽는 파일이라 그 거짓 성공의 대가가 크다.
+  // (agentConfigId를 모르는 직접 실행은 "고를 에이전트가 없음"이 정상 상태라 그대로 둔다.)
+  if (options?.agentConfigId && !hasReportingTemplate) {
+    throw new Error('Invalid convention template response from server.');
+  }
   const platformGuides = await withSpinner('Downloading platform guides...', () =>
     downloadPlatformGuides(projectRoot, apiUrl, headers),
   );

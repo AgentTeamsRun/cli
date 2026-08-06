@@ -193,13 +193,12 @@ describe('printInitResult', () => {
   });
 
   describe('개인 토큰 경로 (human format)', () => {
-    it('로그인 계정과 에이전트 키 폐기 결과를 사람용 출력에 표시한다', () => {
+    it('로그인 계정과 "키를 만들지 않았다"는 사실을 사람용 출력에 표시한다', () => {
       printInitResult(
         {
           ...MOCK_INIT_RESULT,
           authMode: 'personal-token' as const,
           personalLogin: { email: 'dev@example.com', nickname: 'dev', persisted: true },
-          agentKeyRevoked: true,
         },
         'human',
       );
@@ -207,7 +206,9 @@ describe('printInitResult', () => {
       const output = captureOutput(logSpy);
       expect(output).toContain('dev@example.com');
       expect(output).toContain('OS credential store');
-      expect(output).toContain('revoked');
+      // 이 경로는 setup 키를 발급하지 않으므로 "폐기했다"가 아니라 "만들지 않았다"가 참이다.
+      expect(output).toContain('No agent API key was created');
+      expect(output).not.toContain('revoked');
     });
 
     it('경고는 기본 포맷에서 반드시 보인다', () => {
@@ -219,13 +220,12 @@ describe('printInitResult', () => {
           ...MOCK_INIT_RESULT,
           authMode: 'personal-token' as const,
           personalLogin: { email: 'dev@example.com', nickname: 'dev', persisted: true },
-          agentKeyRevoked: false,
-          warning: 'The agent key created for "claude-main" could not be revoked and is still valid.',
+          warning: 'The convention sync finished with a partial result.',
         },
         'human',
       );
 
-      expect(captureOutput(warnSpy)).toContain('could not be revoked');
+      expect(captureOutput(warnSpy)).toContain('partial result');
 
       warnSpy.mockRestore();
     });

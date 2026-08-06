@@ -16,7 +16,6 @@ interface InitResultShape {
   postCheckoutHook?: EnsurePostCheckoutHookResult;
   authMode?: 'api-key' | 'personal-token';
   personalLogin?: { email: string; nickname: string; persisted: boolean };
-  agentKeyRevoked?: boolean;
   warning?: string;
 }
 
@@ -123,9 +122,9 @@ export function printInitResult(result: unknown, format: InitOutputFormat): void
           : '⚠ Login kept in memory for this process only.',
       );
     }
-    if (result.agentKeyRevoked === true) {
-      console.log('✓ The setup agent key was revoked; nothing long-lived is left on the server.');
-    }
+    // 이 경로는 setup용 agent key를 애초에 발급하지 않는다. "발급했다가 폐기했다"는
+    // 이전 안내 줄은 그래서 사라졌다.
+    console.log('✓ No agent API key was created for this setup.');
   }
 
   // The compatibility path has a hard 30-day server-side TTL and no renewal of its own.

@@ -132,7 +132,7 @@ afterEach(() => {
 
 describe('init helpers', () => {
   test('buildAuthorizeUrl includes authPathEnc and osType when provided', () => {
-    const url = buildAuthorizeUrl(9876, 'demo', 'enc-value', 'LINUX');
+    const url = buildAuthorizeUrl({ port: 9876, projectName: 'demo', authPathEnc: 'enc-value', osType: 'LINUX' });
     const parsed = new URL(url);
 
     expect(parsed.searchParams.get('port')).toBe('9876');
@@ -143,21 +143,42 @@ describe('init helpers', () => {
   });
 
   test('buildAuthorizeUrl carries the login state so the web page can echo it back', () => {
-    const url = buildAuthorizeUrl(9876, 'demo', undefined, undefined, 'state-token');
+    const url = buildAuthorizeUrl({ port: 9876, projectName: 'demo', state: 'state-token' });
 
     expect(new URL(url).searchParams.get('state')).toBe('state-token');
   });
 
   test('buildAuthorizeUrl carries the machine id so the server can bind this machine runner', () => {
-    const url = buildAuthorizeUrl(9876, 'demo', undefined, undefined, undefined, 'machine-1');
+    const url = buildAuthorizeUrl({ port: 9876, projectName: 'demo', machineId: 'machine-1' });
 
     expect(new URL(url).searchParams.get('mid')).toBe('machine-1');
   });
 
   test('buildAuthorizeUrl omits the machine id when it could not be resolved', () => {
-    const url = buildAuthorizeUrl(9876, 'demo', 'enc-value', 'LINUX', 'state-token');
+    const url = buildAuthorizeUrl({
+      port: 9876,
+      projectName: 'demo',
+      authPathEnc: 'enc-value',
+      osType: 'LINUX',
+      state: 'state-token',
+    });
 
     expect(new URL(url).searchParams.has('mid')).toBe(false);
+  });
+
+  test('buildAuthorizeUrl asks for the unified setup screen only when a PKCE challenge is present', () => {
+    const setupUrl = new URL(
+      buildAuthorizeUrl({ port: 9876, projectName: 'demo', state: 'state-token', codeChallenge: 'challenge-value' }),
+    );
+
+    expect(setupUrl.searchParams.get('code_challenge')).toBe('challenge-value');
+    expect(setupUrl.searchParams.get('flow')).toBe('setup');
+
+    // --auth api-key는 통합 화면을 요청하지 않는다. 구/신 web 모두 레거시 폼으로 떨어져야 한다.
+    const legacyUrl = new URL(buildAuthorizeUrl({ port: 9876, projectName: 'demo', state: 'state-token' }));
+
+    expect(legacyUrl.searchParams.has('code_challenge')).toBe(false);
+    expect(legacyUrl.searchParams.has('flow')).toBe(false);
   });
 
   test('detectOsType maps process.platform to supported values', () => {

@@ -19,15 +19,26 @@ import { constants, createCipheriv, publicEncrypt, randomBytes } from 'node:cryp
 import { multiselect, isCancel, cancel } from '@clack/prompts';
 import httpClient from '../utils/httpClient.js';
 import open from 'open';
-import { createAuthState, startLocalAuthServer } from '../utils/authServer.js';
+import {
+  createAuthState,
+  createPkcePair,
+  isUnifiedSetupMetadataMissing,
+  SETUP_LEGACY_AGENT_KEY_HINT,
+  SETUP_METADATA_MISSING_HINT,
+  startLocalAuthServer,
+  startUnifiedSetupServer,
+  type AuthServerResult,
+  type UnifiedSetupResult,
+} from '../utils/authServer.js';
 import {
   DEFAULT_API_URL,
+  loadConfigWithCredential,
   type LegacyApiKeyPersistedConfig,
   type PersistedConfig,
   saveConfig,
   saveLegacyApiKeyConfig,
 } from '../utils/config.js';
-import { performPersonalTokenLogin } from './auth.js';
+import { getPersonalTokenClient } from '../auth/personalTokenClient.js';
 import { createSpinner, withSpinner } from '../utils/spinner.js';
 import { withCommandContext } from '../utils/commandContext.js';
 import { conventionDownload } from './convention.js';
@@ -98,12 +109,6 @@ type OAuthInitResult = {
   authMode: AuthMode;
   /** Set only on the personal-token path, where the credential lives outside the repository. */
   personalLogin?: { email: string; nickname: string; persisted: boolean };
-  /**
-   * Personal-token path only. The browser round trip still mints an agent key —
-   * it is what fetches the convention template — and this records whether that
-   * key was handed back before init exited.
-   */
-  agentKeyRevoked?: boolean;
   warning?: string;
 };
 
@@ -178,33 +183,46 @@ export function detectOsType(): 'MACOS' | 'LINUX' | 'WINDOWS' | undefined {
   return undefined;
 }
 
-export function buildAuthorizeUrl(
-  port: number,
-  projectName: string,
-  authPathEnc?: string,
-  osType?: string,
-  state?: string,
-  machineId?: string,
-): string {
+export type AuthorizeUrlInput = {
+  port: number;
+  projectName: string;
+  authPathEnc?: string;
+  osType?: string;
+  state?: string;
+  machineId?: string;
+  /**
+   * Present only on the unified setup path. It is what asks the web page to
+   * finish selection *and* the personal-token consent on one screen; a web build
+   * that does not know `flow=setup` simply ignores both parameters, which is why
+   * the `--auth api-key` path must keep omitting them.
+   */
+  codeChallenge?: string;
+};
+
+export function buildAuthorizeUrl(input: AuthorizeUrlInput): string {
   const params = new URLSearchParams({
-    port: String(port),
-    projectName,
+    port: String(input.port),
+    projectName: input.projectName,
   });
-  if (authPathEnc && authPathEnc.length > 0) {
-    params.set('ap', authPathEnc);
+  if (input.authPathEnc && input.authPathEnc.length > 0) {
+    params.set('ap', input.authPathEnc);
   }
-  if (osType && osType.length > 0) {
-    params.set('ot', osType);
+  if (input.osType && input.osType.length > 0) {
+    params.set('ot', input.osType);
   }
   // Machine identity, shared with the runner installed on this machine. It is not a secret and is
   // only used to bind the agent to the runner that can actually reach this workspace.
-  if (machineId && machineId.length > 0) {
-    params.set('mid', machineId);
+  if (input.machineId && input.machineId.length > 0) {
+    params.set('mid', input.machineId);
   }
   // The web page echoes this back through the callback; without it the local
   // server cannot tell this login apart from one someone else started.
-  if (state && state.length > 0) {
-    params.set('state', state);
+  if (input.state && input.state.length > 0) {
+    params.set('state', input.state);
+  }
+  if (input.codeChallenge && input.codeChallenge.length > 0) {
+    params.set('code_challenge', input.codeChallenge);
+    params.set('flow', 'setup');
   }
   return `${AUTH_BASE_URL}/cli/authorize?${params.toString()}`;
 }
@@ -323,33 +341,6 @@ async function fetchConventionTemplate(
   }
 
   return content;
-}
-
-/**
- * Hand the agent key back at the end of a personal-token init.
- *
- * The browser round trip mints a `key_` no matter which auth mode was asked
- * for — it is the only credential that can read the convention template. On the
- * personal-token path that key is never written to disk, so leaving it live
- * would mean a long-lived secret the user cannot see, use or cancel. The agent
- * config itself stays: it is the project's record of this machine, and only its
- * credential is the liability.
- */
-async function revokeInitAgentKey(
-  authResult: { projectId: string; configId: string; apiKey: string },
-  apiUrl: string,
-): Promise<boolean> {
-  try {
-    await httpClient.delete(
-      `${apiUrl}/api/projects/${authResult.projectId}/agent-configs/${authResult.configId}/api-keys`,
-      { headers: buildAuthHeaders(authResult.apiKey) },
-    );
-    return true;
-  } catch {
-    // Not fatal: init has everything it needs, and the caller warns instead so
-    // the user can revoke it from the web app.
-    return false;
-  }
 }
 
 async function promptAgentFileSelection(): Promise<string[]> {
@@ -798,25 +789,261 @@ export async function executeInitCommand(options?: InitOptions): Promise<InitRes
   return withCommandContext('init', () => executeInitCommandWithContext(options));
 }
 
+/**
+ * Wait for the browser round trip without losing Ctrl+C.
+ *
+ * Shared by both auth paths so the cancel handling — SIGINT plus the raw-mode
+ * ^C read a spinner would otherwise swallow — exists exactly once.
+ */
+async function waitForBrowserCallback<T>(
+  authContext: AuthServerResult<T>,
+  spinner: ReturnType<typeof createSpinner>,
+): Promise<T> {
+  let restored = false;
+
+  // Runs on every exit — success, timeout, or server error. Leaving it on the
+  // success path only meant a failed init handed the shell back in raw mode,
+  // with input no longer echoing until the user typed `reset`.
+  const restoreTerminal = (): void => {
+    if (restored) {
+      return;
+    }
+    restored = true;
+
+    process.removeListener('SIGINT', onSigint);
+    if (process.stdin.isTTY) {
+      process.stdin.setRawMode(false);
+      process.stdin.pause();
+      process.stdin.removeListener('data', onKeypress);
+    }
+  };
+
+  function onSigint(): void {
+    restoreTerminal();
+    spinner?.fail('Init cancelled.');
+    if (authContext.server.listening) {
+      authContext.server.close();
+    }
+    process.exit(0);
+  }
+
+  function onKeypress(key: Buffer): void {
+    if (key[0] === 0x03) {
+      onSigint();
+    }
+  }
+
+  process.on('SIGINT', onSigint);
+
+  if (process.stdin.isTTY) {
+    process.stdin.setRawMode(true);
+    process.stdin.resume();
+    process.stdin.on('data', onKeypress);
+  }
+
+  try {
+    return await authContext.waitForCallback();
+  } finally {
+    restoreTerminal();
+  }
+}
+
+type SetupContext = {
+  cwd: string;
+  projectName: string;
+  apiUrl: string;
+  configPath: string;
+  conventionPath: string;
+  authPathEnc: string | undefined;
+};
+
+type SetupOutcome = {
+  authUrl: string;
+  teamId: string;
+  projectId: string;
+  agentName: string;
+  seedPlanId: string | null;
+  personalLogin?: OAuthInitResult['personalLogin'];
+};
+
+/**
+ * The default path: one browser screen, no agent API key, one convention write.
+ *
+ * The browser returns an authorization code plus the connection identifiers, so
+ * the second round trip that used to run here (`performPersonalTokenLogin`) is
+ * gone, and with it the `key_` that only ever existed to read the convention
+ * template once. `agentteams auth login` still owns that helper for the
+ * project-less login.
+ */
+async function runUnifiedSetup(context: SetupContext): Promise<SetupOutcome> {
+  const pkce = createPkcePair();
+
+  let server;
+  try {
+    server = await startUnifiedSetupServer({ state: createAuthState() });
+  } catch (error) {
+    throw new Error(`Failed to start local OAuth server: ${error instanceof Error ? error.message : String(error)}`);
+  }
+
+  const authUrl = buildAuthorizeUrl({
+    port: server.port,
+    projectName: context.projectName,
+    authPathEnc: context.authPathEnc,
+    osType: detectOsType(),
+    state: server.state,
+    machineId: readOrCreateMachineId() ?? undefined,
+    codeChallenge: pkce.challenge,
+  });
+  await tryOpenBrowser(authUrl);
+
+  const authSpinner = createSpinner('Waiting for authentication... (Ctrl+C to cancel)');
+
+  try {
+    const callback = await waitForBrowserCallback(server, authSpinner);
+    authSpinner?.succeed();
+
+    if (isUnifiedSetupMetadataMissing(callback)) {
+      throw new Error(callback.legacyAgentKeyIssued ? SETUP_LEGACY_AGENT_KEY_HINT : SETUP_METADATA_MISSING_HINT);
+    }
+
+    const setup: UnifiedSetupResult = callback;
+
+    // Storing the credential comes before `saveConfig` on purpose: a login that
+    // cannot be kept throws here, so init stops rather than leaving a project
+    // configured for a credential nothing can find.
+    const client = getPersonalTokenClient(context.apiUrl);
+    const session = await client.exchangeAuthorizationCode({
+      code: setup.code,
+      codeVerifier: pkce.verifier,
+      // Must match the redirect the web registered the code against.
+      redirectUri: `http://localhost:${server.port}/callback`,
+    });
+
+    saveConfig(context.configPath, toConfig(setup, context.apiUrl));
+
+    // The identifiers are passed explicitly rather than re-read from disk: this
+    // command may run against a `cwd` that is not `process.cwd()`, and the
+    // config resolver only ever looks at the latter.
+    const runtimeConfig = await loadConfigWithCredential({
+      teamId: setup.teamId,
+      projectId: setup.projectId,
+      apiUrl: context.apiUrl,
+      authMode: 'personal-token',
+    });
+
+    // Falling back to a bare `conventionDownload()` here would undo the sentence
+    // above: with no config passed it re-resolves the project from
+    // `process.cwd()`, so an `init --cwd` (a worktree bootstrap included) would
+    // quietly pull conventions for whichever project the shell happens to sit
+    // in. Fail instead — this only happens if credential resolution regressed.
+    if (!runtimeConfig) {
+      throw new Error(
+        'Signed in, but the stored credential could not be read back, so the convention template was not downloaded. ' +
+          'Check `agentteams auth status`, then run `agentteams convention download` in this folder.',
+      );
+    }
+
+    // The convention template is now written by `conventionDownload` alone —
+    // exactly one write of `.agentteams/convention.md` per init — using the
+    // agent this setup actually created instead of "whichever config is first".
+    await conventionDownload({
+      cwd: context.cwd,
+      agentConfigId: setup.configId,
+      config: runtimeConfig,
+    });
+
+    return {
+      authUrl,
+      teamId: setup.teamId,
+      projectId: setup.projectId,
+      agentName: setup.agentName,
+      seedPlanId: setup.seedPlanId ?? null,
+      personalLogin: {
+        email: session.identity.email,
+        nickname: session.identity.nickname,
+        persisted: client.state().persisted,
+      },
+    };
+  } catch (error) {
+    authSpinner?.fail();
+    if (server.server.listening) {
+      server.server.close();
+    }
+    throw error;
+  }
+}
+
+/**
+ * The explicit `--auth api-key` compatibility path, unchanged.
+ *
+ * It keeps the legacy authorize URL (no `flow=setup`, no `code_challenge`), the
+ * legacy callback payload with its `key_`, and the direct convention write. CI
+ * users depend on this shape, so it is isolated from the default path rather
+ * than sharing a branch with it.
+ */
+async function runLegacyApiKeySetup(context: SetupContext): Promise<SetupOutcome> {
+  let authContext;
+  try {
+    authContext = await startLocalAuthServer({ state: createAuthState() });
+  } catch (error) {
+    throw new Error(`Failed to start local OAuth server: ${error instanceof Error ? error.message : String(error)}`);
+  }
+
+  const authUrl = buildAuthorizeUrl({
+    port: authContext.port,
+    projectName: context.projectName,
+    authPathEnc: context.authPathEnc,
+    osType: detectOsType(),
+    state: authContext.state,
+    machineId: readOrCreateMachineId() ?? undefined,
+  });
+  await tryOpenBrowser(authUrl);
+
+  const authSpinner = createSpinner('Waiting for authentication... (Ctrl+C to cancel)');
+
+  try {
+    const authResult = await waitForBrowserCallback(authContext, authSpinner);
+    authSpinner?.succeed();
+
+    const runtimeConfig: Config = {
+      teamId: authResult.teamId,
+      projectId: authResult.projectId,
+      apiKey: authResult.apiKey,
+      apiUrl: context.apiUrl,
+    };
+    const conventionContent = await withSpinner('Fetching convention template...', () =>
+      fetchConventionTemplate(authResult, context.apiUrl),
+    );
+
+    saveLegacyApiKeyConfig(context.configPath, toLegacyApiKeyConfig(authResult, context.apiUrl));
+    writeFileSync(context.conventionPath, conventionContent, 'utf-8');
+    await conventionDownload({ cwd: context.cwd, config: runtimeConfig });
+
+    return {
+      authUrl,
+      teamId: authResult.teamId,
+      projectId: authResult.projectId,
+      agentName: authResult.agentName,
+      seedPlanId: authResult.seedPlanId ?? null,
+    };
+  } catch (error) {
+    authSpinner?.fail();
+    if (authContext.server.listening) {
+      authContext.server.close();
+    }
+    throw error;
+  }
+}
+
 async function executeInitCommandWithContext(options?: InitOptions): Promise<InitResult> {
   const cwd = resolve(options?.cwd ?? process.cwd());
-  // Only an explicit compatibility request persists the callback's agent key.
+  // Only an explicit compatibility request goes through the agent-key round trip.
   const authMode: AuthMode = options?.authMode === 'api-key' ? 'api-key' : 'personal-token';
   const worktreeResult = bootstrapLinkedWorktree(cwd);
   if (worktreeResult) return worktreeResult;
 
   const configPath = join(cwd, CONFIG_DIR, CONFIG_FILE);
   const conventionPath = join(cwd, CONFIG_DIR, CONVENTION_FILE);
-
-  const projectName = basename(cwd);
-
-  let authContext;
-
-  try {
-    authContext = await startLocalAuthServer({ state: createAuthState() });
-  } catch (error) {
-    throw new Error(`Failed to start local OAuth server: ${error instanceof Error ? error.message : String(error)}`);
-  }
 
   let authPathEnc: string | undefined;
   try {
@@ -825,148 +1052,55 @@ async function executeInitCommandWithContext(options?: InitOptions): Promise<Ini
     authPathEnc = undefined;
   }
 
-  const authUrl = buildAuthorizeUrl(
-    authContext.port,
-    projectName,
+  const context: SetupContext = {
+    cwd,
+    projectName: basename(cwd),
+    apiUrl: resolveApiUrl(),
+    configPath,
+    conventionPath,
     authPathEnc,
-    detectOsType(),
-    authContext.state,
-    readOrCreateMachineId() ?? undefined,
-  );
-  await tryOpenBrowser(authUrl);
-
-  const authSpinner = createSpinner('Waiting for authentication... (Ctrl+C to cancel)');
-
-  const cleanup = () => {
-    if (authContext.server.listening) {
-      authContext.server.close();
-    }
   };
 
+  let setup: SetupOutcome;
   try {
-    const authResult = await new Promise<Awaited<ReturnType<typeof authContext.waitForCallback>>>((resolve, reject) => {
-      const onSigint = () => {
-        authSpinner?.fail('Init cancelled.');
-        cleanup();
-        process.exit(0);
-      };
-
-      process.on('SIGINT', onSigint);
-
-      if (process.stdin.isTTY) {
-        process.stdin.setRawMode(true);
-        process.stdin.resume();
-        process.stdin.on('data', (key: Buffer) => {
-          if (key[0] === 0x03) {
-            process.stdin.setRawMode(false);
-            process.stdin.pause();
-            onSigint();
-          }
-        });
-      }
-
-      authContext
-        .waitForCallback()
-        .then((result) => {
-          process.removeListener('SIGINT', onSigint);
-          if (process.stdin.isTTY) {
-            process.stdin.setRawMode(false);
-            process.stdin.pause();
-            process.stdin.removeAllListeners('data');
-          }
-          resolve(result);
-        })
-        .catch(reject);
-    });
-
-    authSpinner?.succeed();
-    const apiUrl = resolveApiUrl();
-    const runtimeConfig: Config = {
-      teamId: authResult.teamId,
-      projectId: authResult.projectId,
-      apiKey: authResult.apiKey,
-      apiUrl,
-    };
-    const conventionContent = await withSpinner('Fetching convention template...', () =>
-      fetchConventionTemplate(authResult, apiUrl),
-    );
-
-    // The project is known now, so the personal login can run before anything is
-    // written: a failed login must not leave a config with no usable credential.
-    // A login that cannot be stored throws here, which is the point — init stops
-    // before `saveConfig` rather than leaving a half-configured project behind.
-    let personalLogin: OAuthInitResult['personalLogin'];
-    const warnings: string[] = [];
-    if (authMode === 'personal-token') {
-      const outcome = await performPersonalTokenLogin({ apiUrl, projectName });
-      personalLogin = {
-        email: outcome.identity.email,
-        nickname: outcome.identity.nickname,
-        persisted: outcome.persisted,
-      };
-    }
-
-    if (authMode === 'api-key') {
-      saveLegacyApiKeyConfig(configPath, toLegacyApiKeyConfig(authResult, apiUrl));
-    } else {
-      saveConfig(configPath, toConfig(authResult, apiUrl));
-    }
-    writeFileSync(conventionPath, conventionContent, 'utf-8');
-    await conventionDownload({ cwd, config: runtimeConfig });
-
-    // Last use of the agent key is the convention download above.
-    let agentKeyRevoked: boolean | undefined;
-    if (authMode === 'personal-token') {
-      agentKeyRevoked = await revokeInitAgentKey(authResult, apiUrl);
-      if (!agentKeyRevoked) {
-        warnings.push(
-          `The agent key created for "${authResult.agentName}" could not be revoked and is still valid. ` +
-            'Revoke it in the AgentTeams web app (project settings → agents) — it was never written to this repository.',
-        );
-      }
-    }
-
-    ensureGitignore(cwd);
-    const selectedFiles = await promptAgentFileSelection();
-    if (selectedFiles.includes('GEMINI.md')) {
-      ensureGeminiIgnore(cwd);
-    }
-    const agentFiles = generateAgentEntryPointFiles(cwd, selectedFiles);
-
-    const seedPlanId = authResult.seedPlanId ?? null;
-    const seedPlanWebUrl = seedPlanId ? `${AUTH_BASE_URL.replace(/\/+$/, '')}/go?type=plan&id=${seedPlanId}` : null;
-
-    // A git-root project shares one hooks directory with all its worktrees, so
-    // installing the managed post-checkout hook here lets future `git worktree
-    // add` runs bootstrap conventions automatically (via `agentteams init`).
-    // Non-git roots (a parent folder grouping member repos) have no git-common
-    // dir; `agentteams doctor` owns their per-member hooks instead, so skip.
-    let postCheckoutHook: EnsurePostCheckoutHookResult | undefined;
-    if (resolveGitTopLevel(cwd) !== null) {
-      postCheckoutHook = ensurePostCheckoutHook(cwd);
-    }
-
-    return {
-      success: true,
-      authUrl,
-      configPath,
-      conventionPath,
-      teamId: authResult.teamId,
-      projectId: authResult.projectId,
-      agentName: authResult.agentName,
-      agentFiles,
-      seedPlanId,
-      seedPlanWebUrl,
-      postCheckoutHook,
-      authMode,
-      ...(personalLogin ? { personalLogin } : {}),
-      ...(agentKeyRevoked === undefined ? {} : { agentKeyRevoked }),
-      ...(warnings.length > 0 ? { warning: warnings.join(' ') } : {}),
-    };
+    setup = authMode === 'api-key' ? await runLegacyApiKeySetup(context) : await runUnifiedSetup(context);
   } catch (error) {
-    authSpinner?.fail();
-    cleanup();
-
     throw new Error(`Initialization failed: ${error instanceof Error ? error.message : String(error)}`);
   }
+
+  ensureGitignore(cwd);
+  const selectedFiles = await promptAgentFileSelection();
+  if (selectedFiles.includes('GEMINI.md')) {
+    ensureGeminiIgnore(cwd);
+  }
+  const agentFiles = generateAgentEntryPointFiles(cwd, selectedFiles);
+
+  const seedPlanId = setup.seedPlanId;
+  const seedPlanWebUrl = seedPlanId ? `${AUTH_BASE_URL.replace(/\/+$/, '')}/go?type=plan&id=${seedPlanId}` : null;
+
+  // A git-root project shares one hooks directory with all its worktrees, so
+  // installing the managed post-checkout hook here lets future `git worktree
+  // add` runs bootstrap conventions automatically (via `agentteams init`).
+  // Non-git roots (a parent folder grouping member repos) have no git-common
+  // dir; `agentteams doctor` owns their per-member hooks instead, so skip.
+  let postCheckoutHook: EnsurePostCheckoutHookResult | undefined;
+  if (resolveGitTopLevel(cwd) !== null) {
+    postCheckoutHook = ensurePostCheckoutHook(cwd);
+  }
+
+  return {
+    success: true,
+    authUrl: setup.authUrl,
+    configPath,
+    conventionPath,
+    teamId: setup.teamId,
+    projectId: setup.projectId,
+    agentName: setup.agentName,
+    agentFiles,
+    seedPlanId,
+    seedPlanWebUrl,
+    postCheckoutHook,
+    authMode,
+    ...(setup.personalLogin ? { personalLogin: setup.personalLogin } : {}),
+  };
 }
