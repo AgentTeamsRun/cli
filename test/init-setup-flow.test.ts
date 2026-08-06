@@ -132,6 +132,8 @@ function mockConventionEndpoints(axios: MockedAxios): { requestedUrls: string[] 
     if (url.endsWith('/convention')) return { data: { data: { content: CONVENTION_TEMPLATE } } };
     if (url.endsWith('/download-all')) return { data: { data: [] } };
     if (url.endsWith('/agent-configs')) return { data: { data: [{ id: 'first-listed-config' }] } };
+    // freshness 검사(`convention status`)가 manifest와 대조하는 서버 목록.
+    if (url.endsWith('/conventions')) return { data: { data: [], meta: { totalPages: 1 } } };
     throw new Error(`unexpected GET ${url}`);
   }) as never);
   return { requestedUrls };
@@ -232,7 +234,12 @@ describe('init unified setup (new CLI x new web)', () => {
 });
 
 describe('init configured-project fast path', () => {
-  function createConfiguredProject(): string {
+  /**
+   * `synced: true`는 이미 `convention download`를 한 번 돌린 프로젝트다.
+   * manifest가 없으면 freshness 검사가 "변경 없음"으로 즉시 반환하므로, 두 상태를
+   * 구분하지 않으면 컨벤션이 하나도 없는 프로젝트를 READY로 보고하게 된다.
+   */
+  function createConfiguredProject({ synced = true }: { synced?: boolean } = {}): string {
     const cwd = createTempProject();
     mkdirSync(join(cwd, '.agentteams'), { recursive: true });
     writeFileSync(
@@ -247,6 +254,18 @@ describe('init configured-project fast path', () => {
     );
     writeFileSync(join(cwd, '.agentteams', 'convention.md'), '# Existing convention\n', 'utf-8');
     writeFileSync(join(cwd, 'CLAUDE.md'), '# Existing instructions\n', 'utf-8');
+    if (synced) {
+      writeFileSync(
+        join(cwd, '.agentteams', 'conventions.manifest.json'),
+        JSON.stringify({
+          version: 1,
+          generatedAt: '2026-08-06T00:00:00.000Z',
+          platformGuidesHash: 'aggregate-hash',
+          entries: [],
+        }),
+        'utf-8',
+      );
+    }
     return cwd;
   }
 
@@ -256,7 +275,7 @@ describe('init configured-project fast path', () => {
     const configPath = join(cwd, '.agentteams', 'config.json');
     const configBefore = readFileSync(configPath, 'utf-8');
     const postSpy = jest.spyOn(axios, 'post');
-    const getSpy = jest.spyOn(axios, 'get');
+    const { requestedUrls } = mockConventionEndpoints(axios);
     const { urls, restore } = captureAuthorizeUrls();
 
     try {
@@ -278,16 +297,40 @@ describe('init configured-project fast path', () => {
         'convention-sync',
         'local-adapters',
       ]);
-      expect(result.readiness.every(({ status }) => ['READY', 'DEGRADED', 'SKIPPED'].includes(status))).toBe(true);
+      expect(result.readiness.find(({ stage }) => stage === 'convention-sync')?.status).toBe('READY');
       for (const step of result.readiness.filter(({ status }) => status === 'DEGRADED')) {
         expect(step.retryCommand).toEqual(expect.any(String));
         expect(step.retryCommand?.length).toBeGreaterThan(0);
       }
       expect(urls).toHaveLength(0);
       expect(postSpy).not.toHaveBeenCalled();
-      expect(getSpy).not.toHaveBeenCalled();
+      // 이미 동기화된 프로젝트는 freshness 조회만 하고 다운로드는 건드리지 않는다.
+      expect(requestedUrls.some((url) => url.endsWith('/download-all'))).toBe(false);
+      expect(requestedUrls.some((url) => url.endsWith('/api/platform/guides'))).toBe(false);
       expect(readFileSync(configPath, 'utf-8')).toBe(configBefore);
       expect(existsSync(join(cwd, 'CLAUDE-example.md'))).toBe(false);
+    } finally {
+      restore();
+    }
+  });
+
+  test('downloads conventions when the project has never synced, instead of reporting READY', async () => {
+    const { axios, executeInitCommand } = await loadInitModules();
+    const cwd = createConfiguredProject({ synced: false });
+    const { requestedUrls } = mockConventionEndpoints(axios);
+    const { restore } = captureAuthorizeUrls();
+
+    try {
+      const result = await executeInitCommand({ cwd });
+      if (!('mode' in result) || result.mode !== 'configured-project') {
+        throw new Error('Expected the configured-project fast path.');
+      }
+
+      expect(result.conventionError).toBeUndefined();
+      expect(result.conventionsUpdated).toBe(true);
+      expect(result.readiness.find(({ stage }) => stage === 'convention-sync')?.status).toBe('READY');
+      expect(requestedUrls.some((url) => url.endsWith('/download-all'))).toBe(true);
+      expect(existsSync(join(cwd, '.agentteams', 'conventions.manifest.json'))).toBe(true);
     } finally {
       restore();
     }
@@ -313,11 +356,6 @@ describe('init configured-project fast path', () => {
   test('keeps the binding ready and reports only convention sync as degraded when freshness fails', async () => {
     const { axios, executeInitCommand } = await loadInitModules();
     const cwd = createConfiguredProject();
-    writeFileSync(
-      join(cwd, '.agentteams', 'conventions.manifest.json'),
-      JSON.stringify({ version: 1, generatedAt: '2026-08-06T00:00:00.000Z', platformGuidesHash: 'old', entries: [] }),
-      'utf-8',
-    );
     jest.spyOn(axios, 'get').mockRejectedValueOnce(new Error('network unavailable'));
 
     const result = await executeInitCommand({ cwd });

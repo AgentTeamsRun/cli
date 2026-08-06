@@ -157,10 +157,7 @@ describe('init helpers', () => {
 
     try {
       expect(detectInitExecutionContext(worktreeDir)).toMatchObject({ kind: 'linked-worktree' });
-      expect(detectInitExecutionContext(configuredDir)).toMatchObject({
-        kind: 'configured-project',
-        credentialPlan: { source: 'personal-token', optedIn: true },
-      });
+      expect(detectInitExecutionContext(configuredDir)).toMatchObject({ kind: 'configured-project' });
       expect(detectInitExecutionContext(newProjectDir)).toMatchObject({ kind: 'new-project' });
 
       expect(readdirSync(worktreeDir, { recursive: true }).map(String).sort()).toEqual(beforeWorktree);
@@ -183,6 +180,39 @@ describe('init helpers', () => {
     );
 
     expect(detectInitExecutionContext(configuredDir, 'api-key')).toMatchObject({ kind: 'new-project' });
+  });
+
+  test('detectInitExecutionContext never reuses an ancestor or global binding for a new folder', () => {
+    const ancestorDir = mkdtempSync(join(tmpdir(), 'agentteams-init-ancestor-test-'));
+    tempDirs.push(ancestorDir);
+    mkdirSync(join(ancestorDir, '.agentteams'), { recursive: true });
+    writeFileSync(
+      join(ancestorDir, '.agentteams', 'config.json'),
+      JSON.stringify({ teamId: 'team-1', projectId: 'project-1', authMode: 'personal-token' }),
+      'utf-8',
+    );
+    const childDir = join(ancestorDir, 'new-folder');
+    mkdirSync(childDir, { recursive: true });
+
+    // A plain subfolder of a configured workspace is a new project: init writes
+    // its config into cwd, so classification must use the same scope.
+    expect(detectInitExecutionContext(childDir)).toMatchObject({ kind: 'new-project' });
+
+    // The same ancestor walk reaches ~/.agentteams/config.json, which is a
+    // command-level fallback and never a project binding.
+    expect(detectInitExecutionContext(childDir, undefined, ancestorDir)).toMatchObject({ kind: 'new-project' });
+    expect(detectInitExecutionContext(ancestorDir, undefined, ancestorDir)).toMatchObject({ kind: 'new-project' });
+  });
+
+  testPosix('detectInitExecutionContext keeps a configured repository subdirectory on the fast path', () => {
+    const { repositoryDir } = createRepository();
+    const packageDir = join(repositoryDir, 'packages', 'app');
+    mkdirSync(packageDir, { recursive: true });
+
+    // Repository-scoped lookup: every other command resolves the repository root
+    // config from a subdirectory, so init validating that same binding — instead
+    // of creating a nested project — is the consistent answer.
+    expect(detectInitExecutionContext(packageDir)).toMatchObject({ kind: 'configured-project' });
   });
 
   test('buildAuthorizeUrl includes authPathEnc and osType when provided', () => {

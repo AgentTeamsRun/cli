@@ -291,6 +291,32 @@ describe('doctor root preflight failures', () => {
     expect(existsSync(join(memberDir, '.agentteams'))).toBe(false);
   });
 
+  // The default `agentteams init` stores no key in the repository — the credential
+  // lives in the OS credential store — so demanding `apiKey` here would fail
+  // preflight for every project on the default auth path and skip the repair work
+  // entirely.
+  it('accepts a personal-login root config that stores no apiKey', async () => {
+    const rootDir = createRoot({
+      configBody: JSON.stringify({ teamId: 'team-1', projectId: 'project-1', authMode: 'personal-token' }),
+    });
+    const memberDir = addMemberRepo(rootDir, 'alpha');
+
+    const result = await executeDoctorCommand({ cwd: rootDir });
+
+    expect(result.status).toBe('READY');
+    expect(result.issues.map((issue) => issue.code)).not.toContain('root-config-incomplete');
+    expect(existsSync(join(memberDir, '.agentteams'))).toBe(true);
+  });
+
+  it('still requires apiKey when the project did not opt into a personal login', async () => {
+    const rootDir = createRoot({ configBody: JSON.stringify({ teamId: 'team-1', projectId: 'project-1' }) });
+
+    const result = await executeDoctorCommand({ cwd: rootDir });
+
+    expect(result.status).toBe('DEGRADED');
+    expect(result.issues.map((issue) => issue.code)).toContain('root-config-incomplete');
+  });
+
   it('rejects non-file root entry points instead of reporting READY', async () => {
     const rootDir = createRoot();
     const memberDir = addMemberRepo(rootDir, 'alpha');
@@ -309,7 +335,7 @@ describe('doctor root preflight failures', () => {
   });
 });
 
-function createGitRootProject(): string {
+function createGitRootProject(options?: { configBody?: string }): string {
   const repoDir = join(createTempDir(), 'repo');
   mkdirSync(repoDir, { recursive: true });
   execFileSync('git', ['init', '-b', 'main'], { cwd: repoDir });
@@ -323,7 +349,7 @@ function createGitRootProject(): string {
   mkdirSync(join(repoDir, '.agentteams'), { recursive: true });
   writeFileSync(
     join(repoDir, '.agentteams', 'config.json'),
-    JSON.stringify({ teamId: 'team-1', projectId: 'project-1', apiKey: 'api-key-1' }),
+    options?.configBody ?? JSON.stringify({ teamId: 'team-1', projectId: 'project-1', apiKey: 'api-key-1' }),
     { encoding: 'utf-8', mode: CONFIG_FILE_MODE },
   );
   writeFileSync(join(repoDir, '.agentteams', 'convention.md'), '# Root convention\n', 'utf-8');
@@ -352,6 +378,22 @@ describe('doctor on a git root project', () => {
 
     expect(second.status).toBe('READY');
     expect(second.changedCount).toBe(0);
+  });
+
+  // `init`'s configured-project fast path reports `local-adapters` straight from
+  // this result. A preflight that rejects the default (keyless) config would make
+  // that step permanently DEGRADED and leave the hook uninstalled.
+  it('installs the worktree bootstrap hook for a personal-login project without an apiKey', async () => {
+    const repoDir = createGitRootProject({
+      configBody: JSON.stringify({ teamId: 'team-1', projectId: 'project-1', authMode: 'personal-token' }),
+    });
+
+    const result = await executeDoctorCommand({ cwd: repoDir });
+
+    expect(result.status).toBe('READY');
+    expect(result.rootHook).toBe('ready');
+    expect(result.issues.map((issue) => issue.code)).not.toContain('root-config-incomplete');
+    expect(existsSync(join(repoDir, '.git', 'hooks', 'post-checkout'))).toBe(true);
   });
 
   it('leaves member repo management alone for a git root project', async () => {

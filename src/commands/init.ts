@@ -15,6 +15,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
+import { homedir } from 'node:os';
 import { constants, createCipheriv, publicEncrypt, randomBytes } from 'node:crypto';
 import { multiselect, isCancel, cancel } from '@clack/prompts';
 import httpClient from '../utils/httpClient.js';
@@ -35,8 +36,6 @@ import {
   findProjectConfig,
   loadProjectConfig,
   loadConfigWithCredential,
-  planCredential,
-  type CredentialPlan,
   type LegacyApiKeyPersistedConfig,
   type PersistedConfig,
   saveConfig,
@@ -45,7 +44,12 @@ import {
 import { getPersonalTokenClient } from '../auth/personalTokenClient.js';
 import { createSpinner, withSpinner } from '../utils/spinner.js';
 import { withCommandContext } from '../utils/commandContext.js';
-import { conventionDownload, conventionStatus, type ConventionStatusResult } from './convention.js';
+import {
+  conventionDownload,
+  conventionStatus,
+  CONVENTION_MANIFEST_FILE,
+  type ConventionStatusResult,
+} from './convention.js';
 import { executeDoctorCommand, type DoctorResult } from './doctor.js';
 import type { AuthMode, Config } from '../types/index.js';
 import { resolveGitTopLevel, resolveMainCheckoutRoot } from '../utils/git.js';
@@ -176,7 +180,6 @@ export type InitExecutionContext = {
   kind: InitExecutionKind;
   configPath: string | null;
   config: Partial<Config> | null;
-  credentialPlan: CredentialPlan;
 };
 
 function isSshEnvironment(): boolean {
@@ -494,39 +497,89 @@ function isConfiguredMainCheckout(sourcePath: string): boolean {
   }
 }
 
-function isLinkedWorktreeWithConfiguredMainCheckout(cwd: string): boolean {
+/**
+ * The one precondition set that says "this directory is a linked worktree whose
+ * main checkout is already configured".
+ *
+ * `bootstrapLinkedWorktree` and the read-only classifier both need this answer,
+ * and a copy in each would let them drift: the classifier reporting
+ * `linked-worktree` while the bootstrap returns null drops init into the full
+ * browser OAuth flow with no warning.
+ */
+function resolveLinkedWorktreeSource(cwd: string): { worktreePath: string; sourcePath: string } | null {
   let worktreePath: string;
   try {
     worktreePath = canonicalizePath(resolve(cwd));
   } catch {
-    return false;
+    return null;
   }
 
-  if (resolveGitTopLevel(worktreePath) !== worktreePath) return false;
+  if (resolveGitTopLevel(worktreePath) !== worktreePath) return null;
 
   const mainCheckoutRoot = resolveMainCheckoutRoot(worktreePath);
-  if (!mainCheckoutRoot) return false;
+  if (!mainCheckoutRoot) return null;
 
   const sourcePath = join(mainCheckoutRoot, CONFIG_DIR);
-  return existsSync(sourcePath) && isConfiguredMainCheckout(sourcePath);
+  if (!existsSync(sourcePath) || !isConfiguredMainCheckout(sourcePath)) return null;
+
+  return { worktreePath, sourcePath };
+}
+
+function toComparablePath(path: string): string {
+  try {
+    return canonicalizePath(path);
+  } catch {
+    return path;
+  }
+}
+
+/**
+ * Does the discovered config actually belong to the directory init was asked to
+ * initialize?
+ *
+ * `findProjectConfig` walks ancestors — outside a repository all the way to the
+ * filesystem root, which includes the global `~/.agentteams/config.json` that
+ * `mergeConfigSources` reads as a fallback. The new-project path, in contrast,
+ * always writes to `join(cwd, CONFIG_DIR, CONFIG_FILE)`. Reusing an ancestor's
+ * binding as a "configured project" would therefore make `init` in a fresh
+ * folder a silent no-op that reports someone else's project.
+ */
+function ownsDiscoveredConfig(resolvedCwd: string, configPath: string, userHomeDir: string): boolean {
+  const configRoot = toComparablePath(dirname(dirname(configPath)));
+
+  // The global config is a fallback for commands, never a project binding.
+  if (configRoot === toComparablePath(userHomeDir)) return false;
+
+  const owners = new Set([toComparablePath(resolvedCwd)]);
+  const repositoryRoot = resolveGitTopLevel(resolvedCwd);
+  if (repositoryRoot) owners.add(toComparablePath(repositoryRoot));
+
+  return owners.has(configRoot);
 }
 
 /**
  * Classify init before it opens a browser or materializes any local adapters.
  *
- * This resolver is intentionally read-only. The linked-worktree branch calls
- * `bootstrapLinkedWorktree` only after classification, while the configured
- * project branch can reuse the credential decision without consulting a
- * keychain or refreshing a token.
+ * This resolver is intentionally read-only: the linked-worktree branch calls
+ * `bootstrapLinkedWorktree` and the configured-project branch resolves its
+ * credential only after classification, so a classification never touches a
+ * keychain, a token, or the filesystem.
+ *
+ * `userHomeDir` is injectable for the same reason as in
+ * `getConfigurationNotFoundMessage`: `os.homedir()` does not follow a test's
+ * `process.env.HOME`, so the global-config rule would be untestable otherwise.
  */
-export function detectInitExecutionContext(cwd: string, explicitAuthMode?: AuthMode): InitExecutionContext {
+export function detectInitExecutionContext(
+  cwd: string,
+  explicitAuthMode?: AuthMode,
+  userHomeDir: string = homedir(),
+): InitExecutionContext {
   const resolvedCwd = resolve(cwd);
   const configPath = findProjectConfig(resolvedCwd);
   const config = configPath ? loadProjectConfig(resolvedCwd) : null;
-  const credentialPlan = planCredential(config ?? undefined);
 
-  if (isLinkedWorktreeWithConfiguredMainCheckout(resolvedCwd)) {
-    return { kind: 'linked-worktree', configPath, config, credentialPlan };
+  if (resolveLinkedWorktreeSource(resolvedCwd)) {
+    return { kind: 'linked-worktree', configPath, config };
   }
 
   const hasProjectBinding =
@@ -538,9 +591,11 @@ export function detectInitExecutionContext(cwd: string, explicitAuthMode?: AuthM
   // An explicit --auth choice means the caller intends to reconnect instead of
   // validating the existing binding through the configured-project fast path.
   const kind: InitExecutionKind =
-    configPath && hasProjectBinding && !explicitAuthMode ? 'configured-project' : 'new-project';
+    configPath && hasProjectBinding && ownsDiscoveredConfig(resolvedCwd, configPath, userHomeDir) && !explicitAuthMode
+      ? 'configured-project'
+      : 'new-project';
 
-  return { kind, configPath, config, credentialPlan };
+  return { kind, configPath, config };
 }
 
 /**
@@ -786,20 +841,9 @@ function isBrokenSymbolicLink(path: string): boolean {
 }
 
 export function bootstrapLinkedWorktree(cwd: string): WorktreeInitResult | null {
-  let worktreePath: string;
-  try {
-    worktreePath = canonicalizePath(resolve(cwd));
-  } catch {
-    return null;
-  }
-
-  if (resolveGitTopLevel(worktreePath) !== worktreePath) return null;
-
-  const mainCheckoutRoot = resolveMainCheckoutRoot(worktreePath);
-  if (!mainCheckoutRoot) return null;
-
-  const sourcePath = join(mainCheckoutRoot, CONFIG_DIR);
-  if (!existsSync(sourcePath) || !isConfiguredMainCheckout(sourcePath)) return null;
+  const linkedWorktree = resolveLinkedWorktreeSource(cwd);
+  if (!linkedWorktree) return null;
+  const { worktreePath, sourcePath } = linkedWorktree;
 
   // The convention root is the parent of the canonical .agentteams directory.
   // Following the canonical path resolves double links as well
@@ -1142,17 +1186,37 @@ async function runConfiguredProjectInit(
     );
   }
 
-  const runtimeConfig = await loadConfigWithCredential(projectConfig);
+  // Only the identifiers are forwarded as overrides. Handing the whole config
+  // document to `loadConfigWithCredential` would put it above the environment in
+  // `mergeConfigSources` (global → project → env → options), so AGENTTEAMS_*
+  // would be ignored on this path alone, and a leftover legacy `apiKey` would be
+  // read as an *explicit* key — skipping the migration warning and the refresh
+  // slot. `apiUrl` follows the same env-first rule as `resolveApiUrl()`.
+  const runtimeConfig = await loadConfigWithCredential({
+    teamId: projectConfig.teamId,
+    projectId: projectConfig.projectId,
+    apiUrl: normalizeApiUrl(process.env.AGENTTEAMS_API_URL || projectConfig.apiUrl || DEFAULT_API_URL),
+    ...(projectConfig.authMode ? { authMode: projectConfig.authMode } : {}),
+  });
   if (!runtimeConfig) {
     throw new Error("The existing project binding has no usable credential. Run 'agentteams auth login'.");
   }
+
+  // `checkConventionFreshness` reports "no changes" when the download manifest is
+  // absent, which is exactly the state of a project that has never synced. Left
+  // alone it would report READY while `.agentteams/convention.md` and
+  // `.agentteams/platform/*` — the rules every runner loads as always_on — are
+  // missing, so init treats that state as "sync required" instead.
+  const conventionDir = dirname(configPath);
+  const conventionsNeverSynced =
+    !existsSync(join(conventionDir, CONVENTION_MANIFEST_FILE)) || !existsSync(join(conventionDir, CONVENTION_FILE));
 
   let freshness: ConventionStatusResult | undefined;
   let conventionError: string | undefined;
   let conventionsUpdated = false;
   try {
     freshness = await conventionStatus({ cwd, config: runtimeConfig });
-    if (freshness.conventionUpdateAvailable) {
+    if (freshness.conventionUpdateAvailable || conventionsNeverSynced) {
       await conventionDownload({ cwd, config: runtimeConfig });
       conventionsUpdated = true;
     }

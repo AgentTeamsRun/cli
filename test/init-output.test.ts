@@ -207,6 +207,7 @@ describe('printInitResult', () => {
           configPath: '/project/.agentteams/config.json',
           conventionPath: '/project/.agentteams/convention.md',
           conventionsUpdated: false,
+          doctor: { status: 'NOT_APPLICABLE', issues: [] },
           readiness: [
             { stage: 'project-binding', status: 'READY', issues: [] },
             { stage: 'credential', status: 'READY', issues: [] },
@@ -228,6 +229,35 @@ describe('printInitResult', () => {
       expect(output).toContain('[SKIPPED] local-adapters');
       expect(warnings).toContain('[DEGRADED] convention-sync');
       expect(warnings).toContain('Retry: agentteams convention download');
+
+      warnSpy.mockRestore();
+    });
+
+    // 체크 표시와 바로 아래 readiness가 서로 다른 말을 하면, 로그를 훑는 사용자에게는
+    // 정상 완료로 읽힌다. 로컬 어댑터 줄은 doctor 판정을 그대로 따라야 한다.
+    it('doctor가 READY가 아니면 로컬 어댑터 체크 표시를 찍지 않는다', () => {
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+      const base = {
+        success: true,
+        mode: 'configured-project',
+        configPath: '/project/.agentteams/config.json',
+        conventionPath: '/project/.agentteams/convention.md',
+        conventionsUpdated: false,
+        readiness: [{ stage: 'local-adapters', status: 'DEGRADED', issues: [], retryCommand: 'agentteams doctor' }],
+      };
+
+      printInitResult({ ...base, doctor: { status: 'DEGRADED', issues: [] } }, 'human');
+
+      expect(captureOutput(logSpy)).not.toContain('✓ Local adapters checked');
+      expect(captureOutput(warnSpy)).toContain('Local adapters still need attention');
+
+      logSpy.mockClear();
+      warnSpy.mockClear();
+
+      printInitResult({ ...base, doctor: { status: 'READY', issues: [] } }, 'human');
+
+      expect(captureOutput(logSpy)).toContain('✓ Local adapters checked by agentteams doctor.');
 
       warnSpy.mockRestore();
     });

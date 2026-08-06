@@ -266,7 +266,14 @@ function validateRootPreflight(rootDir: string): DoctorIssue[] {
       severity: 'error',
     });
   } else {
-    const missingFields = ['teamId', 'projectId', 'apiKey'].filter(
+    // A personal-login project deliberately keeps no `apiKey` on disk — the
+    // credential lives in the OS credential store. Requiring one here would fail
+    // preflight for every project created by the default `agentteams init`, and
+    // `runGitRootDoctor` returns before `ensurePostCheckoutHook` on failure, so
+    // the worktree bootstrap hook would never be installed.
+    const requiredFields =
+      config.authMode === 'personal-token' ? ['teamId', 'projectId'] : ['teamId', 'projectId', 'apiKey'];
+    const missingFields = requiredFields.filter(
       (field) => typeof config[field] !== 'string' || (config[field] as string).length === 0,
     );
     if (missingFields.length > 0) {

@@ -123,13 +123,17 @@ program.name('agentteams').description('CLI tool for AgentTeams API').version(pk
 program
   .command('init')
   .description('Initialize AgentTeams CLI via OAuth')
+  // No commander `.default()` on purpose: init has to tell "the user asked for
+  // this credential" apart from "nothing was typed". A default would fill
+  // `options.auth` on every run, and `detectInitExecutionContext` reads a
+  // present value as an explicit relink request — which would make the
+  // configured-project fast path unreachable from the real CLI. The absent case
+  // is defaulted in `executeInitCommandWithContext`.
   .addOption(
     new Option(
       '--auth <mode>',
       'Credential to configure. `personal-token` (default) stores a rotating login in the OS credential store and refreshes itself; `api-key` writes a legacy agent key into .agentteams/config.json, which expires 30 days after issue and must be reissued by hand.',
-    )
-      .choices(['api-key', 'personal-token'])
-      .default('personal-token'),
+    ).choices(['api-key', 'personal-token']),
   )
   .option('--format <format>', 'Output format (json; defaults to human-readable view)')
   .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')

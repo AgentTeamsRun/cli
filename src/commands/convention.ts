@@ -20,7 +20,8 @@ const pkg = require('../../package.json') as { version: string };
 const CONVENTION_DIR = '.agentteams';
 const LEGACY_CONVENTION_DOWNLOAD_DIR = 'conventions';
 const CONVENTION_INDEX_FILE = 'convention.md';
-const CONVENTION_MANIFEST_FILE = 'conventions.manifest.json';
+/** Exported so `init` can tell "never downloaded" from "up to date" without a second copy of the name. */
+export const CONVENTION_MANIFEST_FILE = 'conventions.manifest.json';
 
 type ConventionCommandOptions = {
   cwd?: string;

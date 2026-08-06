@@ -148,7 +148,16 @@ export function printInitResult(result: unknown, format: InitOutputFormat): void
     } else {
       console.log('✓ Conventions/platform guides already up to date.');
     }
-    console.log(`✓ Local adapters checked by agentteams doctor.`);
+    // A checkmark the readiness list below immediately contradicts reads as
+    // "done" to anyone skimming the log, so the mark follows doctor's verdict.
+    const doctorStatus = result.doctor?.status;
+    if (doctorStatus === 'READY') {
+      console.log('✓ Local adapters checked by agentteams doctor.');
+    } else if (doctorStatus === 'DEGRADED') {
+      console.warn('⚠ Local adapters still need attention (agentteams doctor: DEGRADED).');
+    } else if (doctorStatus) {
+      console.warn(`⚠ Local adapters were not checked (agentteams doctor: ${doctorStatus}).`);
+    }
     printReadiness(result.readiness);
     return;
   }
