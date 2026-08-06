@@ -17,10 +17,13 @@ import { join } from 'node:path';
 import {
   bootstrapLinkedWorktree,
   buildAuthorizeUrl,
+  detectInitExecutionContext,
   detectOsType,
   executeInitCommand,
   type WorktreeInitResult,
 } from '../src/commands/init.js';
+import { detectAgentEntryPointFiles, parseAgentFilesOption } from '../src/utils/agentEntryPoints.js';
+import { hasLinkedGitWorktrees } from '../src/utils/git.js';
 import { isSamePath } from '../src/utils/path.js';
 
 const tempDirs: string[] = [];
@@ -131,8 +134,91 @@ afterEach(() => {
 });
 
 describe('init helpers', () => {
+  test('detectInitExecutionContext classifies linked worktree, configured project, and new project without writes', () => {
+    const originalApiKey = process.env.AGENTTEAMS_API_KEY;
+    delete process.env.AGENTTEAMS_API_KEY;
+    const { worktreeDir } = createRepository();
+    const configuredDir = mkdtempSync(join(tmpdir(), 'agentteams-init-configured-test-'));
+    const newProjectDir = mkdtempSync(join(tmpdir(), 'agentteams-init-new-test-'));
+    tempDirs.push(configuredDir, newProjectDir);
+    mkdirSync(join(configuredDir, '.agentteams'), { recursive: true });
+    writeFileSync(
+      join(configuredDir, '.agentteams', 'config.json'),
+      JSON.stringify({
+        teamId: 'team-1',
+        projectId: 'project-1',
+        apiUrl: 'https://api.agentteams.run',
+        authMode: 'personal-token',
+      }),
+      'utf-8',
+    );
+
+    const beforeWorktree = readdirSync(worktreeDir, { recursive: true }).map(String).sort();
+    const beforeConfigured = readdirSync(configuredDir, { recursive: true }).map(String).sort();
+    const beforeNewProject = readdirSync(newProjectDir, { recursive: true }).map(String).sort();
+
+    try {
+      expect(detectInitExecutionContext(worktreeDir)).toMatchObject({ kind: 'linked-worktree' });
+      expect(detectInitExecutionContext(configuredDir)).toMatchObject({ kind: 'configured-project' });
+      expect(detectInitExecutionContext(newProjectDir)).toMatchObject({ kind: 'new-project' });
+
+      expect(readdirSync(worktreeDir, { recursive: true }).map(String).sort()).toEqual(beforeWorktree);
+      expect(readdirSync(configuredDir, { recursive: true }).map(String).sort()).toEqual(beforeConfigured);
+      expect(readdirSync(newProjectDir, { recursive: true }).map(String).sort()).toEqual(beforeNewProject);
+    } finally {
+      if (originalApiKey === undefined) delete process.env.AGENTTEAMS_API_KEY;
+      else process.env.AGENTTEAMS_API_KEY = originalApiKey;
+    }
+  });
+
+  test('detectInitExecutionContext treats an explicit auth mode as a relink request', () => {
+    const configuredDir = mkdtempSync(join(tmpdir(), 'agentteams-init-relink-test-'));
+    tempDirs.push(configuredDir);
+    mkdirSync(join(configuredDir, '.agentteams'), { recursive: true });
+    writeFileSync(
+      join(configuredDir, '.agentteams', 'config.json'),
+      JSON.stringify({ teamId: 'team-1', projectId: 'project-1', authMode: 'personal-token' }),
+      'utf-8',
+    );
+
+    expect(detectInitExecutionContext(configuredDir, 'api-key')).toMatchObject({ kind: 'new-project' });
+  });
+
+  test('detectInitExecutionContext never reuses an ancestor or global binding for a new folder', () => {
+    const ancestorDir = mkdtempSync(join(tmpdir(), 'agentteams-init-ancestor-test-'));
+    tempDirs.push(ancestorDir);
+    mkdirSync(join(ancestorDir, '.agentteams'), { recursive: true });
+    writeFileSync(
+      join(ancestorDir, '.agentteams', 'config.json'),
+      JSON.stringify({ teamId: 'team-1', projectId: 'project-1', authMode: 'personal-token' }),
+      'utf-8',
+    );
+    const childDir = join(ancestorDir, 'new-folder');
+    mkdirSync(childDir, { recursive: true });
+
+    // A plain subfolder of a configured workspace is a new project: init writes
+    // its config into cwd, so classification must use the same scope.
+    expect(detectInitExecutionContext(childDir)).toMatchObject({ kind: 'new-project' });
+
+    // The same ancestor walk reaches ~/.agentteams/config.json, which is a
+    // command-level fallback and never a project binding.
+    expect(detectInitExecutionContext(childDir, undefined, ancestorDir)).toMatchObject({ kind: 'new-project' });
+    expect(detectInitExecutionContext(ancestorDir, undefined, ancestorDir)).toMatchObject({ kind: 'new-project' });
+  });
+
+  testPosix('detectInitExecutionContext keeps a configured repository subdirectory on the fast path', () => {
+    const { repositoryDir } = createRepository();
+    const packageDir = join(repositoryDir, 'packages', 'app');
+    mkdirSync(packageDir, { recursive: true });
+
+    // Repository-scoped lookup: every other command resolves the repository root
+    // config from a subdirectory, so init validating that same binding — instead
+    // of creating a nested project — is the consistent answer.
+    expect(detectInitExecutionContext(packageDir)).toMatchObject({ kind: 'configured-project' });
+  });
+
   test('buildAuthorizeUrl includes authPathEnc and osType when provided', () => {
-    const url = buildAuthorizeUrl(9876, 'demo', 'enc-value', 'LINUX');
+    const url = buildAuthorizeUrl({ port: 9876, projectName: 'demo', authPathEnc: 'enc-value', osType: 'LINUX' });
     const parsed = new URL(url);
 
     expect(parsed.searchParams.get('port')).toBe('9876');
@@ -143,21 +229,42 @@ describe('init helpers', () => {
   });
 
   test('buildAuthorizeUrl carries the login state so the web page can echo it back', () => {
-    const url = buildAuthorizeUrl(9876, 'demo', undefined, undefined, 'state-token');
+    const url = buildAuthorizeUrl({ port: 9876, projectName: 'demo', state: 'state-token' });
 
     expect(new URL(url).searchParams.get('state')).toBe('state-token');
   });
 
   test('buildAuthorizeUrl carries the machine id so the server can bind this machine runner', () => {
-    const url = buildAuthorizeUrl(9876, 'demo', undefined, undefined, undefined, 'machine-1');
+    const url = buildAuthorizeUrl({ port: 9876, projectName: 'demo', machineId: 'machine-1' });
 
     expect(new URL(url).searchParams.get('mid')).toBe('machine-1');
   });
 
   test('buildAuthorizeUrl omits the machine id when it could not be resolved', () => {
-    const url = buildAuthorizeUrl(9876, 'demo', 'enc-value', 'LINUX', 'state-token');
+    const url = buildAuthorizeUrl({
+      port: 9876,
+      projectName: 'demo',
+      authPathEnc: 'enc-value',
+      osType: 'LINUX',
+      state: 'state-token',
+    });
 
     expect(new URL(url).searchParams.has('mid')).toBe(false);
+  });
+
+  test('buildAuthorizeUrl asks for the unified setup screen only when a PKCE challenge is present', () => {
+    const setupUrl = new URL(
+      buildAuthorizeUrl({ port: 9876, projectName: 'demo', state: 'state-token', codeChallenge: 'challenge-value' }),
+    );
+
+    expect(setupUrl.searchParams.get('code_challenge')).toBe('challenge-value');
+    expect(setupUrl.searchParams.get('flow')).toBe('setup');
+
+    // --auth api-key는 통합 화면을 요청하지 않는다. 구/신 web 모두 레거시 폼으로 떨어져야 한다.
+    const legacyUrl = new URL(buildAuthorizeUrl({ port: 9876, projectName: 'demo', state: 'state-token' }));
+
+    expect(legacyUrl.searchParams.has('code_challenge')).toBe(false);
+    expect(legacyUrl.searchParams.has('flow')).toBe(false);
   });
 
   test('detectOsType maps process.platform to supported values', () => {
@@ -179,6 +286,91 @@ describe('init helpers', () => {
     }
 
     expect(result).toBeUndefined();
+  });
+});
+
+describe('agent entry point selection inputs', () => {
+  function createDetectionDir(markers: string[]): string {
+    const dir = mkdtempSync(join(tmpdir(), 'agentteams-init-detect-test-'));
+    tempDirs.push(dir);
+    for (const marker of markers) {
+      mkdirSync(join(dir, marker), { recursive: true });
+    }
+    return dir;
+  }
+
+  // A repository created or cloned minutes ago has no `.claude/` yet — it appears
+  // only once the user approves project scope — so marker-only detection selected
+  // nothing exactly where a first `init` runs. Falling back to one file keeps a
+  // path from an agent to `.agentteams/convention.md`.
+  test('falls back to CLAUDE.md in a folder with no AI client signal', () => {
+    expect(detectAgentEntryPointFiles(createDetectionDir([]))).toEqual(['CLAUDE.md']);
+  });
+
+  test('detects each client from its own configuration directory', () => {
+    expect(detectAgentEntryPointFiles(createDetectionDir(['.claude']))).toEqual(['CLAUDE.md']);
+    expect(detectAgentEntryPointFiles(createDetectionDir(['.codex']))).toEqual(['AGENTS.md']);
+    expect(detectAgentEntryPointFiles(createDetectionDir(['.opencode']))).toEqual(['AGENTS.md']);
+    expect(detectAgentEntryPointFiles(createDetectionDir(['.cursor']))).toEqual(['.cursor/rules/agentteams.mdc']);
+    expect(detectAgentEntryPointFiles(createDetectionDir(['.claude', '.gemini']))).toEqual(['CLAUDE.md', 'GEMINI.md']);
+  });
+
+  // An existing entry point never produces a write — init leaves it alone — but
+  // it does say which client the folder uses, and the adapters downstream act on
+  // that: a hand-written GEMINI.md is what makes `.geminiignore` applicable.
+  test('an existing entry point file counts as a client signal', () => {
+    const dir = createDetectionDir([]);
+    writeFileSync(join(dir, 'GEMINI.md'), '# mine\n', 'utf-8');
+
+    expect(detectAgentEntryPointFiles(dir)).toEqual(['GEMINI.md']);
+  });
+
+  test('parseAgentFilesOption tells "no choice" apart from "create nothing"', () => {
+    expect(parseAgentFilesOption(undefined)).toBeNull();
+    expect(parseAgentFilesOption('')).toBeNull();
+    expect(parseAgentFilesOption('none')).toEqual([]);
+    expect(parseAgentFilesOption('CLAUDE.md, AGENTS.md')).toEqual(['CLAUDE.md', 'AGENTS.md']);
+    expect(parseAgentFilesOption('CLAUDE.md,CLAUDE.md')).toEqual(['CLAUDE.md']);
+  });
+
+  test('parseAgentFilesOption rejects an unknown value instead of dropping it', () => {
+    expect(() => parseAgentFilesOption('CLAUDE.txt')).toThrow(/Unknown --agent-files value/);
+    expect(() => parseAgentFilesOption('none,CLAUDE.md')).toThrow(/cannot be combined/);
+  });
+
+  test('hasLinkedGitWorktrees separates a plain repository from one with worktrees', () => {
+    const { repositoryDir, worktreeDir } = createRepository();
+
+    expect(hasLinkedGitWorktrees(repositoryDir)).toBe(true);
+    expect(hasLinkedGitWorktrees(worktreeDir)).toBe(true);
+
+    const plainRepositoryDir = mkdtempSync(join(tmpdir(), 'agentteams-init-plain-repo-test-'));
+    tempDirs.push(plainRepositoryDir);
+    execFileSync('git', ['init', '-b', 'main'], { cwd: plainRepositoryDir });
+
+    expect(hasLinkedGitWorktrees(plainRepositoryDir)).toBe(false);
+
+    // A directory that is not a repository at all must not read as "in use".
+    const nonRepositoryDir = mkdtempSync(join(tmpdir(), 'agentteams-init-nonrepo-test-'));
+    tempDirs.push(nonRepositoryDir);
+    expect(hasLinkedGitWorktrees(nonRepositoryDir)).toBe(false);
+  });
+
+  // `git worktree list --porcelain` keeps reporting a worktree whose directory is
+  // gone until `git worktree prune` runs, marking the record `prunable`. Counting
+  // records alone therefore claimed a repository still used worktrees after the
+  // last one had been deleted.
+  test('hasLinkedGitWorktrees ignores a prunable worktree record', () => {
+    const { repositoryDir, worktreeDir } = createRepository();
+
+    expect(hasLinkedGitWorktrees(repositoryDir)).toBe(true);
+
+    rmSync(worktreeDir, { recursive: true, force: true });
+
+    expect(
+      execFileSync('git', ['worktree', 'list', '--porcelain'], { cwd: repositoryDir, encoding: 'utf-8' }),
+    ).toContain('prunable');
+    expect(hasLinkedGitWorktrees(repositoryDir)).toBe(false);
   });
 });
 

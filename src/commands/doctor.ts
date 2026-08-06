@@ -15,6 +15,7 @@ import {
   type ConventionLinkState,
 } from '../utils/conventionLink.js';
 import { withCommandContext } from '../utils/commandContext.js';
+import { shouldInstallWorktreeHook } from '../utils/git.js';
 
 const CONFIG_DIR = '.agentteams';
 const CONFIG_FILE = 'config.json';
@@ -82,6 +83,11 @@ export interface DoctorResult {
 
 type DoctorOptions = {
   cwd?: string;
+  /**
+   * Install the managed post-checkout hook even when this repository has no
+   * linked worktree yet. Without it the doctor honors the same gate `init` does.
+   */
+  installWorktreeHook?: boolean;
 };
 
 function pathEntryExists(path: string): boolean {
@@ -185,19 +191,79 @@ function notApplicableResult(rootDir: string | null, issue: DoctorIssue): Doctor
   };
 }
 
+type RootEntryPointScan = {
+  rootEntryPoints: string[];
+  missingRecommendedEntryPoints: string[];
+  issues: DoctorIssue[];
+};
+
+/**
+ * Which agent entry points exist at the convention root.
+ *
+ * `missingSeverity` differs by layout on purpose. A non-git-root project mirrors
+ * these files into every member repo, so a missing one breaks the layout the
+ * doctor manages — that is an error. A git root project only needs *some* path
+ * from an agent to `.agentteams/convention.md`; calling a repository that uses
+ * one client but not the other broken would turn `doctor` red (exit 1) for
+ * projects that were always fine. Reporting it informationally is still the
+ * safety net for a detection miss at `init` time, which is the case that used to
+ * leave no signal anywhere.
+ */
+function scanRootEntryPoints(rootDir: string, missingSeverity: DoctorIssue['severity']): RootEntryPointScan {
+  const issues: DoctorIssue[] = [];
+  const rootEntryPoints: string[] = [];
+
+  for (const relativePath of ENTRY_POINT_ALLOWLIST) {
+    const fullPath = join(rootDir, relativePath);
+    if (!pathEntryExists(fullPath)) continue;
+    if (isReadableRegularFile(fullPath)) {
+      rootEntryPoints.push(relativePath);
+      continue;
+    }
+    issues.push({
+      code: 'root-entry-point-invalid',
+      path: fullPath,
+      message: `The root entry point is not a readable regular file: ${fullPath}`,
+      severity: 'error',
+    });
+  }
+
+  const missingRecommendedEntryPoints = RECOMMENDED_ENTRY_POINTS.filter(
+    (relativePath) => !rootEntryPoints.includes(relativePath),
+  );
+
+  for (const relativePath of missingRecommendedEntryPoints) {
+    issues.push({
+      code: 'missing-recommended-entry-point',
+      path: join(rootDir, relativePath),
+      message: `Recommended entry point ${relativePath} is missing at the convention root; create it (e.g. via 'agentteams init --agent-files ${relativePath}') so agents can reach the conventions.`,
+      severity: missingSeverity,
+    });
+  }
+
+  return { rootEntryPoints, missingRecommendedEntryPoints, issues };
+}
+
 /**
  * A git root project has no member repos to manage, but it does own the
  * worktree bootstrap hook that makes `git worktree add` materialize
  * conventions. That hook was previously reachable only from the interactive
  * OAuth `init`, so any project configured before it existed had no way to get
- * one. Installing it here is the doctor's whole job for this layout — member
- * repo management (exclude, link, entry points) stays out of it.
+ * one. Installing it — and reporting whether the conventions are reachable at
+ * all — is the doctor's whole job for this layout; member repo management
+ * (exclude, link, entry points) stays out of it.
+ *
+ * The hook is no longer installed unconditionally. `shouldInstallWorktreeHook`
+ * is shared with `init` so the two cannot disagree: the second `agentteams init`
+ * of a project takes the configured-project fast path, which calls this
+ * function, and an ungated write here undid `init`'s decision not to touch the
+ * shared `.git/hooks` of a repository that never uses worktrees.
  *
  * A project whose hook infrastructure the CLI must not touch is not a broken
  * project: it keeps exit 0 (the code a git root project has always returned)
  * and is told to use the manual per-worktree `agentteams init` fallback.
  */
-function runGitRootDoctor(rootDir: string): DoctorResult {
+function runGitRootDoctor(rootDir: string, installWorktreeHook: boolean): DoctorResult {
   const preflightIssues = validateRootPreflight(rootDir);
   if (preflightIssues.length > 0) {
     return {
@@ -214,11 +280,27 @@ function runGitRootDoctor(rootDir: string): DoctorResult {
     };
   }
 
-  const hookResult = ensurePostCheckoutHook(rootDir);
-  const blockedByUserHookConfig =
-    hookResult.status === 'blocked' && USER_HOOK_CONFIG_CODES.has(hookResult.issue?.code ?? '');
-  const issues: DoctorIssue[] = hookResult.issue
-    ? [
+  const scan = scanRootEntryPoints(rootDir, 'info');
+  const issues: DoctorIssue[] = [...scan.issues];
+
+  let rootHook: DoctorResult['rootHook'] = 'skipped';
+  let changedCount = 0;
+  let hookDegraded = false;
+
+  if (!shouldInstallWorktreeHook(rootDir, { force: installWorktreeHook })) {
+    issues.push({
+      code: 'post-checkout-hook-no-worktrees',
+      path: null,
+      message:
+        "This repository has no linked git worktrees, so the worktree bootstrap hook was not installed. Run 'agentteams doctor --install-worktree-hook' to install it anyway.",
+      severity: 'info',
+    });
+  } else {
+    const hookResult = ensurePostCheckoutHook(rootDir);
+    const blockedByUserHookConfig =
+      hookResult.status === 'blocked' && USER_HOOK_CONFIG_CODES.has(hookResult.issue?.code ?? '');
+    if (hookResult.issue) {
+      issues.push(
         blockedByUserHookConfig
           ? {
               ...hookResult.issue,
@@ -226,19 +308,23 @@ function runGitRootDoctor(rootDir: string): DoctorResult {
               severity: 'info' as const,
             }
           : { ...hookResult.issue, severity: 'error' as const },
-      ]
-    : [];
+      );
+    }
+    rootHook = hookResult.status;
+    changedCount = hookResult.changed ? 1 : 0;
+    hookDegraded = !(hookResult.status === 'ready' || blockedByUserHookConfig);
+  }
 
   return {
-    status: hookResult.status === 'ready' || blockedByUserHookConfig ? 'READY' : 'DEGRADED',
+    status: hookDegraded || issues.some((issue) => issue.severity === 'error') ? 'DEGRADED' : 'READY',
     layout: 'git-root',
     applicable: true,
-    changedCount: hookResult.changed ? 1 : 0,
+    changedCount,
     rootDir,
-    rootEntryPoints: [],
-    missingRecommendedEntryPoints: [],
+    rootEntryPoints: scan.rootEntryPoints,
+    missingRecommendedEntryPoints: scan.missingRecommendedEntryPoints,
     repositories: [],
-    rootHook: hookResult.status,
+    rootHook,
     issues,
   };
 }
@@ -266,7 +352,14 @@ function validateRootPreflight(rootDir: string): DoctorIssue[] {
       severity: 'error',
     });
   } else {
-    const missingFields = ['teamId', 'projectId', 'apiKey'].filter(
+    // A personal-login project deliberately keeps no `apiKey` on disk — the
+    // credential lives in the OS credential store. Requiring one here would fail
+    // preflight for every project created by the default `agentteams init`, and
+    // `runGitRootDoctor` returns before `ensurePostCheckoutHook` on failure, so
+    // the worktree bootstrap hook would never be installed.
+    const requiredFields =
+      config.authMode === 'personal-token' ? ['teamId', 'projectId'] : ['teamId', 'projectId', 'apiKey'];
+    const missingFields = requiredFields.filter(
       (field) => typeof config[field] !== 'string' || (config[field] as string).length === 0,
     );
     if (missingFields.length > 0) {
@@ -401,12 +494,15 @@ function runDoctor(options?: DoctorOptions): DoctorResult {
   // before the layout branch and is merged into whichever result comes back.
   const configPermissions = repairConfigFilePermissions(rootDir);
 
-  return withConfigPermissionFindings(runLayoutDoctor(rootDir), configPermissions);
+  return withConfigPermissionFindings(
+    runLayoutDoctor(rootDir, options?.installWorktreeHook === true),
+    configPermissions,
+  );
 }
 
-function runLayoutDoctor(rootDir: string): DoctorResult {
+function runLayoutDoctor(rootDir: string, installWorktreeHook: boolean): DoctorResult {
   if (!isNonGitRootProject(rootDir)) {
-    return runGitRootDoctor(rootDir);
+    return runGitRootDoctor(rootDir, installWorktreeHook);
   }
 
   const issues: DoctorIssue[] = [];
@@ -427,33 +523,12 @@ function runLayoutDoctor(rootDir: string): DoctorResult {
     };
   }
 
-  const rootEntryPoints: string[] = [];
-  for (const relativePath of ENTRY_POINT_ALLOWLIST) {
-    const fullPath = join(rootDir, relativePath);
-    if (!pathEntryExists(fullPath)) continue;
-    if (isReadableRegularFile(fullPath)) {
-      rootEntryPoints.push(relativePath);
-      continue;
-    }
-    issues.push({
-      code: 'root-entry-point-invalid',
-      path: fullPath,
-      message: `The root entry point is not a readable regular file: ${fullPath}`,
-      severity: 'error',
-    });
-  }
-  const missingRecommendedEntryPoints = RECOMMENDED_ENTRY_POINTS.filter(
-    (relativePath) => !rootEntryPoints.includes(relativePath),
-  );
-
-  for (const relativePath of missingRecommendedEntryPoints) {
-    issues.push({
-      code: 'missing-recommended-entry-point',
-      path: join(rootDir, relativePath),
-      message: `Recommended entry point ${relativePath} is missing at the convention root; create it (e.g. via 'agentteams init') so agents can reach the conventions.`,
-      severity: 'error',
-    });
-  }
+  const {
+    rootEntryPoints,
+    missingRecommendedEntryPoints,
+    issues: entryPointIssues,
+  } = scanRootEntryPoints(rootDir, 'error');
+  issues.push(...entryPointIssues);
 
   const repositories = findMemberRepos(rootDir).map((repoDir) =>
     processMemberRepo(rootDir, repoDir, [...rootEntryPoints]),

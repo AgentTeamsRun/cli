@@ -291,6 +291,32 @@ describe('doctor root preflight failures', () => {
     expect(existsSync(join(memberDir, '.agentteams'))).toBe(false);
   });
 
+  // The default `agentteams init` stores no key in the repository — the credential
+  // lives in the OS credential store — so demanding `apiKey` here would fail
+  // preflight for every project on the default auth path and skip the repair work
+  // entirely.
+  it('accepts a personal-login root config that stores no apiKey', async () => {
+    const rootDir = createRoot({
+      configBody: JSON.stringify({ teamId: 'team-1', projectId: 'project-1', authMode: 'personal-token' }),
+    });
+    const memberDir = addMemberRepo(rootDir, 'alpha');
+
+    const result = await executeDoctorCommand({ cwd: rootDir });
+
+    expect(result.status).toBe('READY');
+    expect(result.issues.map((issue) => issue.code)).not.toContain('root-config-incomplete');
+    expect(existsSync(join(memberDir, '.agentteams'))).toBe(true);
+  });
+
+  it('still requires apiKey when the project did not opt into a personal login', async () => {
+    const rootDir = createRoot({ configBody: JSON.stringify({ teamId: 'team-1', projectId: 'project-1' }) });
+
+    const result = await executeDoctorCommand({ cwd: rootDir });
+
+    expect(result.status).toBe('DEGRADED');
+    expect(result.issues.map((issue) => issue.code)).toContain('root-config-incomplete');
+  });
+
   it('rejects non-file root entry points instead of reporting READY', async () => {
     const rootDir = createRoot();
     const memberDir = addMemberRepo(rootDir, 'alpha');
@@ -309,8 +335,9 @@ describe('doctor root preflight failures', () => {
   });
 });
 
-function createGitRootProject(): string {
-  const repoDir = join(createTempDir(), 'repo');
+function createGitRootProject(options?: { configBody?: string; withLinkedWorktree?: boolean }): string {
+  const rootTempDir = createTempDir();
+  const repoDir = join(rootTempDir, 'repo');
   mkdirSync(repoDir, { recursive: true });
   execFileSync('git', ['init', '-b', 'main'], { cwd: repoDir });
   writeFileSync(join(repoDir, 'README.md'), '# repo\n', 'utf-8');
@@ -323,10 +350,16 @@ function createGitRootProject(): string {
   mkdirSync(join(repoDir, '.agentteams'), { recursive: true });
   writeFileSync(
     join(repoDir, '.agentteams', 'config.json'),
-    JSON.stringify({ teamId: 'team-1', projectId: 'project-1', apiKey: 'api-key-1' }),
+    options?.configBody ?? JSON.stringify({ teamId: 'team-1', projectId: 'project-1', apiKey: 'api-key-1' }),
     { encoding: 'utf-8', mode: CONFIG_FILE_MODE },
   );
   writeFileSync(join(repoDir, '.agentteams', 'convention.md'), '# Root convention\n', 'utf-8');
+  // The doctor only writes the shared post-checkout hook for a repository that
+  // actually uses linked worktrees, so any test about that hook has to create
+  // one — the same gate `agentteams init` applies.
+  if (options?.withLinkedWorktree) {
+    execFileSync('git', ['worktree', 'add', '-b', 'doctor-wt', join(rootTempDir, 'wt')], { cwd: repoDir });
+  }
   return repoDir;
 }
 
@@ -336,7 +369,7 @@ describe('doctor on a git root project', () => {
   // re-running the interactive OAuth init, which leaves existing projects
   // permanently without worktree convention bootstrap.
   it('installs the worktree bootstrap hook and reports zero changes on the second run', async () => {
-    const repoDir = createGitRootProject();
+    const repoDir = createGitRootProject({ withLinkedWorktree: true });
 
     const first = await executeDoctorCommand({ cwd: repoDir });
 
@@ -354,6 +387,23 @@ describe('doctor on a git root project', () => {
     expect(second.changedCount).toBe(0);
   });
 
+  // `init`'s configured-project fast path reports `local-adapters` straight from
+  // this result. A preflight that rejects the default (keyless) config would make
+  // that step permanently DEGRADED and leave the hook uninstalled.
+  it('installs the worktree bootstrap hook for a personal-login project without an apiKey', async () => {
+    const repoDir = createGitRootProject({
+      configBody: JSON.stringify({ teamId: 'team-1', projectId: 'project-1', authMode: 'personal-token' }),
+      withLinkedWorktree: true,
+    });
+
+    const result = await executeDoctorCommand({ cwd: repoDir });
+
+    expect(result.status).toBe('READY');
+    expect(result.rootHook).toBe('ready');
+    expect(result.issues.map((issue) => issue.code)).not.toContain('root-config-incomplete');
+    expect(existsSync(join(repoDir, '.git', 'hooks', 'post-checkout'))).toBe(true);
+  });
+
   it('leaves member repo management alone for a git root project', async () => {
     const repoDir = createGitRootProject();
     const excludeBefore = readFileSync(join(repoDir, '.git', 'info', 'exclude'), 'utf-8');
@@ -369,7 +419,7 @@ describe('doctor on a git root project', () => {
   // reports the manual fallback and keeps the exit code a git root project has
   // always returned, so scripts and CI that call it do not turn permanently red.
   it('never overwrites an unmanaged post-checkout hook and still exits 0', async () => {
-    const repoDir = createGitRootProject();
+    const repoDir = createGitRootProject({ withLinkedWorktree: true });
     const hookPath = join(repoDir, '.git', 'hooks', 'post-checkout');
     const customHook = '#!/bin/sh\n# my own hook\nexit 0\n';
     writeFileSync(hookPath, customHook, 'utf-8');
@@ -386,7 +436,7 @@ describe('doctor on a git root project', () => {
   });
 
   it('exits 0 and points at the manual fallback when core.hooksPath is user managed', async () => {
-    const repoDir = createGitRootProject();
+    const repoDir = createGitRootProject({ withLinkedWorktree: true });
     const customHooksDir = join(repoDir, '.husky');
     mkdirSync(customHooksDir);
     execFileSync('git', ['config', 'core.hooksPath', customHooksDir], { cwd: repoDir });
@@ -406,7 +456,7 @@ describe('doctor on a git root project', () => {
   // install would deny the feature for no reason. This repository itself has
   // that configuration.
   it('installs the hook when core.hooksPath is the default hooks directory', async () => {
-    const repoDir = createGitRootProject();
+    const repoDir = createGitRootProject({ withLinkedWorktree: true });
     const hookPath = join(repoDir, '.git', 'hooks', 'post-checkout');
     execFileSync('git', ['config', 'core.hooksPath', join(repoDir, '.git', 'hooks')], { cwd: repoDir });
 
@@ -424,6 +474,63 @@ describe('doctor on a git root project', () => {
     expect(relative.status).toBe('READY');
     expect(relative.rootHook).toBe('ready');
     expect(existsSync(hookPath)).toBe(true);
+  });
+
+  // `init` refuses to write the shared `.git/hooks` of a repository that never
+  // uses linked worktrees, but a second `agentteams init` takes the
+  // configured-project fast path — which calls this doctor. While the doctor
+  // installed unconditionally, that gate lasted exactly one command.
+  it('leaves the shared hooks directory alone when the repository has no linked worktree', async () => {
+    const repoDir = createGitRootProject();
+
+    const result = await executeDoctorCommand({ cwd: repoDir });
+
+    expect(result.status).toBe('READY');
+    expect(result.rootHook).toBe('skipped');
+    expect(result.changedCount).toBe(0);
+    expect(existsSync(join(repoDir, '.git', 'hooks', 'post-checkout'))).toBe(false);
+    const issue = result.issues.find((candidate) => candidate.code === 'post-checkout-hook-no-worktrees');
+    expect(issue?.severity).toBe('info');
+    expect(issue?.message).toContain('agentteams doctor --install-worktree-hook');
+    expect(resolveDoctorExitCode(result)).toBe(0);
+  });
+
+  it('installs the hook without a linked worktree when asked explicitly', async () => {
+    const repoDir = createGitRootProject();
+
+    const result = await executeDoctorCommand({ cwd: repoDir, installWorktreeHook: true });
+
+    expect(result.status).toBe('READY');
+    expect(result.rootHook).toBe('ready');
+    expect(existsSync(join(repoDir, '.git', 'hooks', 'post-checkout'))).toBe(true);
+  });
+
+  // Detection at `init` time can miss a client, and until now nothing noticed:
+  // a git root project with no entry point at all reported a clean READY, so an
+  // agent had no path to `.agentteams/convention.md` and no message said so.
+  it('reports missing root entry points without failing an otherwise healthy project', async () => {
+    const repoDir = createGitRootProject();
+
+    const missing = await executeDoctorCommand({ cwd: repoDir });
+
+    expect(missing.rootEntryPoints).toEqual([]);
+    expect(missing.missingRecommendedEntryPoints).toEqual(['CLAUDE.md', 'AGENTS.md']);
+    const issue = missing.issues.find((candidate) => candidate.code === 'missing-recommended-entry-point');
+    // Informational on purpose: a repository that uses one client and not the
+    // other is not broken, and turning `doctor` red would break every caller
+    // that treats exit 1 as a defect.
+    expect(issue?.severity).toBe('info');
+    expect(missing.status).toBe('READY');
+    expect(resolveDoctorExitCode(missing)).toBe(0);
+
+    writeFileSync(join(repoDir, 'CLAUDE.md'), '# entry\n', 'utf-8');
+    writeFileSync(join(repoDir, 'AGENTS.md'), '# entry\n', 'utf-8');
+
+    const present = await executeDoctorCommand({ cwd: repoDir });
+
+    expect(present.rootEntryPoints).toEqual(['CLAUDE.md', 'AGENTS.md']);
+    expect(present.missingRecommendedEntryPoints).toEqual([]);
+    expect(present.issues.map((candidate) => candidate.code)).not.toContain('missing-recommended-entry-point');
   });
 
   it('reports the git root layout when the diagnosis stops at preflight', async () => {

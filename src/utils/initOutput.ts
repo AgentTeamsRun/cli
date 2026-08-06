@@ -1,6 +1,11 @@
 import chalk from 'chalk';
 import { formatOutput } from './formatter.js';
-import type { AgentFileEntry, WorktreeInitResult } from '../commands/init.js';
+import type {
+  AgentFileEntry,
+  ConfiguredProjectInitResult,
+  InitReadinessStep,
+  WorktreeInitResult,
+} from '../commands/init.js';
 import type { EnsurePostCheckoutHookResult } from './conventionLink.js';
 
 export type InitOutputFormat = 'human' | 'json';
@@ -16,8 +21,8 @@ interface InitResultShape {
   postCheckoutHook?: EnsurePostCheckoutHookResult;
   authMode?: 'api-key' | 'personal-token';
   personalLogin?: { email: string; nickname: string; persisted: boolean };
-  agentKeyRevoked?: boolean;
   warning?: string;
+  readiness?: InitReadinessStep[];
 }
 
 /** Mirrors AGENT_API_KEY_TTL_MS in api/src/services/agentApiKey.ts. */
@@ -54,6 +59,55 @@ function isWorktreeInitResult(result: unknown): result is WorktreeInitResult {
       r.materialization === 'existing' ||
       r.materialization === 'blocked')
   );
+}
+
+function isConfiguredProjectInitResult(result: unknown): result is ConfiguredProjectInitResult {
+  if (!result || typeof result !== 'object') return false;
+  const r = result as Record<string, unknown>;
+  return (
+    r.success === true &&
+    r.mode === 'configured-project' &&
+    typeof r.configPath === 'string' &&
+    typeof r.conventionPath === 'string' &&
+    Array.isArray(r.readiness)
+  );
+}
+
+function printAgentFiles(agentFiles: AgentFileEntry[] | undefined): void {
+  for (const file of agentFiles ?? []) {
+    if (file.type === 'created') {
+      console.log(`✓ Agent file created: ${file.relativePath}`);
+    } else if (file.type === 'example') {
+      console.log(`✓ Example file created: ${file.relativePath}`);
+    } else {
+      console.log(`- Agent file already exists, left untouched: ${file.relativePath}`);
+    }
+  }
+}
+
+function printReadiness(readiness: InitReadinessStep[]): void {
+  console.log('');
+  console.log('Readiness:');
+  for (const step of readiness) {
+    const line = `  [${step.status}] ${step.stage}`;
+    if (step.status === 'DEGRADED') {
+      console.warn(line);
+      for (const issue of step.issues) {
+        console.warn(`    ${issue.message}`);
+      }
+      console.warn(`    Retry: ${step.retryCommand}`);
+    } else {
+      console.log(line);
+      // Issues print at every status, not just SKIPPED. The `local-adapters`
+      // rollup turns READY as soon as one adapter succeeded — and `.gitignore`
+      // always does — so a run that created no entry point file and installed no
+      // hook still reports READY. Printing only the tag there left the reasons
+      // sitting in the JSON payload with nothing on screen.
+      for (const issue of step.issues) {
+        console.log(`    ${issue.message}`);
+      }
+    }
+  }
 }
 
 export function printInitResult(result: unknown, format: InitOutputFormat): void {
@@ -104,6 +158,33 @@ export function printInitResult(result: unknown, format: InitOutputFormat): void
     return;
   }
 
+  if (isConfiguredProjectInitResult(result)) {
+    console.log('✓ Existing project binding reused; browser authentication was skipped.');
+    console.log(`✓ Config verified:     ${result.configPath}`);
+    if (result.conventionError) {
+      console.warn(`⚠ Convention sync is degraded: ${result.conventionError}`);
+    } else if (result.conventionsUpdated) {
+      console.log('✓ Conventions updated in .agentteams/.');
+    } else {
+      console.log('✓ Conventions/platform guides already up to date.');
+    }
+    // A checkmark the readiness list below immediately contradicts reads as
+    // "done" to anyone skimming the log, so the mark follows doctor's verdict.
+    const doctorStatus = result.doctor?.status;
+    if (doctorStatus === 'READY') {
+      console.log('✓ Local adapters checked by agentteams doctor.');
+    } else if (doctorStatus === 'DEGRADED') {
+      console.warn('⚠ Local adapters still need attention (agentteams doctor: DEGRADED).');
+    } else if (doctorStatus) {
+      console.warn(`⚠ Local adapters were not checked (agentteams doctor: ${doctorStatus}).`);
+    }
+    // The fast path re-applies the local adapters, so a file it repaired has to
+    // be visible here too — otherwise the only proof of the write is on disk.
+    printAgentFiles(result.agentFiles);
+    printReadiness(result.readiness);
+    return;
+  }
+
   if (!isInitResult(result)) {
     console.log(typeof result === 'string' ? result : formatOutput(result));
     return;
@@ -123,9 +204,9 @@ export function printInitResult(result: unknown, format: InitOutputFormat): void
           : '⚠ Login kept in memory for this process only.',
       );
     }
-    if (result.agentKeyRevoked === true) {
-      console.log('✓ The setup agent key was revoked; nothing long-lived is left on the server.');
-    }
+    // 이 경로는 setup용 agent key를 애초에 발급하지 않는다. "발급했다가 폐기했다"는
+    // 이전 안내 줄은 그래서 사라졌다.
+    console.log('✓ No agent API key was created for this setup.');
   }
 
   // The compatibility path has a hard 30-day server-side TTL and no renewal of its own.
@@ -146,6 +227,10 @@ export function printInitResult(result: unknown, format: InitOutputFormat): void
   console.log(`✓ Convention saved:  ${result.conventionPath}`);
   console.log(`✓ Conventions synced to .agentteams/`);
 
+  if (result.readiness) {
+    printReadiness(result.readiness);
+  }
+
   const hook = result.postCheckoutHook;
   if (hook) {
     if (hook.status === 'ready') {
@@ -156,20 +241,24 @@ export function printInitResult(result: unknown, format: InitOutputFormat): void
     }
   }
 
-  if (result.agentFiles && result.agentFiles.length > 0) {
-    for (const file of result.agentFiles) {
-      if (file.type === 'created') {
-        console.log(`✓ Agent file created: ${file.relativePath}`);
-      } else {
-        console.log(`✓ Example file created: ${file.relativePath}`);
-      }
-    }
-  }
+  printAgentFiles(result.agentFiles);
 
   console.log('');
   console.log('Next steps:');
-  console.log('  1. Check the generated agent files (CLAUDE.md, AGENTS.md, etc.)');
-  console.log('     If a -example file was created, merge it into your existing file.');
+
+  // Pointing at "the generated agent files" when the run generated none sent
+  // users looking for a CLAUDE.md that was never written. The readiness list
+  // above already says why it was skipped; this line offers the way to get one.
+  const writtenAgentFiles = (result.agentFiles ?? []).filter((file) => file.type !== 'skipped');
+  if (writtenAgentFiles.length > 0) {
+    console.log(`  1. Check the generated agent files (${writtenAgentFiles.map((f) => f.relativePath).join(', ')})`);
+    console.log('     If a -example file was created, merge it into your existing file.');
+  } else {
+    console.log('  1. No agent entry point file was created in this run.');
+    console.log(
+      "     Create one with 'agentteams init --agent-files CLAUDE.md' so agents load .agentteams/convention.md.",
+    );
+  }
 
   if (result.seedPlanId) {
     const seedPlanDisplayId = `agentteams_pln_${result.seedPlanId}`;

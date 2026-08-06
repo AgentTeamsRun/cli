@@ -17,6 +17,12 @@ const MOCK_INIT_RESULT = {
     { relativePath: 'CLAUDE.md', type: 'created' as const },
     { relativePath: 'AGENTS-example.md', type: 'example' as const },
   ],
+  readiness: [
+    { stage: 'project-binding' as const, status: 'READY' as const, issues: [] },
+    { stage: 'credential' as const, status: 'READY' as const, issues: [] },
+    { stage: 'convention-sync' as const, status: 'READY' as const, issues: [] },
+    { stage: 'local-adapters' as const, status: 'READY' as const, issues: [] },
+  ],
 };
 
 describe('printInitResult', () => {
@@ -116,6 +122,89 @@ describe('printInitResult', () => {
       warnSpy.mockRestore();
     });
 
+    it('이미 존재해 건너뛴 진입점 파일을 만들었다고 말하지 않는다', () => {
+      printInitResult(
+        {
+          ...MOCK_INIT_RESULT,
+          agentFiles: [{ relativePath: 'CLAUDE.md', type: 'skipped' as const }],
+        },
+        'human',
+      );
+
+      const output = captureOutput(logSpy);
+      expect(output).toContain('Agent file already exists, left untouched: CLAUDE.md');
+      expect(output).not.toContain('Agent file created: CLAUDE.md');
+    });
+
+    // 훅을 안 깔았다는 사실만 남고 되돌리는 방법이 없으면, 사용자는 워크트리 부트스트랩이
+    // 왜 안 도는지 알 길이 없다. SKIPPED도 이유를 출력해야 한다.
+    it('SKIPPED 단계의 사유와 복구 명령을 함께 출력한다', () => {
+      printInitResult(
+        {
+          ...MOCK_INIT_RESULT,
+          readiness: [
+            {
+              stage: 'local-adapters' as const,
+              status: 'SKIPPED' as const,
+              issues: [
+                {
+                  code: 'post-checkout-hook-no-worktrees',
+                  message:
+                    "This repository has no linked git worktrees, so the worktree bootstrap hook was not installed. Run 'agentteams doctor' to install it.",
+                },
+              ],
+            },
+          ],
+        },
+        'human',
+      );
+
+      const output = captureOutput(logSpy);
+      expect(output).toContain('[SKIPPED] local-adapters');
+      expect(output).toContain('agentteams doctor');
+    });
+
+    // local-adapters 롤업은 어댑터 하나만 성공해도 READY가 된다(.gitignore는 항상
+    // 성공한다). 그래서 READY일 때 issues를 안 찍으면, 진입점 0개·훅 미설치로 끝난
+    // 실행이 초록 한 줄로 끝나고 사유는 JSON에만 남는다.
+    it('READY 단계의 스킵 사유도 화면에 출력한다', () => {
+      printInitResult(
+        {
+          ...MOCK_INIT_RESULT,
+          agentFiles: [],
+          readiness: [
+            {
+              stage: 'local-adapters' as const,
+              status: 'READY' as const,
+              issues: [
+                { code: 'agent-entry-points-not-selected', message: 'No agent entry point file was created.' },
+                {
+                  code: 'post-checkout-hook-no-worktrees',
+                  message: 'This repository has no linked git worktrees, so the hook was not installed.',
+                },
+              ],
+            },
+          ],
+        },
+        'human',
+      );
+
+      const output = captureOutput(logSpy);
+      expect(output).toContain('[READY] local-adapters');
+      expect(output).toContain('No agent entry point file was created.');
+      expect(output).toContain('no linked git worktrees');
+    });
+
+    // 만들지도 않은 파일을 "확인하라"고 하면 사용자는 없는 CLAUDE.md를 찾아 헤맨다.
+    it('진입점을 하나도 만들지 않았으면 Next steps가 생성 방법을 안내한다', () => {
+      printInitResult({ ...MOCK_INIT_RESULT, agentFiles: [] }, 'human');
+
+      const output = captureOutput(logSpy);
+      expect(output).toContain('No agent entry point file was created in this run.');
+      expect(output).toContain('agentteams init --agent-files CLAUDE.md');
+      expect(output).not.toContain('Check the generated agent files');
+    });
+
     it('post-checkout 훅 필드가 없으면 훅 관련 출력을 하지 않는다', () => {
       printInitResult(MOCK_INIT_RESULT, 'human');
 
@@ -190,16 +279,80 @@ describe('printInitResult', () => {
 
       warnSpy.mockRestore();
     });
+
+    it('configured-project readiness와 재시도 명령을 배열 그대로 출력한다', () => {
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+      printInitResult(
+        {
+          success: true,
+          mode: 'configured-project',
+          configPath: '/project/.agentteams/config.json',
+          conventionPath: '/project/.agentteams/convention.md',
+          conventionsUpdated: false,
+          doctor: { status: 'NOT_APPLICABLE', issues: [] },
+          readiness: [
+            { stage: 'project-binding', status: 'READY', issues: [] },
+            { stage: 'credential', status: 'READY', issues: [] },
+            {
+              stage: 'convention-sync',
+              status: 'DEGRADED',
+              issues: [{ code: 'sync-failed', message: 'Network unavailable' }],
+              retryCommand: 'agentteams convention download',
+            },
+            { stage: 'local-adapters', status: 'SKIPPED', issues: [] },
+          ],
+        },
+        'human',
+      );
+
+      const output = captureOutput(logSpy);
+      const warnings = captureOutput(warnSpy);
+      expect(output).toContain('[READY] project-binding');
+      expect(output).toContain('[SKIPPED] local-adapters');
+      expect(warnings).toContain('[DEGRADED] convention-sync');
+      expect(warnings).toContain('Retry: agentteams convention download');
+
+      warnSpy.mockRestore();
+    });
+
+    // 체크 표시와 바로 아래 readiness가 서로 다른 말을 하면, 로그를 훑는 사용자에게는
+    // 정상 완료로 읽힌다. 로컬 어댑터 줄은 doctor 판정을 그대로 따라야 한다.
+    it('doctor가 READY가 아니면 로컬 어댑터 체크 표시를 찍지 않는다', () => {
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+      const base = {
+        success: true,
+        mode: 'configured-project',
+        configPath: '/project/.agentteams/config.json',
+        conventionPath: '/project/.agentteams/convention.md',
+        conventionsUpdated: false,
+        readiness: [{ stage: 'local-adapters', status: 'DEGRADED', issues: [], retryCommand: 'agentteams doctor' }],
+      };
+
+      printInitResult({ ...base, doctor: { status: 'DEGRADED', issues: [] } }, 'human');
+
+      expect(captureOutput(logSpy)).not.toContain('✓ Local adapters checked');
+      expect(captureOutput(warnSpy)).toContain('Local adapters still need attention');
+
+      logSpy.mockClear();
+      warnSpy.mockClear();
+
+      printInitResult({ ...base, doctor: { status: 'READY', issues: [] } }, 'human');
+
+      expect(captureOutput(logSpy)).toContain('✓ Local adapters checked by agentteams doctor.');
+
+      warnSpy.mockRestore();
+    });
   });
 
   describe('개인 토큰 경로 (human format)', () => {
-    it('로그인 계정과 에이전트 키 폐기 결과를 사람용 출력에 표시한다', () => {
+    it('로그인 계정과 "키를 만들지 않았다"는 사실을 사람용 출력에 표시한다', () => {
       printInitResult(
         {
           ...MOCK_INIT_RESULT,
           authMode: 'personal-token' as const,
           personalLogin: { email: 'dev@example.com', nickname: 'dev', persisted: true },
-          agentKeyRevoked: true,
         },
         'human',
       );
@@ -207,7 +360,9 @@ describe('printInitResult', () => {
       const output = captureOutput(logSpy);
       expect(output).toContain('dev@example.com');
       expect(output).toContain('OS credential store');
-      expect(output).toContain('revoked');
+      // 이 경로는 setup 키를 발급하지 않으므로 "폐기했다"가 아니라 "만들지 않았다"가 참이다.
+      expect(output).toContain('No agent API key was created');
+      expect(output).not.toContain('revoked');
     });
 
     it('경고는 기본 포맷에서 반드시 보인다', () => {
@@ -219,13 +374,12 @@ describe('printInitResult', () => {
           ...MOCK_INIT_RESULT,
           authMode: 'personal-token' as const,
           personalLogin: { email: 'dev@example.com', nickname: 'dev', persisted: true },
-          agentKeyRevoked: false,
-          warning: 'The agent key created for "claude-main" could not be revoked and is still valid.',
+          warning: 'The convention sync finished with a partial result.',
         },
         'human',
       );
 
-      expect(captureOutput(warnSpy)).toContain('could not be revoked');
+      expect(captureOutput(warnSpy)).toContain('partial result');
 
       warnSpy.mockRestore();
     });
@@ -245,6 +399,37 @@ describe('printInitResult', () => {
 
       const output = captureOutput(logSpy);
       expect(output).not.toContain('Next steps:');
+    });
+
+    it('기존 필드를 유지하면서 4단계 readiness를 추가한다', () => {
+      printInitResult(MOCK_INIT_RESULT, 'json');
+
+      const parsed = JSON.parse(captureOutput(logSpy)) as Record<string, unknown>;
+      for (const key of Object.keys(MOCK_INIT_RESULT)) {
+        expect(parsed).toHaveProperty(key);
+      }
+      expect(parsed.readiness).toHaveLength(4);
+      expect(parsed.readiness).toEqual(MOCK_INIT_RESULT.readiness);
+    });
+
+    // localAdapters는 추가 필드다. 기존 소비자가 읽던 키가 하나라도 사라지면 안 된다.
+    it('어댑터 상태는 기존 필드를 건드리지 않고 추가만 한다', () => {
+      const localAdapters = [
+        { adapter: 'gitignore', status: 'READY', issues: [] },
+        {
+          adapter: 'post-checkout-hook',
+          status: 'SKIPPED',
+          issues: [{ code: 'post-checkout-hook-no-worktrees', message: "Run 'agentteams doctor' to install it." }],
+        },
+      ];
+
+      printInitResult({ ...MOCK_INIT_RESULT, localAdapters }, 'json');
+
+      const parsed = JSON.parse(captureOutput(logSpy)) as Record<string, unknown>;
+      for (const key of Object.keys(MOCK_INIT_RESULT)) {
+        expect(parsed).toHaveProperty(key);
+      }
+      expect(parsed.localAdapters).toEqual(localAdapters);
     });
   });
 });

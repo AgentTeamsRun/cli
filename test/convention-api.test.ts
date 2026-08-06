@@ -1,7 +1,10 @@
 import { describe, it, expect, afterEach, beforeEach, jest } from '@jest/globals';
 import axios from 'axios';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { downloadAllConventions, getConvention, listConventions } from '../src/api/convention.js';
-import { conventionList, conventionShow } from '../src/commands/convention.js';
+import { conventionDownload, conventionList, conventionShow } from '../src/commands/convention.js';
 
 const API_URL = 'http://localhost:3001';
 const PROJECT_ID = 'project-1';
@@ -139,5 +142,79 @@ describe('convention commands delegating to the api client', () => {
     jest.spyOn(axios, 'get').mockResolvedValue({ data: { data: 'not-an-array' } } as never);
 
     await expect(conventionShow()).rejects.toThrow('Invalid download-all response format');
+  });
+});
+
+/**
+ * `init`은 방금 연결한 AgentConfig를 알고 있으므로, 템플릿을 고르려고 목록을 다시 조회할 이유가
+ * 없다. 직접 `agentteams convention download`를 실행하는 사용자에게는 고를 근거가 없어 기존
+ * "목록 → 첫 항목" 폴백이 남아 있어야 한다.
+ */
+describe('conventionDownload agent config selection', () => {
+  const tempRoots: string[] = [];
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+    while (tempRoots.length > 0) {
+      rmSync(tempRoots.pop() as string, { recursive: true, force: true });
+    }
+  });
+
+  const createTempProject = (): string => {
+    const root = mkdtempSync(join(tmpdir(), 'agentteams-convention-'));
+    mkdirSync(join(root, '.agentteams'), { recursive: true });
+    writeFileSync(
+      join(root, '.agentteams', 'config.json'),
+      JSON.stringify({ projectId: PROJECT_ID, teamId: 'team-1' }),
+      'utf-8',
+    );
+    return root;
+  };
+
+  const mockDownloadResponses = (): string[] => {
+    const requestedUrls: string[] = [];
+    jest.spyOn(axios, 'get').mockImplementation((async (url: string) => {
+      requestedUrls.push(url);
+      if (url.endsWith('/api/platform/guides')) return { data: { data: [] } };
+      if (url.endsWith('/api/platform/guides/hash')) return { data: { data: { hash: 'aggregate-hash' } } };
+      if (url.endsWith('/agent-configs')) return { data: { data: [{ id: 'agent-first' }] } };
+      if (url.endsWith('/convention')) return { data: { data: { content: '# AGENT_RULES\n' } } };
+      if (url.endsWith('/download-all')) return { data: { data: [] } };
+      throw new Error(`unexpected GET ${url}`);
+    }) as never);
+    return requestedUrls;
+  };
+
+  const download = (root: string, agentConfigId?: string) =>
+    conventionDownload({
+      cwd: root,
+      config: { projectId: PROJECT_ID, teamId: 'team-1', apiUrl: API_URL, apiKey: 'key_test' } as never,
+      ...(agentConfigId ? { agentConfigId } : {}),
+    });
+
+  const conventionMarkdown = (root: string) => readFileSync(join(root, '.agentteams', 'convention.md'), 'utf-8');
+
+  it('skips the agent-config list request when the caller already knows the config id', async () => {
+    const root = createTempProject();
+    tempRoots.push(root);
+    const requestedUrls = mockDownloadResponses();
+
+    await download(root, 'agent-chosen');
+
+    expect(requestedUrls).not.toContain(`${API_URL}/api/projects/${PROJECT_ID}/agent-configs`);
+    expect(requestedUrls).toContain(`${API_URL}/api/projects/${PROJECT_ID}/agent-configs/agent-chosen/convention`);
+    expect(conventionMarkdown(root)).toBe('# AGENT_RULES\n');
+  });
+
+  it('keeps the list-then-first-item fallback when no config id is given', async () => {
+    const root = createTempProject();
+    tempRoots.push(root);
+    const requestedUrls = mockDownloadResponses();
+
+    await download(root);
+
+    expect(requestedUrls).toContain(`${API_URL}/api/projects/${PROJECT_ID}/agent-configs`);
+    expect(requestedUrls).toContain(`${API_URL}/api/projects/${PROJECT_ID}/agent-configs/agent-first/convention`);
+    expect(conventionMarkdown(root)).toBe('# AGENT_RULES\n');
   });
 });

@@ -89,18 +89,18 @@ describe('CLI Integration Tests', () => {
 
       const tempCwd = mkdtempSync(join(tmpdir(), 'agentteams-init-success-'));
       const closeSpy = jest.fn();
+      // 통합 setup 콜백: 인가 코드 + 연결 metadata. apiKey/apiUrl은 실리지 않는다.
       const callbackPayload = {
+        code: 'atc_authorization_code',
+        state: 'test-login-state',
         teamId: 'team_1',
         projectId: PROJECT_ID,
         agentName: 'test-agent',
-        apiKey: 'key_oauth_123',
-        apiUrl: API_URL,
         configId: '7',
+        seedPlanId: null,
       };
 
       axiosGetSpy
-        .mockResolvedValueOnce({ data: { data: { content: '# team convention\n- follow rules\n' } } } as any)
-        .mockResolvedValueOnce({ data: { data: [{ id: 'ag-1' }] } } as any)
         .mockResolvedValueOnce({ data: { data: { content: '# team convention\n- follow rules\n' } } } as any)
         .mockResolvedValueOnce({
           data: {
@@ -115,7 +115,7 @@ describe('CLI Integration Tests', () => {
         .mockResolvedValueOnce({ data: { data: { hash: 'platform-guides-hash-init-1' } } } as any)
         .mockResolvedValueOnce({ data: { data: [] } } as any);
 
-      const mockStartLocalAuthServer = jest.fn().mockReturnValue({
+      const mockStartUnifiedSetupServer = jest.fn().mockReturnValue({
         server: {
           listening: true,
           close: closeSpy,
@@ -133,22 +133,34 @@ describe('CLI Integration Tests', () => {
         isAxiosError: axios.isAxiosError,
       }));
       (jest as any).unstable_mockModule('../src/utils/authServer.js', () => ({
-        startLocalAuthServer: mockStartLocalAuthServer,
+        startLocalAuthServer: jest.fn(),
+        startUnifiedSetupServer: mockStartUnifiedSetupServer,
+        isUnifiedSetupMetadataMissing: (value: any) => value?.metadataMissing === true,
+        SETUP_METADATA_MISSING_HINT: 'older than this CLI',
+        SETUP_LEGACY_AGENT_KEY_HINT: 'older than this CLI',
+        parseUnifiedSetupPayload: jest.fn(),
         createAuthState: () => 'test-login-state',
         createPkcePair: () => ({ verifier: 'test-verifier', challenge: 'test-challenge' }),
         startAuthorizationCodeServer: jest.fn(),
       }));
-      const personalLoginMock = jest.fn(async () => ({
-        identity: { email: 'dev@example.com', nickname: 'dev' },
-        persisted: true,
+      const exchangeAuthorizationCode = jest.fn(async () => ({
+        accessToken: 'atp_access_token',
+        expiresAt: Date.now() + 60_000,
+        identity: { memberId: 'member-1', email: 'dev@example.com', nickname: 'dev' },
       }));
-      (jest as any).unstable_mockModule('../src/commands/auth.js', () => ({
-        performPersonalTokenLogin: personalLoginMock,
+      (jest as any).unstable_mockModule('../src/auth/personalTokenClient.js', () => ({
+        getPersonalTokenClient: () => ({
+          exchangeAuthorizationCode,
+          state: () => ({ persisted: true, identity: { email: 'dev@example.com' }, expiresAt: null }),
+          hasCredential: () => true,
+          getAccessToken: async () => 'atp_access_token',
+          invalidateAccessToken: () => {},
+        }),
+        PersonalTokenError: class PersonalTokenError extends Error {},
       }));
       (jest as any).unstable_mockModule('open', () => ({
         default: jest.fn().mockImplementation(async () => undefined),
       }));
-      axiosDeleteSpy.mockResolvedValueOnce({ data: {} } as any);
 
       const { executeInitCommand } = await import('../src/commands/init.js');
       const result = await executeInitCommand({ cwd: tempCwd });
@@ -164,7 +176,6 @@ describe('CLI Integration Tests', () => {
           agentName: 'test-agent',
           authMode: 'personal-token',
           personalLogin: { email: 'dev@example.com', nickname: 'dev', persisted: true },
-          agentKeyRevoked: true,
         }),
       );
       if ('mode' in result) {
@@ -173,7 +184,15 @@ describe('CLI Integration Tests', () => {
       const parsedAuthUrl = new URL(result.authUrl);
       expect(parsedAuthUrl.searchParams.get('ap')).toBeTruthy();
       expect(parsedAuthUrl.searchParams.get('state')).toBe('test-login-state');
+      expect(parsedAuthUrl.searchParams.get('flow')).toBe('setup');
+      expect(parsedAuthUrl.searchParams.get('code_challenge')).toBe('test-challenge');
       expect(result.authUrl).not.toContain(tempCwd);
+
+      expect(exchangeAuthorizationCode).toHaveBeenCalledWith({
+        code: 'atc_authorization_code',
+        codeVerifier: 'test-verifier',
+        redirectUri: 'http://localhost:7779/callback',
+      });
 
       const savedConfigText = readFileSync(result.configPath, 'utf-8');
       const savedConfig = JSON.parse(savedConfigText);
@@ -187,36 +206,28 @@ describe('CLI Integration Tests', () => {
       });
       expect(Object.keys(savedConfig).sort()).toEqual(['apiUrl', 'authMode', 'projectId', 'teamId']);
       expect(savedConfigText).not.toContain('key_');
-      expect(personalLoginMock).toHaveBeenCalledWith({
-        apiUrl: API_URL,
-        projectName: expect.any(String),
-      });
-      expect(axiosDeleteSpy).toHaveBeenCalledWith(`${API_URL}/api/projects/${PROJECT_ID}/agent-configs/7/api-keys`, {
-        headers: {
-          'X-API-Key': 'key_oauth_123',
-        },
-      });
+
+      // setup용 agent key는 발급도 폐기도 하지 않는다.
+      expect(axiosDeleteSpy).not.toHaveBeenCalled();
+      expect(axiosPostSpy.mock.calls.some(([url]) => typeof url === 'string' && url.includes('/api-keys'))).toBe(false);
 
       const savedConvention = readFileSync(result.conventionPath, 'utf-8');
       expect(savedConvention).toBe('# team convention\n- follow rules\n');
-      expect(axiosGetSpy).toHaveBeenCalledWith(`${API_URL}/api/projects/${PROJECT_ID}/agent-configs/7/convention`, {
-        headers: {
-          'X-API-Key': 'key_oauth_123',
-          'Content-Type': 'application/json',
-        },
-      });
-      expect(axiosGetSpy).toHaveBeenCalledWith(`${API_URL}/api/projects/${PROJECT_ID}/agent-configs`, {
-        headers: {
-          'X-API-Key': 'key_oauth_123',
-          'Content-Type': 'application/json',
-        },
-      });
-      expect(axiosGetSpy).toHaveBeenCalledWith(`${API_URL}/api/projects/${PROJECT_ID}/conventions/download-all`, {
-        headers: {
-          'X-API-Key': 'key_oauth_123',
-          'Content-Type': 'application/json',
-        },
-      });
+      // 이번 setup이 만든 config로 정확히 한 번만 템플릿을 받는다(목록 조회 없음).
+      const conventionTemplateCalls = axiosGetSpy.mock.calls.filter(
+        ([url]) => typeof url === 'string' && url.endsWith('/agent-configs/7/convention'),
+      );
+      expect(conventionTemplateCalls).toHaveLength(1);
+      expect(
+        axiosGetSpy.mock.calls.some(([url]) => url === `${API_URL}/api/projects/${PROJECT_ID}/agent-configs`),
+      ).toBe(false);
+      // 이 스위트는 AGENTTEAMS_API_KEY를 세팅하므로 명시적 env 키가 자격증명 우선순위를 이긴다.
+      // 여기서 고정하는 것은 "어떤 요청이 나갔는가"이지 자격증명 선택 규칙이 아니다.
+      expect(
+        axiosGetSpy.mock.calls.some(
+          ([url]) => url === `${API_URL}/api/projects/${PROJECT_ID}/conventions/download-all`,
+        ),
+      ).toBe(true);
 
       rmSync(tempCwd, { recursive: true, force: true });
     });
@@ -276,6 +287,11 @@ describe('CLI Integration Tests', () => {
       }));
       (jest as any).unstable_mockModule('../src/utils/authServer.js', () => ({
         startLocalAuthServer: mockStartLocalAuthServer,
+        startUnifiedSetupServer: jest.fn(),
+        isUnifiedSetupMetadataMissing: (value: any) => value?.metadataMissing === true,
+        SETUP_METADATA_MISSING_HINT: 'older than this CLI',
+        SETUP_LEGACY_AGENT_KEY_HINT: 'older than this CLI',
+        parseUnifiedSetupPayload: jest.fn(),
         createAuthState: () => 'test-login-state',
         createPkcePair: () => ({ verifier: 'test-verifier', challenge: 'test-challenge' }),
         startAuthorizationCodeServer: jest.fn(),

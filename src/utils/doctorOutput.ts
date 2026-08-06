@@ -29,15 +29,22 @@ export function printDoctorResult(result: DoctorResult, format: DoctorOutputForm
   console.log(`Changes applied: ${result.changedCount}`);
 
   if (result.layout === 'git-root') {
-    // A git root project's only managed artifact is this hook, so report it
-    // instead of the member repository table — including when the diagnosis
-    // stopped before the hook was even reached (rootHook: 'skipped'), where
+    // A git root project has no member repository table, so report the hook and
+    // the entry points instead — including when the diagnosis stopped before the
+    // hook was even reached (rootHook: 'skipped' with no gate issue), where
     // member repository terms would only mislead.
     if (result.rootHook === 'ready') {
       console.log("Worktree bootstrap hook: ready — new git worktrees auto-run 'agentteams init'");
     } else if (result.rootHook === 'blocked') {
       console.log("Worktree bootstrap hook: not installed — run 'agentteams init' inside each new worktree");
+    } else if (result.issues.some((issue) => issue.code === 'post-checkout-hook-no-worktrees')) {
+      console.log(
+        "Worktree bootstrap hook: skipped — no linked worktree yet; run 'agentteams doctor --install-worktree-hook' to install it now",
+      );
     }
+    console.log(
+      `Root entry points: ${result.rootEntryPoints.length > 0 ? result.rootEntryPoints.join(', ') : '(none)'}`,
+    );
     for (const issue of result.issues) {
       const marker = issue.severity === 'info' ? 'ℹ' : '⚠';
       console.log(`${marker} [${issue.code}] ${issue.message}`);

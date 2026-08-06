@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, it } from '@jest/globals';
 import type { Server as HttpServer } from 'node:http';
-import { createAuthState, startLocalAuthServer } from '../src/utils/authServer.js';
+import {
+  createAuthState,
+  parseUnifiedSetupPayload,
+  SETUP_METADATA_MISSING_HINT,
+  startLocalAuthServer,
+  startUnifiedSetupServer,
+} from '../src/utils/authServer.js';
 
 const WEB_ORIGIN = 'https://web.test.agentteams.run';
 
@@ -219,5 +225,102 @@ describe('startLocalAuthServer', () => {
     const response = await postCallback(context.port, { teamId: 'team_1', state: context.state });
 
     expect(response.status).toBe(400);
+  });
+});
+
+describe('startUnifiedSetupServer', () => {
+  const setupPayload = (state: string): CallbackPayload => ({
+    code: 'atc_authorization_code',
+    state,
+    teamId: 'team_1',
+    projectId: 'project_1',
+    configId: 'config_1',
+    agentName: 'demo-agent',
+    seedPlanId: 'seed_1',
+  });
+
+  async function startSetupServer(): ReturnType<typeof startUnifiedSetupServer> {
+    const context = await startUnifiedSetupServer();
+    servers.push(context.server);
+    return context;
+  }
+
+  it('accepts the code plus the connection identifiers', async () => {
+    const context = await startSetupServer();
+    const pending = context.waitForCallback();
+    pendingCallbacks.push(pending);
+
+    const response = await postCallback(context.port, setupPayload(context.state));
+
+    expect(response.status).toBe(200);
+    await expect(pending).resolves.toEqual({
+      code: 'atc_authorization_code',
+      state: context.state,
+      teamId: 'team_1',
+      projectId: 'project_1',
+      configId: 'config_1',
+      agentName: 'demo-agent',
+      seedPlanId: 'seed_1',
+    });
+  });
+
+  it('drops fields the CLI does not trust, apiKey and apiUrl included', async () => {
+    const context = await startSetupServer();
+    const pending = context.waitForCallback();
+    pendingCallbacks.push(pending);
+
+    await postCallback(context.port, {
+      ...setupPayload(context.state),
+      apiKey: 'key_should_not_travel',
+      apiUrl: 'https://attacker.example',
+      refreshToken: 'rt_should_not_travel',
+    });
+
+    const result = (await pending) as Record<string, unknown>;
+    expect(Object.keys(result).sort()).toEqual([
+      'agentName',
+      'code',
+      'configId',
+      'projectId',
+      'seedPlanId',
+      'state',
+      'teamId',
+    ]);
+  });
+
+  it('reports a plain login callback from an older web as metadata-missing', async () => {
+    const context = await startSetupServer();
+    const pending = context.waitForCallback();
+    pendingCallbacks.push(pending);
+
+    // 구 web은 flow=setup을 모르고 순수 인가코드 분기로 떨어져 {code,state}만 돌려준다.
+    const response = await postCallback(context.port, { code: 'atc_authorization_code', state: context.state });
+
+    expect(response.status).toBe(200);
+    await expect(pending).resolves.toEqual({ metadataMissing: true });
+  });
+
+  it('rejects a payload with no authorization code at all', () => {
+    expect(parseUnifiedSetupPayload({ teamId: 'team_1', state: 'state' })).toBeNull();
+    expect(parseUnifiedSetupPayload('not-an-object')).toBeNull();
+  });
+
+  it('treats a blank connection identifier as metadata-missing rather than accepting it', () => {
+    expect(
+      parseUnifiedSetupPayload({
+        code: 'atc_code',
+        state: 'state',
+        teamId: 'team_1',
+        projectId: '',
+        configId: 'config_1',
+        agentName: 'demo-agent',
+      }),
+    ).toEqual({ metadataMissing: true });
+  });
+
+  it('explains that the web deploy is behind and that nothing was consumed', () => {
+    expect(SETUP_METADATA_MISSING_HINT).toContain('older than this CLI');
+    expect(SETUP_METADATA_MISSING_HINT).toContain('agentteams init');
+    expect(SETUP_METADATA_MISSING_HINT).toContain('discarded');
   });
 });
