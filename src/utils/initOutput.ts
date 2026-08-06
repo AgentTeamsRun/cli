@@ -73,6 +73,18 @@ function isConfiguredProjectInitResult(result: unknown): result is ConfiguredPro
   );
 }
 
+function printAgentFiles(agentFiles: AgentFileEntry[] | undefined): void {
+  for (const file of agentFiles ?? []) {
+    if (file.type === 'created') {
+      console.log(`✓ Agent file created: ${file.relativePath}`);
+    } else if (file.type === 'example') {
+      console.log(`✓ Example file created: ${file.relativePath}`);
+    } else {
+      console.log(`- Agent file already exists, left untouched: ${file.relativePath}`);
+    }
+  }
+}
+
 function printReadiness(readiness: InitReadinessStep[]): void {
   console.log('');
   console.log('Readiness:');
@@ -86,6 +98,14 @@ function printReadiness(readiness: InitReadinessStep[]): void {
       console.warn(`    Retry: ${step.retryCommand}`);
     } else {
       console.log(line);
+      // Issues print at every status, not just SKIPPED. The `local-adapters`
+      // rollup turns READY as soon as one adapter succeeded — and `.gitignore`
+      // always does — so a run that created no entry point file and installed no
+      // hook still reports READY. Printing only the tag there left the reasons
+      // sitting in the JSON payload with nothing on screen.
+      for (const issue of step.issues) {
+        console.log(`    ${issue.message}`);
+      }
     }
   }
 }
@@ -158,6 +178,9 @@ export function printInitResult(result: unknown, format: InitOutputFormat): void
     } else if (doctorStatus) {
       console.warn(`⚠ Local adapters were not checked (agentteams doctor: ${doctorStatus}).`);
     }
+    // The fast path re-applies the local adapters, so a file it repaired has to
+    // be visible here too — otherwise the only proof of the write is on disk.
+    printAgentFiles(result.agentFiles);
     printReadiness(result.readiness);
     return;
   }
@@ -218,20 +241,24 @@ export function printInitResult(result: unknown, format: InitOutputFormat): void
     }
   }
 
-  if (result.agentFiles && result.agentFiles.length > 0) {
-    for (const file of result.agentFiles) {
-      if (file.type === 'created') {
-        console.log(`✓ Agent file created: ${file.relativePath}`);
-      } else {
-        console.log(`✓ Example file created: ${file.relativePath}`);
-      }
-    }
-  }
+  printAgentFiles(result.agentFiles);
 
   console.log('');
   console.log('Next steps:');
-  console.log('  1. Check the generated agent files (CLAUDE.md, AGENTS.md, etc.)');
-  console.log('     If a -example file was created, merge it into your existing file.');
+
+  // Pointing at "the generated agent files" when the run generated none sent
+  // users looking for a CLAUDE.md that was never written. The readiness list
+  // above already says why it was skipped; this line offers the way to get one.
+  const writtenAgentFiles = (result.agentFiles ?? []).filter((file) => file.type !== 'skipped');
+  if (writtenAgentFiles.length > 0) {
+    console.log(`  1. Check the generated agent files (${writtenAgentFiles.map((f) => f.relativePath).join(', ')})`);
+    console.log('     If a -example file was created, merge it into your existing file.');
+  } else {
+    console.log('  1. No agent entry point file was created in this run.');
+    console.log(
+      "     Create one with 'agentteams init --agent-files CLAUDE.md' so agents load .agentteams/convention.md.",
+    );
+  }
 
   if (result.seedPlanId) {
     const seedPlanDisplayId = `agentteams_pln_${result.seedPlanId}`;

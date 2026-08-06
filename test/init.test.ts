@@ -22,6 +22,8 @@ import {
   executeInitCommand,
   type WorktreeInitResult,
 } from '../src/commands/init.js';
+import { detectAgentEntryPointFiles, parseAgentFilesOption } from '../src/utils/agentEntryPoints.js';
+import { hasLinkedGitWorktrees } from '../src/utils/git.js';
 import { isSamePath } from '../src/utils/path.js';
 
 const tempDirs: string[] = [];
@@ -284,6 +286,91 @@ describe('init helpers', () => {
     }
 
     expect(result).toBeUndefined();
+  });
+});
+
+describe('agent entry point selection inputs', () => {
+  function createDetectionDir(markers: string[]): string {
+    const dir = mkdtempSync(join(tmpdir(), 'agentteams-init-detect-test-'));
+    tempDirs.push(dir);
+    for (const marker of markers) {
+      mkdirSync(join(dir, marker), { recursive: true });
+    }
+    return dir;
+  }
+
+  // A repository created or cloned minutes ago has no `.claude/` yet — it appears
+  // only once the user approves project scope — so marker-only detection selected
+  // nothing exactly where a first `init` runs. Falling back to one file keeps a
+  // path from an agent to `.agentteams/convention.md`.
+  test('falls back to CLAUDE.md in a folder with no AI client signal', () => {
+    expect(detectAgentEntryPointFiles(createDetectionDir([]))).toEqual(['CLAUDE.md']);
+  });
+
+  test('detects each client from its own configuration directory', () => {
+    expect(detectAgentEntryPointFiles(createDetectionDir(['.claude']))).toEqual(['CLAUDE.md']);
+    expect(detectAgentEntryPointFiles(createDetectionDir(['.codex']))).toEqual(['AGENTS.md']);
+    expect(detectAgentEntryPointFiles(createDetectionDir(['.opencode']))).toEqual(['AGENTS.md']);
+    expect(detectAgentEntryPointFiles(createDetectionDir(['.cursor']))).toEqual(['.cursor/rules/agentteams.mdc']);
+    expect(detectAgentEntryPointFiles(createDetectionDir(['.claude', '.gemini']))).toEqual(['CLAUDE.md', 'GEMINI.md']);
+  });
+
+  // An existing entry point never produces a write — init leaves it alone — but
+  // it does say which client the folder uses, and the adapters downstream act on
+  // that: a hand-written GEMINI.md is what makes `.geminiignore` applicable.
+  test('an existing entry point file counts as a client signal', () => {
+    const dir = createDetectionDir([]);
+    writeFileSync(join(dir, 'GEMINI.md'), '# mine\n', 'utf-8');
+
+    expect(detectAgentEntryPointFiles(dir)).toEqual(['GEMINI.md']);
+  });
+
+  test('parseAgentFilesOption tells "no choice" apart from "create nothing"', () => {
+    expect(parseAgentFilesOption(undefined)).toBeNull();
+    expect(parseAgentFilesOption('')).toBeNull();
+    expect(parseAgentFilesOption('none')).toEqual([]);
+    expect(parseAgentFilesOption('CLAUDE.md, AGENTS.md')).toEqual(['CLAUDE.md', 'AGENTS.md']);
+    expect(parseAgentFilesOption('CLAUDE.md,CLAUDE.md')).toEqual(['CLAUDE.md']);
+  });
+
+  test('parseAgentFilesOption rejects an unknown value instead of dropping it', () => {
+    expect(() => parseAgentFilesOption('CLAUDE.txt')).toThrow(/Unknown --agent-files value/);
+    expect(() => parseAgentFilesOption('none,CLAUDE.md')).toThrow(/cannot be combined/);
+  });
+
+  test('hasLinkedGitWorktrees separates a plain repository from one with worktrees', () => {
+    const { repositoryDir, worktreeDir } = createRepository();
+
+    expect(hasLinkedGitWorktrees(repositoryDir)).toBe(true);
+    expect(hasLinkedGitWorktrees(worktreeDir)).toBe(true);
+
+    const plainRepositoryDir = mkdtempSync(join(tmpdir(), 'agentteams-init-plain-repo-test-'));
+    tempDirs.push(plainRepositoryDir);
+    execFileSync('git', ['init', '-b', 'main'], { cwd: plainRepositoryDir });
+
+    expect(hasLinkedGitWorktrees(plainRepositoryDir)).toBe(false);
+
+    // A directory that is not a repository at all must not read as "in use".
+    const nonRepositoryDir = mkdtempSync(join(tmpdir(), 'agentteams-init-nonrepo-test-'));
+    tempDirs.push(nonRepositoryDir);
+    expect(hasLinkedGitWorktrees(nonRepositoryDir)).toBe(false);
+  });
+
+  // `git worktree list --porcelain` keeps reporting a worktree whose directory is
+  // gone until `git worktree prune` runs, marking the record `prunable`. Counting
+  // records alone therefore claimed a repository still used worktrees after the
+  // last one had been deleted.
+  test('hasLinkedGitWorktrees ignores a prunable worktree record', () => {
+    const { repositoryDir, worktreeDir } = createRepository();
+
+    expect(hasLinkedGitWorktrees(repositoryDir)).toBe(true);
+
+    rmSync(worktreeDir, { recursive: true, force: true });
+
+    expect(
+      execFileSync('git', ['worktree', 'list', '--porcelain'], { cwd: repositoryDir, encoding: 'utf-8' }),
+    ).toContain('prunable');
+    expect(hasLinkedGitWorktrees(repositoryDir)).toBe(false);
   });
 });
 

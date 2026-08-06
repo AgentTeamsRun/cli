@@ -1,19 +1,4 @@
-import {
-  appendFileSync,
-  cpSync,
-  existsSync,
-  lstatSync,
-  mkdirSync,
-  readFileSync,
-  readdirSync,
-  realpathSync,
-  renameSync,
-  rmSync,
-  statSync,
-  symlinkSync,
-  unlinkSync,
-  writeFileSync,
-} from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { constants, createCipheriv, publicEncrypt, randomBytes } from 'node:crypto';
@@ -52,35 +37,31 @@ import {
 } from './convention.js';
 import { executeDoctorCommand, type DoctorResult } from './doctor.js';
 import type { AuthMode, Config } from '../types/index.js';
-import { resolveGitTopLevel, resolveMainCheckoutRoot } from '../utils/git.js';
+import { resolveGitTopLevel, shouldInstallWorktreeHook } from '../utils/git.js';
 import { canonicalizePath } from '../utils/path.js';
 import { readOrCreateMachineId } from '../utils/machineId.js';
 import { buildAuthHeaders } from '../utils/apiContext.js';
 import {
+  AGENT_ENTRY_POINT_FILES,
+  detectAgentEntryPointFiles,
+  parseAgentFilesOption,
+  type AgentEntryPointValue,
+} from '../utils/agentEntryPoints.js';
+import { bootstrapLinkedWorktree, resolveLinkedWorktreeSource, type WorktreeInitResult } from './initWorktree.js';
+import {
   DEFAULT_CONVENTION_REFERENCE,
-  ensureConventionEntryPoints,
-  ensureLocalExclude,
   ensurePostCheckoutHook,
-  isReadableRegularFile,
-  resolveGitCommonDir,
-  toAnchoredExcludePattern,
-  type ConventionEntryPointState,
-  type ConventionIssue,
   type EnsurePostCheckoutHookResult,
 } from '../utils/conventionLink.js';
 
+export { bootstrapLinkedWorktree } from './initWorktree.js';
+export type { WorktreeEntryPointEntry, WorktreeEntryPointState, WorktreeInitResult } from './initWorktree.js';
+
 const AUTH_BASE_URL = process.env.AGENTTEAMS_WEB_URL || 'https://agentteams.run';
 
-const AGENT_ENTRY_POINT_FILES = [
-  { value: 'CLAUDE.md', label: 'CLAUDE.md', hint: 'Claude Code' },
-  { value: 'AGENTS.md', label: 'AGENTS.md', hint: 'OpenCode / Codex' },
-  { value: 'GEMINI.md', label: 'GEMINI.md', hint: 'Antigravity' },
-  { value: '.cursor/rules/agentteams.mdc', label: '.cursor/rules/agentteams.mdc', hint: 'Cursor' },
-] as const;
 const CONFIG_DIR = '.agentteams';
 const CONFIG_FILE = 'config.json';
 const CONVENTION_FILE = 'convention.md';
-const RELINK_BACKUP_NAME = 'agentteams-relink';
 
 const AUTH_PATH_PUBLIC_KEY_PEM = `-----BEGIN PUBLIC KEY-----
 MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAs9s9+n0C8Z099LrOTlKB
@@ -96,6 +77,16 @@ type InitOptions = {
   cwd?: string;
   /** Personal login is the default; `api-key` is the explicit compatibility path. */
   authMode?: AuthMode;
+  /**
+   * Raw `--agent-files` value. Absent means "decide from detection or the
+   * interactive prompt"; `none` means "create nothing" — the two are different
+   * answers, so this stays a string rather than a pre-parsed list.
+   */
+  agentFiles?: unknown;
+  /** Restore the legacy `<name>-example` write when an entry point already exists. */
+  agentFilesExample?: boolean;
+  /** Install the managed post-checkout hook even without a linked worktree. */
+  installWorktreeHook?: boolean;
 };
 
 export type InitReadinessStatus = 'READY' | 'DEGRADED' | 'SKIPPED';
@@ -113,9 +104,36 @@ export type InitReadinessStep = {
   retryCommand?: string;
 };
 
+/**
+ * The local adapters init runs *after* the project binding and the credential
+ * are already on disk. They are reported one by one because they fail
+ * independently and each has its own repair command — collapsing them into a
+ * single verdict is what used to turn one unwritable file into
+ * "Initialization failed".
+ */
+export type InitAdapterName = 'gitignore' | 'agent-entry-points' | 'gemini-ignore' | 'post-checkout-hook';
+
+export type InitAdapterOutcome = {
+  adapter: InitAdapterName;
+  status: InitReadinessStatus;
+  issues: InitReadinessIssue[];
+  retryCommand?: string;
+};
+
 export type AgentFileEntry = {
   relativePath: string;
-  type: 'created' | 'example';
+  type: 'created' | 'example' | 'skipped';
+};
+
+/** One entry point path that could not be written, and why. */
+export type AgentEntryPointWriteFailure = {
+  relativePath: string;
+  message: string;
+};
+
+export type AgentEntryPointWriteResult = {
+  entries: AgentFileEntry[];
+  failures: AgentEntryPointWriteFailure[];
 };
 
 type OAuthInitResult = {
@@ -135,25 +153,8 @@ type OAuthInitResult = {
   personalLogin?: { email: string; nickname: string; persisted: boolean };
   warning?: string;
   readiness: InitReadinessStep[];
-};
-
-export type WorktreeEntryPointState = ConventionEntryPointState;
-
-export type WorktreeEntryPointEntry = {
-  relativePath: string;
-  state: WorktreeEntryPointState;
-};
-
-export type WorktreeInitResult = {
-  success: true;
-  mode: 'worktree';
-  worktreePath: string;
-  sourcePath: string;
-  targetPath: string;
-  materialization: 'symlink' | 'copy' | 'relinked' | 'existing' | 'blocked';
-  entryPoints: WorktreeEntryPointEntry[];
-  issues: ConventionIssue[];
-  warning?: string;
+  /** Per-adapter detail behind the `local-adapters` readiness step. Additive. */
+  localAdapters: InitAdapterOutcome[];
 };
 
 export type ConfiguredProjectInitResult = {
@@ -170,6 +171,11 @@ export type ConfiguredProjectInitResult = {
   conventionError?: string;
   doctor: DoctorResult;
   readiness: InitReadinessStep[];
+  /** Entry points this run wrote or left alone. Additive; the fast path repairs them too. */
+  agentFiles: AgentFileEntry[];
+  /** Per-adapter detail behind the `local-adapters` readiness step. Additive. */
+  localAdapters: InitAdapterOutcome[];
+  postCheckoutHook?: EnsurePostCheckoutHookResult;
 };
 
 type InitResult = OAuthInitResult | WorktreeInitResult | ConfiguredProjectInitResult;
@@ -392,9 +398,34 @@ async function fetchConventionTemplate(
   return content;
 }
 
-async function promptAgentFileSelection(): Promise<string[]> {
-  if (!process.stdin.isTTY) {
-    return AGENT_ENTRY_POINT_FILES.map((f) => f.value);
+/**
+ * Which entry point files this run may write.
+ *
+ * The order is deliberate: an explicit `--agent-files` wins over everything, a
+ * TTY still gets the multiselect (now seeded with what was detected instead of
+ * everything), and a non-TTY run gets the detection result alone. The old
+ * non-TTY branch returned the full catalog, so every automated re-run wrote all
+ * four files — and an `-example` sibling for each one that already existed.
+ */
+/**
+ * `allowPrompt` is false on the configured-project repair pass: that path exists
+ * to make a re-run of `agentteams init` actually re-apply the local adapters,
+ * and a fast path that stops to ask a question is no longer a fast path.
+ * Detection still runs there, so a missing entry point is created and an
+ * existing one is reported as untouched.
+ */
+async function resolveAgentFileSelection(
+  cwd: string,
+  explicitFiles: AgentEntryPointValue[] | null,
+  options?: { allowPrompt?: boolean },
+): Promise<AgentEntryPointValue[]> {
+  if (explicitFiles) {
+    return explicitFiles;
+  }
+
+  const detected = detectAgentEntryPointFiles(cwd);
+  if (options?.allowPrompt === false || !process.stdin.isTTY) {
+    return detected;
   }
 
   const selected = await multiselect({
@@ -404,7 +435,7 @@ async function promptAgentFileSelection(): Promise<string[]> {
       label: f.label,
       hint: f.hint,
     })),
-    initialValues: AGENT_ENTRY_POINT_FILES.map((f) => f.value),
+    initialValues: detected,
     required: false,
   });
 
@@ -413,7 +444,7 @@ async function promptAgentFileSelection(): Promise<string[]> {
     process.exit(0);
   }
 
-  return selected as string[];
+  return selected as AgentEntryPointValue[];
 }
 
 function ensureGitignore(cwd: string): void {
@@ -454,75 +485,64 @@ function ensureGeminiIgnore(cwd: string): void {
   }
 }
 
-function generateAgentEntryPointFiles(cwd: string, selectedFiles: string[]): AgentFileEntry[] {
-  if (selectedFiles.length === 0) {
-    return [];
-  }
-
+/**
+ * Write the selected entry points, never over an existing file.
+ *
+ * An occupied path is reported as `skipped` rather than answered with a
+ * `<name>-example` sibling: the example write is unconditional, so a repeated
+ * init kept re-creating files nobody merged. `--agent-files-example` restores
+ * the old behavior for the case it was built for — a first-time setup on a repo
+ * that already has its own CLAUDE.md.
+ *
+ * Each file is written under its own try/catch and failures come back alongside
+ * the entries instead of as an exception. Letting one unwritable path throw out
+ * of the loop discarded the record of every file already on disk, so the caller
+ * reported `agentFiles: []` for a run that had in fact created some of them —
+ * the JSON contract and the human output both disagreeing with the filesystem.
+ */
+function generateAgentEntryPointFiles(
+  cwd: string,
+  selectedFiles: string[],
+  options: { createExample: boolean },
+): AgentEntryPointWriteResult {
   const entries: AgentFileEntry[] = [];
+  const failures: AgentEntryPointWriteFailure[] = [];
 
   for (const relativePath of selectedFiles) {
     const fullPath = join(cwd, relativePath);
-    const dir = dirname(fullPath);
-    if (!existsSync(dir)) {
-      mkdirSync(dir, { recursive: true });
-    }
 
-    if (!existsSync(fullPath)) {
+    try {
+      if (existsSync(fullPath)) {
+        if (!options.createExample) {
+          entries.push({ relativePath, type: 'skipped' });
+          continue;
+        }
+
+        const ext = relativePath.includes('.') ? `.${relativePath.split('.').pop()}` : '';
+        const base = ext ? relativePath.slice(0, -ext.length) : relativePath;
+        const exampleRelativePath = `${base}-example${ext}`;
+        const exampleFullPath = join(cwd, exampleRelativePath);
+        const exampleDir = dirname(exampleFullPath);
+        if (!existsSync(exampleDir)) {
+          mkdirSync(exampleDir, { recursive: true });
+        }
+        writeFileSync(exampleFullPath, DEFAULT_CONVENTION_REFERENCE, 'utf-8');
+        entries.push({ relativePath: exampleRelativePath, type: 'example' });
+        continue;
+      }
+
+      const dir = dirname(fullPath);
+      if (!existsSync(dir)) {
+        mkdirSync(dir, { recursive: true });
+      }
       writeFileSync(fullPath, DEFAULT_CONVENTION_REFERENCE, 'utf-8');
       entries.push({ relativePath, type: 'created' });
-    } else {
-      const ext = relativePath.includes('.') ? `.${relativePath.split('.').pop()}` : '';
-      const base = ext ? relativePath.slice(0, -ext.length) : relativePath;
-      const exampleRelativePath = `${base}-example${ext}`;
-      const exampleFullPath = join(cwd, exampleRelativePath);
-      const exampleDir = dirname(exampleFullPath);
-      if (!existsSync(exampleDir)) {
-        mkdirSync(exampleDir, { recursive: true });
-      }
-      writeFileSync(exampleFullPath, DEFAULT_CONVENTION_REFERENCE, 'utf-8');
-      entries.push({ relativePath: exampleRelativePath, type: 'example' });
+    } catch (error) {
+      failures.push({ relativePath, message: toErrorMessage(error) });
     }
   }
 
-  return entries;
-}
-
-function isConfiguredMainCheckout(sourcePath: string): boolean {
-  try {
-    const config = JSON.parse(readFileSync(join(sourcePath, CONFIG_FILE), 'utf-8')) as Record<string, unknown>;
-    return ['teamId', 'projectId'].every((field) => typeof config[field] === 'string' && config[field].length > 0);
-  } catch {
-    return false;
-  }
-}
-
-/**
- * The one precondition set that says "this directory is a linked worktree whose
- * main checkout is already configured".
- *
- * `bootstrapLinkedWorktree` and the read-only classifier both need this answer,
- * and a copy in each would let them drift: the classifier reporting
- * `linked-worktree` while the bootstrap returns null drops init into the full
- * browser OAuth flow with no warning.
- */
-function resolveLinkedWorktreeSource(cwd: string): { worktreePath: string; sourcePath: string } | null {
-  let worktreePath: string;
-  try {
-    worktreePath = canonicalizePath(resolve(cwd));
-  } catch {
-    return null;
-  }
-
-  if (resolveGitTopLevel(worktreePath) !== worktreePath) return null;
-
-  const mainCheckoutRoot = resolveMainCheckoutRoot(worktreePath);
-  if (!mainCheckoutRoot) return null;
-
-  const sourcePath = join(mainCheckoutRoot, CONFIG_DIR);
-  if (!existsSync(sourcePath) || !isConfiguredMainCheckout(sourcePath)) return null;
-
-  return { worktreePath, sourcePath };
+  return { entries, failures };
 }
 
 function toComparablePath(path: string): string {
@@ -598,330 +618,8 @@ export function detectInitExecutionContext(
   return { kind, configPath, config };
 }
 
-/**
- * Materialize the worktree's `.agentteams` entry as a real link.
- *
- * Windows directory symlinks require SeCreateSymbolicLinkPrivilege (Developer
- * Mode or elevation), so an unprivileged win32 run fails with EPERM and used to
- * fall through to a copy — silently breaking the guarantee that a worktree
- * tracks the main checkout's conventions. Junctions need no privilege, which is
- * why `utils/conventionLink.ts` and the daemon's worktree helper already use
- * them; this is the same documented platform exception.
- *
- * The copy fallback stays for environments neither link type supports (UNC
- * paths, filesystems without reparse points). It dereferences because in a
- * non-git-root layout the source is itself a link, and copying a link
- * recursively re-creates it — which fails for exactly the same reason.
- */
-function linkConventionDir(
-  sourcePath: string,
-  targetPath: string,
-): { materialization: 'symlink' | 'copy'; warning?: string } {
-  try {
-    if (process.platform === 'win32') {
-      // Junctions only accept absolute targets, so resolve the chain first.
-      symlinkSync(realpathSync(sourcePath), targetPath, 'junction');
-    } else {
-      symlinkSync(sourcePath, targetPath, 'dir');
-    }
-    return { materialization: 'symlink' };
-  } catch (error) {
-    cpSync(sourcePath, targetPath, { recursive: true, dereference: true });
-    return {
-      materialization: 'copy',
-      warning: `Could not create the .agentteams symlink (${error instanceof Error ? error.message : String(error)}). Copied the directory instead.`,
-    };
-  }
-}
-
-/**
- * Decide whether a plain directory sitting at the worktree's `.agentteams` may
- * be the copy an earlier failed link attempt left behind, rather than something
- * the user created. Identity is judged by the config file, the one artifact a
- * copy reproduces byte for byte — anything else is treated as the user's and is
- * never touched. This only authorizes moving the directory aside; whether the
- * moved copy may be deleted is decided separately by `findCopyOnlyFiles`.
- */
-function isCopyOfMainCheckout(sourcePath: string, targetPath: string): boolean {
-  try {
-    return (
-      readFileSync(join(targetPath, CONFIG_FILE), 'utf-8') === readFileSync(join(sourcePath, CONFIG_FILE), 'utf-8')
-    );
-  } catch {
-    return false;
-  }
-}
-
 function toErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-function hasIdenticalFile(sourceFile: string, backupFile: string): boolean {
-  try {
-    const sourceStats = statSync(sourceFile);
-    if (!sourceStats.isFile() || sourceStats.size !== statSync(backupFile).size) return false;
-    return readFileSync(sourceFile).equals(readFileSync(backupFile));
-  } catch {
-    return false;
-  }
-}
-
-/**
- * List every file in the moved-aside copy that the main checkout does not
- * already hold byte for byte. A worktree that ran as a copy accumulates its own
- * artifacts inside `.agentteams` — runner history, evidence, downloaded plans,
- * review findings — and none of them can be regenerated, so the copy is only
- * safe to delete when it is a strict subset of the source. Anything that is not
- * a plain matching file (a symlink, a special file, an unreadable directory)
- * counts as copy-only: it cannot be proven redundant.
- */
-function findCopyOnlyFiles(backupPath: string, sourcePath: string): string[] {
-  const copyOnlyFiles: string[] = [];
-
-  const walk = (relativeDir: string): void => {
-    let entries;
-    try {
-      entries = readdirSync(join(backupPath, relativeDir), { withFileTypes: true });
-    } catch {
-      copyOnlyFiles.push(relativeDir || '.');
-      return;
-    }
-
-    for (const entry of entries) {
-      const relativePath = relativeDir ? join(relativeDir, entry.name) : entry.name;
-      if (entry.isDirectory()) {
-        walk(relativePath);
-      } else if (!entry.isFile() || !hasIdenticalFile(join(sourcePath, relativePath), join(backupPath, relativePath))) {
-        copyOnlyFiles.push(relativePath);
-      }
-    }
-  };
-
-  walk('');
-  return copyOnlyFiles;
-}
-
-/**
- * Park the copy outside every tracked surface while the link is created. A
- * backup next to `.agentteams` would show up in `git status` — the anchored
- * `/.agentteams` exclude is an exact match and does not cover a sibling name —
- * and a copied legacy `config.json` may carry the project apiKey.
- * `git-common-dir` is part of no working tree, so nothing can surface from
- * there. A worktree on a different volume cannot be renamed into it, and only
- * then does the in-worktree fallback apply — after registering its own exclude
- * pattern.
- */
-function moveConventionCopyAside(worktreePath: string, targetPath: string): { backupPath: string } | { error: string } {
-  const failures: string[] = [];
-
-  const commonDir = resolveGitCommonDir(worktreePath);
-  if (commonDir) {
-    const backupPath = join(commonDir, `${RELINK_BACKUP_NAME}-${process.pid}`);
-    try {
-      renameSync(targetPath, backupPath);
-      return { backupPath };
-    } catch (error) {
-      failures.push(toErrorMessage(error));
-    }
-  }
-
-  const excludeResult = ensureLocalExclude(worktreePath, [toAnchoredExcludePattern(`.${RELINK_BACKUP_NAME}`)]);
-  if (excludeResult.status !== 'ready') {
-    failures.push(
-      `the in-worktree backup cannot be kept out of git status (${excludeResult.issue?.message ?? 'local exclude is blocked'})`,
-    );
-    return { error: failures.join('; ') };
-  }
-
-  try {
-    const backupPath = join(worktreePath, `.${RELINK_BACKUP_NAME}`);
-    renameSync(targetPath, backupPath);
-    return { backupPath };
-  } catch (error) {
-    failures.push(toErrorMessage(error));
-    return { error: failures.join('; ') };
-  }
-}
-
-/** Undo the move-aside. The target may hold a fresh link or a partial copy, and
- * `renameSync` onto a non-empty directory fails with ENOTEMPTY, so clear it
- * first and never let the restore itself escape as an exception. */
-function restoreConventionCopy(backupPath: string, targetPath: string): boolean {
-  try {
-    rmSync(targetPath, { recursive: true, force: true });
-    renameSync(backupPath, targetPath);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Replace a copied `.agentteams` directory with a real link so a worktree that
- * predates the link fix starts tracking the main checkout again. Without this
- * the `existing` branch treats the copy as settled and the worktree keeps
- * serving stale conventions forever.
- *
- * The copy is moved aside first and is deleted only once the link is in place
- * *and* the copy proves to be a strict subset of the main checkout; otherwise
- * the backup is kept and its path reported. Any failure restores the original
- * directory, and a failed restore reports where the original is.
- */
-function promoteCopiedConventionDir(
-  worktreePath: string,
-  sourcePath: string,
-  targetPath: string,
-): { materialization: 'relinked' | 'existing'; issue?: ConventionIssue } {
-  if (!isCopyOfMainCheckout(sourcePath, targetPath)) {
-    return {
-      materialization: 'existing',
-      issue: {
-        code: 'link-occupied',
-        path: targetPath,
-        message: `The directory at ${targetPath} does not match the main checkout's ${CONFIG_DIR}; leaving it untouched. Remove it manually to restore the convention link.`,
-      },
-    };
-  }
-
-  const moved = moveConventionCopyAside(worktreePath, targetPath);
-  if ('error' in moved) {
-    return {
-      materialization: 'existing',
-      issue: {
-        code: 'link-create-failed',
-        path: targetPath,
-        message: `Could not move the copied ${CONFIG_DIR} aside at ${targetPath}: ${moved.error}`,
-      },
-    };
-  }
-  const { backupPath } = moved;
-
-  try {
-    const { materialization } = linkConventionDir(sourcePath, targetPath);
-    // A copy fallback here would only rebuild the state being replaced.
-    if (materialization !== 'symlink') {
-      throw new Error('the link could not be created and a copy would not restore the convention chain');
-    }
-  } catch (error) {
-    const restored = restoreConventionCopy(backupPath, targetPath);
-    return {
-      materialization: 'existing',
-      issue: {
-        code: 'link-create-failed',
-        path: targetPath,
-        message: restored
-          ? `Could not relink ${targetPath} to the main checkout: ${toErrorMessage(error)}`
-          : `Could not relink ${targetPath} to the main checkout: ${toErrorMessage(error)}. The original ${CONFIG_DIR} was left at ${backupPath}; move it back manually.`,
-      },
-    };
-  }
-
-  const copyOnlyFiles = findCopyOnlyFiles(backupPath, sourcePath);
-  if (copyOnlyFiles.length > 0) {
-    return {
-      materialization: 'relinked',
-      issue: {
-        code: 'link-backup-retained',
-        path: backupPath,
-        message: `Kept ${copyOnlyFiles.length} file(s) that exist only in the replaced ${CONFIG_DIR} copy (${copyOnlyFiles.slice(0, 3).join(', ')}${copyOnlyFiles.length > 3 ? ', …' : ''}) at ${backupPath}; move what you still need out of it and delete it.`,
-      },
-    };
-  }
-
-  rmSync(backupPath, { recursive: true, force: true });
-  return { materialization: 'relinked' };
-}
-
-function isBrokenSymbolicLink(path: string): boolean {
-  try {
-    return lstatSync(path).isSymbolicLink() && !existsSync(path);
-  } catch {
-    return false;
-  }
-}
-
-export function bootstrapLinkedWorktree(cwd: string): WorktreeInitResult | null {
-  const linkedWorktree = resolveLinkedWorktreeSource(cwd);
-  if (!linkedWorktree) return null;
-  const { worktreePath, sourcePath } = linkedWorktree;
-
-  // The convention root is the parent of the canonical .agentteams directory.
-  // Following the canonical path resolves double links as well
-  // (worktree/.agentteams → member/.agentteams → non-git-root/.agentteams),
-  // so the entry point set is read from the actual root — not the member repo.
-  let conventionRoot: string | null = null;
-  try {
-    conventionRoot = dirname(canonicalizePath(sourcePath));
-  } catch {
-    conventionRoot = null;
-  }
-
-  const selectedEntryPoints = conventionRoot
-    ? AGENT_ENTRY_POINT_FILES.map((f) => f.value).filter((relativePath) =>
-        isReadableRegularFile(join(conventionRoot, relativePath)),
-      )
-    : [];
-
-  // Local exclude registration comes before creating any managed path so a
-  // bootstrap never dirties the shared repository state.
-  const issues: ConventionIssue[] = [];
-  const excludeResult = ensureLocalExclude(worktreePath, [
-    toAnchoredExcludePattern(CONFIG_DIR),
-    ...selectedEntryPoints.map(toAnchoredExcludePattern),
-  ]);
-  if (excludeResult.status === 'blocked' && excludeResult.issue) {
-    issues.push(excludeResult.issue);
-  }
-  const excludeReady = excludeResult.status === 'ready';
-
-  const targetPath = join(worktreePath, CONFIG_DIR);
-  let materialization: WorktreeInitResult['materialization'];
-  let warning: string | undefined;
-
-  if (!excludeReady) {
-    materialization = existsSync(targetPath) ? 'existing' : 'blocked';
-  } else if (isBrokenSymbolicLink(targetPath)) {
-    unlinkSync(targetPath);
-    ({ materialization, warning } = linkConventionDir(sourcePath, targetPath));
-  } else if (existsSync(targetPath)) {
-    // An entry that is already a link is settled; a plain directory is either a
-    // copy left by a failed link attempt or something the user put there.
-    if (lstatSync(targetPath).isSymbolicLink()) {
-      materialization = 'existing';
-    } else {
-      const promotion = promoteCopiedConventionDir(worktreePath, sourcePath, targetPath);
-      materialization = promotion.materialization;
-      if (promotion.issue) {
-        issues.push(promotion.issue);
-      }
-    }
-  } else {
-    ({ materialization, warning } = linkConventionDir(sourcePath, targetPath));
-  }
-
-  const entryPointResult = ensureConventionEntryPoints(worktreePath, selectedEntryPoints, {
-    allowCreate: excludeReady,
-    validateExistingReference: false,
-  });
-  issues.push(...entryPointResult.issues);
-  const entryPoints = entryPointResult.entries.map(({ relativePath, state }) => ({ relativePath, state }));
-
-  const result: WorktreeInitResult = {
-    success: true,
-    mode: 'worktree',
-    worktreePath,
-    sourcePath,
-    targetPath,
-    materialization,
-    entryPoints,
-    issues,
-  };
-
-  if (warning) {
-    result.warning = warning;
-  }
-
-  return result;
 }
 
 export async function executeInitCommand(options?: InitOptions): Promise<InitResult> {
@@ -1177,6 +875,7 @@ async function runLegacyApiKeySetup(context: SetupContext): Promise<SetupOutcome
 async function runConfiguredProjectInit(
   cwd: string,
   executionContext: InitExecutionContext,
+  adapterOptions: LocalAdapterPassOptions,
 ): Promise<ConfiguredProjectInitResult> {
   const configPath = executionContext.configPath;
   const projectConfig = executionContext.config;
@@ -1224,10 +923,15 @@ async function runConfiguredProjectInit(
     conventionError = toErrorMessage(error);
   }
 
-  const doctor = await executeDoctorCommand({ cwd });
+  // The same adapters the new-project path runs. Without them a re-run of
+  // `agentteams init` — which is exactly what every adapter retry command tells
+  // the user to do — verified the binding and changed nothing else.
+  const adapterPass = await runLocalAdapterPass(cwd, adapterOptions);
+
+  const doctor = await executeDoctorCommand({ cwd, installWorktreeHook: adapterOptions.installWorktreeHook });
   const configuredAuthMode: AuthMode =
     runtimeConfig.credentialSource === 'personal-token' ? 'personal-token' : 'api-key';
-  const readiness = buildConfiguredProjectReadiness(conventionError, doctor);
+  const readiness = buildConfiguredProjectReadiness(conventionError, doctor, adapterPass.adapters);
 
   return {
     success: true,
@@ -1243,12 +947,25 @@ async function runConfiguredProjectInit(
     ...(conventionError ? { conventionError } : {}),
     doctor,
     readiness,
+    agentFiles: adapterPass.agentFiles,
+    localAdapters: adapterPass.adapters,
+    ...(adapterPass.postCheckoutHook ? { postCheckoutHook: adapterPass.postCheckoutHook } : {}),
   };
 }
 
+/**
+ * Roll the doctor verdict *and* the local adapter outcomes into one
+ * `local-adapters` step.
+ *
+ * Both sources matter: the doctor owns the layout-level diagnosis (member repo
+ * links, config permissions) while the adapters own the files this command
+ * writes, and a step that reported only one of them would call the stage READY
+ * while the other was degraded.
+ */
 function buildConfiguredProjectReadiness(
   conventionError: string | undefined,
   doctor: DoctorResult,
+  adapters: InitAdapterOutcome[],
 ): InitReadinessStep[] {
   const conventionStep: InitReadinessStep = conventionError
     ? {
@@ -1259,26 +976,33 @@ function buildConfiguredProjectReadiness(
       }
     : { stage: 'convention-sync', status: 'READY', issues: [] };
 
-  let localAdaptersStep: InitReadinessStep;
-  if (doctor.status === 'NOT_APPLICABLE') {
-    localAdaptersStep = {
-      stage: 'local-adapters',
-      status: 'SKIPPED',
-      issues: doctor.issues.map(({ code, message }) => ({ code, message })),
-    };
-  } else if (doctor.status === 'DEGRADED') {
-    localAdaptersStep = {
-      stage: 'local-adapters',
-      status: 'DEGRADED',
-      issues:
-        doctor.issues.length > 0
-          ? doctor.issues.map(({ code, message }) => ({ code, message }))
-          : [{ code: 'doctor-degraded', message: 'Local adapters still need attention.' }],
-      retryCommand: 'agentteams doctor',
-    };
-  } else {
-    localAdaptersStep = { stage: 'local-adapters', status: 'READY', issues: [] };
-  }
+  const degradedAdapters = adapters.filter((adapter) => adapter.status === 'DEGRADED');
+  const doctorDegraded = doctor.status === 'DEGRADED';
+
+  // A NOT_APPLICABLE doctor still contributes its reason: `printReadiness` shows
+  // issues at every status, so the note survives even when an adapter succeeded
+  // and the step as a whole is READY.
+  const issues: InitReadinessIssue[] = [
+    ...(doctor.status === 'READY' ? [] : doctor.issues.map(({ code, message }) => ({ code, message }))),
+    ...adapters.filter((adapter) => adapter.status !== 'READY').flatMap((adapter) => adapter.issues),
+  ];
+
+  const status: InitReadinessStatus =
+    doctorDegraded || degradedAdapters.length > 0
+      ? 'DEGRADED'
+      : adapters.some((adapter) => adapter.status === 'READY')
+        ? 'READY'
+        : 'SKIPPED';
+
+  const localAdaptersStep: InitReadinessStep = {
+    stage: 'local-adapters',
+    status,
+    issues:
+      status === 'DEGRADED' && issues.length === 0
+        ? [{ code: 'doctor-degraded', message: 'Local adapters still need attention.' }]
+        : issues,
+    ...(status === 'DEGRADED' ? { retryCommand: degradedAdapters[0]?.retryCommand ?? 'agentteams doctor' } : {}),
+  };
 
   return [
     { stage: 'project-binding', status: 'READY', issues: [] },
@@ -1288,21 +1012,29 @@ function buildConfiguredProjectReadiness(
   ];
 }
 
-function buildNewProjectReadiness(postCheckoutHook?: EnsurePostCheckoutHookResult): InitReadinessStep[] {
-  const localAdaptersStep: InitReadinessStep =
-    postCheckoutHook?.status === 'blocked'
-      ? {
-          stage: 'local-adapters',
-          status: 'DEGRADED',
-          issues: [
-            {
-              code: postCheckoutHook.issue?.code ?? 'post-checkout-hook-blocked',
-              message: postCheckoutHook.issue?.message ?? 'The worktree bootstrap hook could not be installed.',
-            },
-          ],
-          retryCommand: 'agentteams doctor',
-        }
-      : { stage: 'local-adapters', status: 'READY', issues: [] };
+/**
+ * Roll the per-adapter outcomes into the single `local-adapters` readiness step.
+ *
+ * A degraded adapter dominates, and `SKIPPED` requires *every* adapter to have
+ * skipped — which the always-on `.gitignore` adapter makes unreachable today.
+ * The rule is kept honest for the day that adapter becomes conditional, but it
+ * is deliberately not what makes a partial skip visible: one green
+ * `[READY] local-adapters` line above a hook that was never installed is exactly
+ * the mismatch this list exists to prevent, so `printReadiness` prints the
+ * issues of every step regardless of its status. Every non-READY adapter
+ * contributes its issues, so the reason travels with the line.
+ */
+function buildNewProjectReadiness(adapters: InitAdapterOutcome[]): InitReadinessStep[] {
+  const degraded = adapters.filter((adapter) => adapter.status === 'DEGRADED');
+  const status: InitReadinessStatus =
+    degraded.length > 0 ? 'DEGRADED' : adapters.some((adapter) => adapter.status === 'READY') ? 'READY' : 'SKIPPED';
+
+  const localAdaptersStep: InitReadinessStep = {
+    stage: 'local-adapters',
+    status,
+    issues: adapters.filter((adapter) => adapter.status !== 'READY').flatMap((adapter) => adapter.issues),
+    ...(degraded.length > 0 ? { retryCommand: degraded[0].retryCommand ?? 'agentteams doctor' } : {}),
+  };
 
   return [
     { stage: 'project-binding', status: 'READY', issues: [] },
@@ -1312,10 +1044,220 @@ function buildNewProjectReadiness(postCheckoutHook?: EnsurePostCheckoutHookResul
   ];
 }
 
+/**
+ * Run one local adapter without letting it fail the init that already
+ * succeeded.
+ *
+ * By the time these run, the credential is in the OS store and the config is on
+ * disk. An exception escaping from here used to surface as
+ * `Initialization failed: EACCES ...` for a project that was, in fact, fully
+ * connected — so every adapter is isolated and reports `DEGRADED` with its own
+ * retry command instead. Failures are never swallowed: an adapter that throws
+ * always produces an issue.
+ */
+async function runLocalAdapter(
+  adapter: InitAdapterName,
+  retryCommand: string,
+  run: () =>
+    | Promise<Omit<InitAdapterOutcome, 'adapter' | 'retryCommand'>>
+    | Omit<InitAdapterOutcome, 'adapter' | 'retryCommand'>,
+): Promise<InitAdapterOutcome> {
+  try {
+    const outcome = await run();
+    return {
+      adapter,
+      status: outcome.status,
+      issues: outcome.issues,
+      ...(outcome.status === 'DEGRADED' ? { retryCommand } : {}),
+    };
+  } catch (error) {
+    return {
+      adapter,
+      status: 'DEGRADED',
+      issues: [{ code: `${adapter}-failed`, message: toErrorMessage(error) }],
+      retryCommand,
+    };
+  }
+}
+
+type LocalAdapterPassOptions = {
+  explicitAgentFiles: AgentEntryPointValue[] | null;
+  agentFilesExample: boolean;
+  installWorktreeHook: boolean;
+  /** Only the new-project path may stop and ask which entry points to write. */
+  allowPrompt: boolean;
+};
+
+type LocalAdapterPassResult = {
+  adapters: InitAdapterOutcome[];
+  agentFiles: AgentFileEntry[];
+  postCheckoutHook?: EnsurePostCheckoutHookResult;
+};
+
+/**
+ * The four local adapters, run identically by both init paths.
+ *
+ * This is shared rather than duplicated because the adapters advertise retry
+ * commands (`agentteams init`, `agentteams init --agent-files <list>`) and those
+ * are all `agentteams init`. A project that has just been configured takes the
+ * configured-project fast path on the *next* run, so while this pass lived only
+ * in the new-project branch every retry command it printed was a no-op: the
+ * user was told how to fix a degraded `.gitignore` — the single thing keeping a
+ * legacy `--auth api-key` config's agent key out of the repository — by running
+ * a command that would not touch `.gitignore` at all.
+ */
+async function runLocalAdapterPass(cwd: string, options: LocalAdapterPassOptions): Promise<LocalAdapterPassResult> {
+  const adapters: InitAdapterOutcome[] = [];
+
+  adapters.push(
+    // `.gitignore` is not conditional and never will be: it is what keeps
+    // `.agentteams` — including a legacy config carrying an apiKey — out of the
+    // repository.
+    await runLocalAdapter('gitignore', 'agentteams init', () => {
+      ensureGitignore(cwd);
+      return { status: 'READY', issues: [] };
+    }),
+  );
+
+  let selectedFiles: AgentEntryPointValue[] = [];
+  let agentFiles: AgentFileEntry[] = [];
+  adapters.push(
+    await runLocalAdapter('agent-entry-points', 'agentteams init --agent-files <list>', async () => {
+      selectedFiles = await resolveAgentFileSelection(cwd, options.explicitAgentFiles, {
+        allowPrompt: options.allowPrompt,
+      });
+      if (selectedFiles.length === 0) {
+        return {
+          status: 'SKIPPED',
+          issues: [
+            {
+              code: 'agent-entry-points-not-selected',
+              message:
+                'No agent entry point file was created. Pass --agent-files (CLAUDE.md, AGENTS.md, GEMINI.md, .cursor/rules/agentteams.mdc) to create them explicitly.',
+            },
+          ],
+        };
+      }
+
+      // Assigned before the failure check so a partially failed write still
+      // reports the files that actually reached disk.
+      const written = generateAgentEntryPointFiles(cwd, selectedFiles, {
+        createExample: options.agentFilesExample,
+      });
+      agentFiles = written.entries;
+
+      if (written.failures.length > 0) {
+        return {
+          status: 'DEGRADED',
+          issues: written.failures.map((failure) => ({
+            code: 'agent-entry-point-write-failed',
+            message: `${failure.relativePath} could not be written: ${failure.message}`,
+          })),
+        };
+      }
+
+      const skipped = agentFiles.filter((file) => file.type === 'skipped');
+      if (skipped.length === agentFiles.length) {
+        return {
+          status: 'SKIPPED',
+          issues: [
+            {
+              code: 'agent-entry-points-exist',
+              message: `Left ${skipped.map((file) => file.relativePath).join(', ')} untouched because the file already exists.`,
+            },
+          ],
+        };
+      }
+      return { status: 'READY', issues: [] };
+    }),
+  );
+
+  adapters.push(
+    await runLocalAdapter('gemini-ignore', 'agentteams init --agent-files GEMINI.md', () => {
+      if (!selectedFiles.includes('GEMINI.md')) {
+        return {
+          status: 'SKIPPED',
+          issues: [{ code: 'gemini-ignore-not-selected', message: 'GEMINI.md was not selected.' }],
+        };
+      }
+      ensureGeminiIgnore(cwd);
+      return { status: 'READY', issues: [] };
+    }),
+  );
+
+  // A git-root project shares one hooks directory with all its worktrees, so the
+  // managed post-checkout hook lets future `git worktree add` runs bootstrap
+  // conventions automatically (via `agentteams init`). It is no longer installed
+  // unconditionally: a repository that never uses linked worktrees got its
+  // shared `.git/hooks` written for a hook it would never fire. The gate itself
+  // lives in `shouldInstallWorktreeHook` so `agentteams doctor` — which this
+  // command's own fast path invokes — applies the same rule.
+  let postCheckoutHook: EnsurePostCheckoutHookResult | undefined;
+  adapters.push(
+    await runLocalAdapter('post-checkout-hook', 'agentteams doctor', () => {
+      if (resolveGitTopLevel(cwd) === null) {
+        // Non-git roots (a parent folder grouping member repos) have no
+        // git-common dir; doctor owns their per-member hooks instead.
+        return {
+          status: 'SKIPPED',
+          issues: [
+            {
+              code: 'post-checkout-hook-not-a-git-root',
+              message:
+                "Not a git repository root, so no worktree bootstrap hook was installed. Run 'agentteams doctor' to set up member repository hooks.",
+            },
+          ],
+        };
+      }
+
+      if (!shouldInstallWorktreeHook(cwd, { force: options.installWorktreeHook })) {
+        return {
+          status: 'SKIPPED',
+          issues: [
+            {
+              code: 'post-checkout-hook-no-worktrees',
+              message:
+                "This repository has no linked git worktrees, so the worktree bootstrap hook was not installed. Run 'agentteams init --install-worktree-hook' (or 'agentteams doctor --install-worktree-hook') to install it anyway.",
+            },
+          ],
+        };
+      }
+
+      postCheckoutHook = ensurePostCheckoutHook(cwd);
+      if (postCheckoutHook.status === 'blocked') {
+        // The existing issue code and message, verbatim — the user hook
+        // protection in `ensurePostCheckoutHook` is what produced them.
+        return {
+          status: 'DEGRADED',
+          issues: [
+            {
+              code: postCheckoutHook.issue?.code ?? 'post-checkout-hook-blocked',
+              message: postCheckoutHook.issue?.message ?? 'The worktree bootstrap hook could not be installed.',
+            },
+          ],
+        };
+      }
+      return { status: 'READY', issues: [] };
+    }),
+  );
+
+  return { adapters, agentFiles, ...(postCheckoutHook ? { postCheckoutHook } : {}) };
+}
+
 async function executeInitCommandWithContext(options?: InitOptions): Promise<InitResult> {
   const cwd = resolve(options?.cwd ?? process.cwd());
   // Only an explicit compatibility request goes through the agent-key round trip.
   const authMode: AuthMode = options?.authMode === 'api-key' ? 'api-key' : 'personal-token';
+  // Parsed before anything opens a browser: a typo in --agent-files must not be
+  // discovered after the user has already signed in.
+  const explicitAgentFiles = parseAgentFilesOption(options?.agentFiles);
+  const adapterOptions: LocalAdapterPassOptions = {
+    explicitAgentFiles,
+    agentFilesExample: options?.agentFilesExample === true,
+    installWorktreeHook: options?.installWorktreeHook === true,
+    // Overridden per path below: only a first-time setup may prompt.
+    allowPrompt: true,
+  };
   const executionContext = detectInitExecutionContext(cwd, options?.authMode);
   if (executionContext.kind === 'linked-worktree') {
     const worktreeResult = bootstrapLinkedWorktree(cwd);
@@ -1323,7 +1265,7 @@ async function executeInitCommandWithContext(options?: InitOptions): Promise<Ini
   }
   if (executionContext.kind === 'configured-project') {
     try {
-      return await runConfiguredProjectInit(cwd, executionContext);
+      return await runConfiguredProjectInit(cwd, executionContext, { ...adapterOptions, allowPrompt: false });
     } catch (error) {
       throw new Error(`Initialization failed: ${toErrorMessage(error)}`);
     }
@@ -1355,25 +1297,12 @@ async function executeInitCommandWithContext(options?: InitOptions): Promise<Ini
     throw new Error(`Initialization failed: ${error instanceof Error ? error.message : String(error)}`);
   }
 
-  ensureGitignore(cwd);
-  const selectedFiles = await promptAgentFileSelection();
-  if (selectedFiles.includes('GEMINI.md')) {
-    ensureGeminiIgnore(cwd);
-  }
-  const agentFiles = generateAgentEntryPointFiles(cwd, selectedFiles);
+  // Everything below runs *after* the credential and the config are stored, so
+  // none of it may fail the init. Each adapter reports itself.
+  const { adapters: localAdapters, agentFiles, postCheckoutHook } = await runLocalAdapterPass(cwd, adapterOptions);
 
   const seedPlanId = setup.seedPlanId;
   const seedPlanWebUrl = seedPlanId ? `${AUTH_BASE_URL.replace(/\/+$/, '')}/go?type=plan&id=${seedPlanId}` : null;
-
-  // A git-root project shares one hooks directory with all its worktrees, so
-  // installing the managed post-checkout hook here lets future `git worktree
-  // add` runs bootstrap conventions automatically (via `agentteams init`).
-  // Non-git roots (a parent folder grouping member repos) have no git-common
-  // dir; `agentteams doctor` owns their per-member hooks instead, so skip.
-  let postCheckoutHook: EnsurePostCheckoutHookResult | undefined;
-  if (resolveGitTopLevel(cwd) !== null) {
-    postCheckoutHook = ensurePostCheckoutHook(cwd);
-  }
 
   return {
     success: true,
@@ -1388,7 +1317,8 @@ async function executeInitCommandWithContext(options?: InitOptions): Promise<Ini
     seedPlanWebUrl,
     postCheckoutHook,
     authMode,
-    readiness: buildNewProjectReadiness(postCheckoutHook),
+    readiness: buildNewProjectReadiness(localAdapters),
+    localAdapters,
     ...(setup.personalLogin ? { personalLogin: setup.personalLogin } : {}),
   };
 }

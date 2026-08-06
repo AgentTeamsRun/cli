@@ -135,13 +135,36 @@ program
       'Credential to configure. `personal-token` (default) stores a rotating login in the OS credential store and refreshes itself; `api-key` writes a legacy agent key into .agentteams/config.json, which expires 30 days after issue and must be reissued by hand.',
     ).choices(['api-key', 'personal-token']),
   )
+  // Entry point files are no longer written for every AI client on every run.
+  // Without a TTY the selection now comes from what is actually configured in
+  // the folder (.claude/, .cursor/, …), and this option is how an automated
+  // caller states the set explicitly instead.
+  .option(
+    '--agent-files <list>',
+    "Comma-separated agent entry point files to create (CLAUDE.md, AGENTS.md, GEMINI.md, .cursor/rules/agentteams.mdc), or 'none'. Defaults to the AI clients detected in this folder.",
+  )
+  .option(
+    '--agent-files-example',
+    'When a selected entry point file already exists, write a <name>-example file next to it instead of leaving it alone.',
+    false,
+  )
+  .option(
+    '--install-worktree-hook',
+    "Install the managed git post-checkout hook even if this repository has no linked worktrees yet. By default the hook is installed only when linked worktrees exist; 'agentteams doctor' can install it later.",
+    false,
+  )
   .option('--format <format>', 'Output format (json; defaults to human-readable view)')
   .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
   .option('--verbose', 'Print full raw output to stdout; with --output-file, also echo it', false)
   .addHelpText('after', CONVENTION_HINT)
   .action(async (options) => {
     try {
-      const result = await executeCommand('init', 'start', { authMode: options.auth });
+      const result = await executeCommand('init', 'start', {
+        authMode: options.auth,
+        agentFiles: options.agentFiles,
+        agentFilesExample: options.agentFilesExample === true,
+        installWorktreeHook: options.installWorktreeHook === true,
+      });
       const format = normalizeInteractiveFormat(options.format);
 
       printInitResult(result, format);
@@ -189,11 +212,22 @@ program
   .command('doctor')
   .description('Diagnose convention reachability and install the worktree bootstrap hook')
   .option('--format <format>', 'Output format (json; defaults to human-readable view)')
+  // The doctor honors the same gate `init` does — a repository with no linked
+  // worktree keeps its shared .git/hooks untouched — so opting in needs a flag
+  // on this command too, not just on `init`.
+  .option(
+    '--install-worktree-hook',
+    'Install the managed git post-checkout hook even if this repository has no linked worktrees yet.',
+    false,
+  )
   .addHelpText('after', CONVENTION_HINT)
   .action(async (options) => {
     try {
       const { result, format } = await executeValidatedInteractiveCommand(options.format, async () =>
-        executeCommand('doctor', 'run', { cwd: process.cwd() }),
+        executeCommand('doctor', 'run', {
+          cwd: process.cwd(),
+          installWorktreeHook: options.installWorktreeHook === true,
+        }),
       );
 
       printDoctorResult(result as DoctorResult, format);

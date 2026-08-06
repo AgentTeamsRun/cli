@@ -67,6 +67,60 @@ export function resolveMainCheckoutRoot(
   }
 }
 
+/**
+ * Does this repository already use linked worktrees?
+ *
+ * `git worktree list --porcelain` emits one blank-line separated block per
+ * worktree, the main checkout first. Counting `worktree ` lines is not enough:
+ * a worktree whose directory has been deleted keeps its block — marked
+ * `prunable` — until `git worktree prune` runs, so a repository that no longer
+ * has any linked worktree would still report one.
+ *
+ * This deliberately does not try to predict a *future* `git worktree add`: there
+ * is no signal for that, and guessing wrong in the permissive direction is what
+ * made `agentteams init` write a shared hooks directory for every project.
+ * `agentteams doctor --install-worktree-hook` installs the hook on demand, so a
+ * wrong guess here costs one command.
+ */
+export function hasLinkedGitWorktrees(
+  cwd: string,
+  execFileSyncImpl: ExecFileSyncFn = childProcess.execFileSync,
+): boolean {
+  const output = runGit(execFileSyncImpl, ['worktree', 'list', '--porcelain'], cwd);
+  if (!output) return false;
+
+  const records = output
+    .split(/\r?\n\s*\r?\n/)
+    .map((block) =>
+      block
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0),
+    )
+    .filter((lines) => lines.some((line) => line.startsWith('worktree ')));
+
+  // The first record is the main checkout, which is never a linked worktree.
+  return records.slice(1).some((lines) => !lines.some((line) => line === 'prunable' || line.startsWith('prunable ')));
+}
+
+/**
+ * The single rule for "may the managed post-checkout hook be written to this
+ * repository's shared hooks directory?".
+ *
+ * `init` and `doctor` both install that hook, and they must agree: when only
+ * `init` gated the write, running `agentteams init` a second time took the
+ * configured-project fast path, which calls `doctor`, which installed the hook
+ * anyway — the gate existed but never held.
+ */
+export function shouldInstallWorktreeHook(
+  cwd: string,
+  options?: { force?: boolean },
+  execFileSyncImpl: ExecFileSyncFn = childProcess.execFileSync,
+): boolean {
+  if (options?.force === true) return true;
+  return hasLinkedGitWorktrees(cwd, execFileSyncImpl);
+}
+
 export function resolveGitTopLevel(
   cwd: string,
   execFileSyncImpl: ExecFileSyncFn = childProcess.execFileSync,

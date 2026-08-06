@@ -86,4 +86,24 @@ describe('agentteams init CLI wiring', () => {
     const [, , options] = executeCommand.mock.calls[0] as [string, string, Record<string, unknown>];
     expect(options.authMode).toBe('personal-token');
   });
+
+  // 어댑터 옵션은 커맨드 정의를 지나야 실제로 전달된다. 여기서 끊기면 감지 폴백이
+  // 명시 선택을 덮어써 사용자가 지정한 것과 다른 파일 집합이 만들어진다.
+  test('진입점/훅 옵션이 없으면 어댑터 기본값이 그대로 전달된다', async () => {
+    await runCli(['init']);
+
+    const [, , options] = executeCommand.mock.calls[0] as [string, string, Record<string, unknown>];
+    expect(options.agentFiles).toBeUndefined();
+    expect(options.agentFilesExample).toBe(false);
+    expect(options.installWorktreeHook).toBe(false);
+  });
+
+  test('--agent-files / --agent-files-example / --install-worktree-hook가 그대로 전달된다', async () => {
+    await runCli(['init', '--agent-files', 'CLAUDE.md,AGENTS.md', '--agent-files-example', '--install-worktree-hook']);
+
+    const [, , options] = executeCommand.mock.calls[0] as [string, string, Record<string, unknown>];
+    expect(options.agentFiles).toBe('CLAUDE.md,AGENTS.md');
+    expect(options.agentFilesExample).toBe(true);
+    expect(options.installWorktreeHook).toBe(true);
+  });
 });

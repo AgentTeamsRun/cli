@@ -122,6 +122,89 @@ describe('printInitResult', () => {
       warnSpy.mockRestore();
     });
 
+    it('이미 존재해 건너뛴 진입점 파일을 만들었다고 말하지 않는다', () => {
+      printInitResult(
+        {
+          ...MOCK_INIT_RESULT,
+          agentFiles: [{ relativePath: 'CLAUDE.md', type: 'skipped' as const }],
+        },
+        'human',
+      );
+
+      const output = captureOutput(logSpy);
+      expect(output).toContain('Agent file already exists, left untouched: CLAUDE.md');
+      expect(output).not.toContain('Agent file created: CLAUDE.md');
+    });
+
+    // 훅을 안 깔았다는 사실만 남고 되돌리는 방법이 없으면, 사용자는 워크트리 부트스트랩이
+    // 왜 안 도는지 알 길이 없다. SKIPPED도 이유를 출력해야 한다.
+    it('SKIPPED 단계의 사유와 복구 명령을 함께 출력한다', () => {
+      printInitResult(
+        {
+          ...MOCK_INIT_RESULT,
+          readiness: [
+            {
+              stage: 'local-adapters' as const,
+              status: 'SKIPPED' as const,
+              issues: [
+                {
+                  code: 'post-checkout-hook-no-worktrees',
+                  message:
+                    "This repository has no linked git worktrees, so the worktree bootstrap hook was not installed. Run 'agentteams doctor' to install it.",
+                },
+              ],
+            },
+          ],
+        },
+        'human',
+      );
+
+      const output = captureOutput(logSpy);
+      expect(output).toContain('[SKIPPED] local-adapters');
+      expect(output).toContain('agentteams doctor');
+    });
+
+    // local-adapters 롤업은 어댑터 하나만 성공해도 READY가 된다(.gitignore는 항상
+    // 성공한다). 그래서 READY일 때 issues를 안 찍으면, 진입점 0개·훅 미설치로 끝난
+    // 실행이 초록 한 줄로 끝나고 사유는 JSON에만 남는다.
+    it('READY 단계의 스킵 사유도 화면에 출력한다', () => {
+      printInitResult(
+        {
+          ...MOCK_INIT_RESULT,
+          agentFiles: [],
+          readiness: [
+            {
+              stage: 'local-adapters' as const,
+              status: 'READY' as const,
+              issues: [
+                { code: 'agent-entry-points-not-selected', message: 'No agent entry point file was created.' },
+                {
+                  code: 'post-checkout-hook-no-worktrees',
+                  message: 'This repository has no linked git worktrees, so the hook was not installed.',
+                },
+              ],
+            },
+          ],
+        },
+        'human',
+      );
+
+      const output = captureOutput(logSpy);
+      expect(output).toContain('[READY] local-adapters');
+      expect(output).toContain('No agent entry point file was created.');
+      expect(output).toContain('no linked git worktrees');
+    });
+
+    // 만들지도 않은 파일을 "확인하라"고 하면 사용자는 없는 CLAUDE.md를 찾아 헤맨다.
+    it('진입점을 하나도 만들지 않았으면 Next steps가 생성 방법을 안내한다', () => {
+      printInitResult({ ...MOCK_INIT_RESULT, agentFiles: [] }, 'human');
+
+      const output = captureOutput(logSpy);
+      expect(output).toContain('No agent entry point file was created in this run.');
+      expect(output).toContain('agentteams init --agent-files CLAUDE.md');
+      expect(output).not.toContain('Check the generated agent files');
+    });
+
     it('post-checkout 훅 필드가 없으면 훅 관련 출력을 하지 않는다', () => {
       printInitResult(MOCK_INIT_RESULT, 'human');
 
@@ -327,6 +410,26 @@ describe('printInitResult', () => {
       }
       expect(parsed.readiness).toHaveLength(4);
       expect(parsed.readiness).toEqual(MOCK_INIT_RESULT.readiness);
+    });
+
+    // localAdapters는 추가 필드다. 기존 소비자가 읽던 키가 하나라도 사라지면 안 된다.
+    it('어댑터 상태는 기존 필드를 건드리지 않고 추가만 한다', () => {
+      const localAdapters = [
+        { adapter: 'gitignore', status: 'READY', issues: [] },
+        {
+          adapter: 'post-checkout-hook',
+          status: 'SKIPPED',
+          issues: [{ code: 'post-checkout-hook-no-worktrees', message: "Run 'agentteams doctor' to install it." }],
+        },
+      ];
+
+      printInitResult({ ...MOCK_INIT_RESULT, localAdapters }, 'json');
+
+      const parsed = JSON.parse(captureOutput(logSpy)) as Record<string, unknown>;
+      for (const key of Object.keys(MOCK_INIT_RESULT)) {
+        expect(parsed).toHaveProperty(key);
+      }
+      expect(parsed.localAdapters).toEqual(localAdapters);
     });
   });
 });

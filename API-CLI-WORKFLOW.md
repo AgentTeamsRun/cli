@@ -105,7 +105,11 @@ agentteams plan list
 
 ### git 루트 프로젝트에서의 doctor
 
-프로젝트 루트 자체가 git 저장소인 구성에서는 멤버 저장소가 없으므로, `agentteams doctor`는 워크트리 부트스트랩 훅(`post-checkout`)을 점검하고 없으면 **설치**합니다. 즉 진단 전용 읽기 명령이 아니라 git 메타데이터에 쓰는 명령입니다. 훅이 준비되면 이후 `git worktree add`로 만든 워크트리가 자동으로 `agentteams init`을 실행해 컨벤션을 연결합니다.
+프로젝트 루트 자체가 git 저장소인 구성에서는 멤버 저장소가 없으므로, `agentteams doctor`는 워크트리 부트스트랩 훅(`post-checkout`)을 점검하고 필요하면 **설치**합니다. 즉 진단 전용 읽기 명령이 아니라 git 메타데이터에 쓰는 명령입니다. 훅이 준비되면 이후 `git worktree add`로 만든 워크트리가 자동으로 `agentteams init`을 실행해 컨벤션을 연결합니다.
+
+설치 조건은 `agentteams init`과 동일합니다. **링크된 워크트리가 이미 있을 때만** 설치하고, 없으면 저장소가 모든 워크트리와 공유하는 `.git/hooks`를 건드리지 않은 채 사유(`post-checkout-hook-no-worktrees`)를 정보성으로 보고합니다. 워크트리를 아직 만들지 않았지만 미리 깔고 싶다면 `agentteams doctor --install-worktree-hook`(또는 `agentteams init --install-worktree-hook`)을 사용하세요.
+
+또한 루트에 에이전트 진입점 파일(`CLAUDE.md`, `AGENTS.md`)이 하나도 없으면 `missing-recommended-entry-point`를 정보성으로 보고합니다. 클라이언트를 하나만 쓰는 저장소는 결함이 아니므로 종료 코드는 0을 유지합니다.
 
 훅을 설치할 수 없는 경우(이미 사용자 소유 `post-checkout` 훅이 있거나 `core.hooksPath`가 기본 훅 디렉터리가 아닌 곳을 가리킬 때)는 사용자의 훅 설정이므로 결함으로 보지 않습니다. 안내 메시지와 함께 종료 코드 0을 유지하며, 각 워크트리에서 `agentteams init`을 직접 실행하는 폴백을 사용하세요. 루트 config/컨벤션 자체가 깨진 경우에만 `DEGRADED`(종료 코드 1)로 보고합니다.
 

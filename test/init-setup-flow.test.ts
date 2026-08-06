@@ -6,9 +6,10 @@
  * 서버에 POST를 보내 전체 흐름을 돌린다.
  */
 import { afterEach, beforeEach, describe, expect, jest, test } from '@jest/globals';
+import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 
 const WEB_ORIGIN = 'https://web.test.agentteams.run';
 const API_URL = 'https://api.test.agentteams.run';
@@ -233,6 +234,313 @@ describe('init unified setup (new CLI x new web)', () => {
   }, 20000);
 });
 
+/**
+ * 로컬 어댑터(진입점 파일 / .geminiignore / post-checkout hook)는 자격증명과 config가
+ * 이미 디스크에 저장된 *뒤에* 돈다. 그래서 여기서 고정하는 성질은 두 가지다.
+ *
+ * 1. 무엇을 만드는가 — 비-TTY 기본 실행이 네 종류를 무조건 만들지 않는다.
+ * 2. 실패가 어디까지 번지는가 — 어댑터 하나가 실패해도 연결은 성공으로 남는다.
+ */
+describe('init local adapters (new project path)', () => {
+  type NewProjectResult = {
+    success: true;
+    agentFiles: { relativePath: string; type: string }[];
+    postCheckoutHook?: { status: string };
+    readiness: { stage: string; status: string; issues: { code: string; message: string }[] }[];
+    localAdapters: { adapter: string; status: string; issues: { code: string; message: string }[] }[];
+  };
+
+  /** 실제 콜백 왕복까지 포함한 new-project 전체 실행. */
+  async function runNewProjectInit(cwd: string, options: Record<string, unknown> = {}): Promise<NewProjectResult> {
+    const { axios, executeInitCommand } = await loadInitModules();
+    mockConventionEndpoints(axios);
+    const { urls, restore } = captureAuthorizeUrls();
+
+    try {
+      const pending = executeInitCommand({ cwd, ...options });
+      const authorizeUrl = await waitForAuthorizeUrl(urls);
+      await postCallback(authorizeUrl.searchParams.get('port') as string, {
+        code: 'atc_authorization_code',
+        state: authorizeUrl.searchParams.get('state'),
+        teamId: 'team-1',
+        projectId: 'project-1',
+        configId: 'config-1',
+        agentName: 'demo-agent',
+      });
+      return (await pending) as NewProjectResult;
+    } finally {
+      restore();
+    }
+  }
+
+  function createGitProject(): string {
+    const cwd = createTempProject();
+    execFileSync('git', ['init', '-b', 'main'], { cwd });
+    return cwd;
+  }
+
+  function adapterOf(result: NewProjectResult, adapter: string) {
+    return result.localAdapters.find((entry) => entry.adapter === adapter);
+  }
+
+  function localAdaptersStep(result: NewProjectResult) {
+    return result.readiness.find((step) => step.stage === 'local-adapters');
+  }
+
+  // 갓 만든 저장소에는 `.claude/`가 아직 없다(프로젝트 스코프 승인 시점에 생긴다).
+  // 마커만 보면 여기서 0개를 만들게 되는데, 그러면 에이전트가 컨벤션에 닿을 통로가
+  // 아예 사라진다. 그래서 신호가 하나도 없을 때만 CLAUDE.md 1종으로 폴백한다.
+  test('falls back to CLAUDE.md when nothing signals an AI client', async () => {
+    const cwd = createTempProject();
+
+    const result = await runNewProjectInit(cwd);
+
+    expect(result.agentFiles).toEqual([{ relativePath: 'CLAUDE.md', type: 'created' }]);
+    expect(existsSync(join(cwd, 'CLAUDE.md'))).toBe(true);
+    expect(existsSync(join(cwd, 'AGENTS.md'))).toBe(false);
+    expect(existsSync(join(cwd, 'GEMINI.md'))).toBe(false);
+    expect(existsSync(join(cwd, '.cursor'))).toBe(false);
+    expect(adapterOf(result, 'agent-entry-points')).toMatchObject({ status: 'READY' });
+    // 연결 자체는 여전히 성공이다.
+    expect(existsSync(join(cwd, '.agentteams', 'config.json'))).toBe(true);
+  }, 20000);
+
+  test('creates only the entry points of the detected clients', async () => {
+    const cwd = createTempProject();
+    mkdirSync(join(cwd, '.claude'), { recursive: true });
+
+    const result = await runNewProjectInit(cwd);
+
+    expect(result.agentFiles).toEqual([{ relativePath: 'CLAUDE.md', type: 'created' }]);
+    expect(existsSync(join(cwd, 'CLAUDE.md'))).toBe(true);
+    expect(existsSync(join(cwd, 'AGENTS.md'))).toBe(false);
+  }, 20000);
+
+  test('leaves an existing entry point alone instead of writing a -example sibling', async () => {
+    const cwd = createTempProject();
+    mkdirSync(join(cwd, '.claude'), { recursive: true });
+    writeFileSync(join(cwd, 'CLAUDE.md'), '# Existing instructions\n', 'utf-8');
+
+    const result = await runNewProjectInit(cwd);
+
+    expect(existsSync(join(cwd, 'CLAUDE-example.md'))).toBe(false);
+    expect(readFileSync(join(cwd, 'CLAUDE.md'), 'utf-8')).toBe('# Existing instructions\n');
+    expect(result.agentFiles).toEqual([{ relativePath: 'CLAUDE.md', type: 'skipped' }]);
+    expect(adapterOf(result, 'agent-entry-points')).toMatchObject({ status: 'SKIPPED' });
+  }, 20000);
+
+  test('--agent-files-example restores the legacy example write', async () => {
+    const cwd = createTempProject();
+    writeFileSync(join(cwd, 'CLAUDE.md'), '# Existing instructions\n', 'utf-8');
+
+    const result = await runNewProjectInit(cwd, { agentFiles: 'CLAUDE.md', agentFilesExample: true });
+
+    expect(result.agentFiles).toEqual([{ relativePath: 'CLAUDE-example.md', type: 'example' }]);
+    expect(existsSync(join(cwd, 'CLAUDE-example.md'))).toBe(true);
+  }, 20000);
+
+  test('an explicit --agent-files list creates exactly those files and nothing else', async () => {
+    const cwd = createTempProject();
+    // 감지 신호가 있어도 명시 옵션이 이긴다.
+    mkdirSync(join(cwd, '.claude'), { recursive: true });
+
+    const result = await runNewProjectInit(cwd, { agentFiles: 'AGENTS.md' });
+
+    expect(result.agentFiles).toEqual([{ relativePath: 'AGENTS.md', type: 'created' }]);
+    expect(existsSync(join(cwd, 'CLAUDE.md'))).toBe(false);
+  }, 20000);
+
+  test('--agent-files none creates nothing at all', async () => {
+    const cwd = createTempProject();
+    mkdirSync(join(cwd, '.claude'), { recursive: true });
+
+    const result = await runNewProjectInit(cwd, { agentFiles: 'none' });
+
+    expect(result.agentFiles).toEqual([]);
+    expect(existsSync(join(cwd, 'CLAUDE.md'))).toBe(false);
+  }, 20000);
+
+  test('rejects an unknown --agent-files value before opening a browser', async () => {
+    const { axios, executeInitCommand } = await loadInitModules();
+    const cwd = createTempProject();
+    mockConventionEndpoints(axios);
+    const { urls, restore } = captureAuthorizeUrls();
+
+    try {
+      await expect(executeInitCommand({ cwd, agentFiles: 'CLAUDE.txt' })).rejects.toThrow(
+        /Unknown --agent-files value/,
+      );
+      expect(urls).toHaveLength(0);
+      expect(existsSync(join(cwd, '.agentteams', 'config.json'))).toBe(false);
+    } finally {
+      restore();
+    }
+  }, 20000);
+
+  test('does not touch .geminiignore unless GEMINI.md was selected', async () => {
+    const cwd = createTempProject();
+    mkdirSync(join(cwd, '.claude'), { recursive: true });
+
+    const withoutGemini = await runNewProjectInit(cwd);
+    expect(existsSync(join(cwd, '.geminiignore'))).toBe(false);
+    expect(adapterOf(withoutGemini, 'gemini-ignore')).toMatchObject({ status: 'SKIPPED' });
+
+    const geminiCwd = createTempProject();
+    const withGemini = await runNewProjectInit(geminiCwd, { agentFiles: 'GEMINI.md' });
+    expect(readFileSync(join(geminiCwd, '.geminiignore'), 'utf-8')).toContain('!.agentteams');
+    expect(adapterOf(withGemini, 'gemini-ignore')).toMatchObject({ status: 'READY' });
+  }, 30000);
+
+  test('.gitignore stays unconditional — it is what keeps secrets out of the repository', async () => {
+    const cwd = createTempProject();
+
+    const result = await runNewProjectInit(cwd);
+
+    expect(readFileSync(join(cwd, '.gitignore'), 'utf-8')).toContain('.agentteams');
+    expect(adapterOf(result, 'gitignore')).toMatchObject({ status: 'READY' });
+  }, 20000);
+
+  test('installs no post-checkout hook in a repository without linked worktrees', async () => {
+    const cwd = createGitProject();
+
+    const result = await runNewProjectInit(cwd);
+
+    expect(existsSync(join(cwd, '.git', 'hooks', 'post-checkout'))).toBe(false);
+    expect(result.postCheckoutHook).toBeUndefined();
+    expect(adapterOf(result, 'post-checkout-hook')).toMatchObject({ status: 'SKIPPED' });
+    // 건너뛴 이유와 되돌리는 명령이 결과에 남아야 사용자가 복구할 수 있다.
+    const message = adapterOf(result, 'post-checkout-hook')?.issues[0]?.message ?? '';
+    expect(message).toContain('agentteams doctor');
+    expect(localAdaptersStep(result)?.issues.some((issue) => issue.message.includes('agentteams doctor'))).toBe(true);
+  }, 20000);
+
+  test('installs the hook when the opt-in flag is given', async () => {
+    const cwd = createGitProject();
+
+    const result = await runNewProjectInit(cwd, { installWorktreeHook: true });
+
+    expect(existsSync(join(cwd, '.git', 'hooks', 'post-checkout'))).toBe(true);
+    expect(result.postCheckoutHook).toMatchObject({ status: 'ready' });
+    expect(adapterOf(result, 'post-checkout-hook')).toMatchObject({ status: 'READY' });
+  }, 20000);
+
+  test('installs the hook when the repository already uses linked worktrees', async () => {
+    const cwd = createGitProject();
+    writeFileSync(join(cwd, 'README.md'), '# repo\n', 'utf-8');
+    execFileSync('git', ['add', 'README.md'], { cwd });
+    execFileSync(
+      'git',
+      ['-c', 'user.name=AgentTeams Test', '-c', 'user.email=test@agentteams.run', 'commit', '-m', 'initial'],
+      { cwd },
+    );
+    const worktreeDir = join(cwd, '..', `${basename(cwd)}-wt`);
+    execFileSync('git', ['worktree', 'add', '-b', 'wt-test', worktreeDir], { cwd });
+
+    try {
+      const result = await runNewProjectInit(cwd);
+
+      expect(existsSync(join(cwd, '.git', 'hooks', 'post-checkout'))).toBe(true);
+      expect(adapterOf(result, 'post-checkout-hook')).toMatchObject({ status: 'READY' });
+    } finally {
+      rmSync(worktreeDir, { recursive: true, force: true });
+    }
+  }, 20000);
+
+  test('never overwrites a user post-checkout hook, and reports the existing issue verbatim', async () => {
+    const cwd = createGitProject();
+    const hookPath = join(cwd, '.git', 'hooks', 'post-checkout');
+    mkdirSync(join(cwd, '.git', 'hooks'), { recursive: true });
+    writeFileSync(hookPath, '#!/bin/sh\necho mine\n', 'utf-8');
+
+    const result = await runNewProjectInit(cwd, { installWorktreeHook: true });
+
+    expect(readFileSync(hookPath, 'utf-8')).toBe('#!/bin/sh\necho mine\n');
+    expect(adapterOf(result, 'post-checkout-hook')).toMatchObject({
+      status: 'DEGRADED',
+      retryCommand: 'agentteams doctor',
+    });
+    expect(adapterOf(result, 'post-checkout-hook')?.issues[0]?.code).toBe('hook-custom');
+    expect(localAdaptersStep(result)).toMatchObject({ status: 'DEGRADED', retryCommand: 'agentteams doctor' });
+  }, 20000);
+
+  // 어댑터 실패가 init 전체 실패로 번지던 자리. 이 시점에는 자격증명과 config가 이미
+  // 저장돼 있어서, 예외가 새면 "초기화 실패"라고 말하면서 실제로는 연결이 끝난 모순 상태가 된다.
+  test('an entry point write failure degrades that adapter without failing the connection', async () => {
+    const cwd = createTempProject();
+    // `.cursor/rules`를 디렉터리가 아닌 파일로 만들어 두면 mdc 쓰기가 ENOTDIR로 실패한다.
+    mkdirSync(join(cwd, '.cursor'), { recursive: true });
+    writeFileSync(join(cwd, '.cursor', 'rules'), 'not a directory\n', 'utf-8');
+
+    const result = await runNewProjectInit(cwd, { agentFiles: '.cursor/rules/agentteams.mdc' });
+
+    expect(result.success).toBe(true);
+    expect(existsSync(join(cwd, '.agentteams', 'config.json'))).toBe(true);
+    expect(readFileSync(join(cwd, '.agentteams', 'convention.md'), 'utf-8')).toBe(CONVENTION_TEMPLATE);
+    expect(adapterOf(result, 'agent-entry-points')).toMatchObject({
+      status: 'DEGRADED',
+      retryCommand: 'agentteams init --agent-files <list>',
+    });
+    // 조용히 삼키지 않는다.
+    expect(adapterOf(result, 'agent-entry-points')?.issues).not.toHaveLength(0);
+    expect(localAdaptersStep(result)?.status).toBe('DEGRADED');
+    // 뒤따르는 어댑터는 계속 실행된다.
+    expect(adapterOf(result, 'post-checkout-hook')).toBeDefined();
+  }, 20000);
+
+  // 여러 파일 중 일부만 실패하는 경로. 루프가 통째로 예외를 던지면 그때까지 디스크에
+  // 실제로 쓴 파일 기록이 함께 날아가, JSON 계약(`agentFiles`)과 human 출력이 파일
+  // 시스템 상태와 정반대가 된다.
+  test('a partial entry point failure still reports the files that reached disk', async () => {
+    const cwd = createTempProject();
+    // `.cursor/rules`를 파일로 점유해 mdc 쓰기만 ENOTDIR로 실패시킨다.
+    mkdirSync(join(cwd, '.cursor'), { recursive: true });
+    writeFileSync(join(cwd, '.cursor', 'rules'), 'not a directory\n', 'utf-8');
+
+    const result = await runNewProjectInit(cwd, { agentFiles: 'CLAUDE.md,.cursor/rules/agentteams.mdc' });
+
+    expect(existsSync(join(cwd, 'CLAUDE.md'))).toBe(true);
+    expect(result.agentFiles).toEqual([{ relativePath: 'CLAUDE.md', type: 'created' }]);
+    expect(adapterOf(result, 'agent-entry-points')).toMatchObject({ status: 'DEGRADED' });
+    expect(adapterOf(result, 'agent-entry-points')?.issues[0]?.code).toBe('agent-entry-point-write-failed');
+    expect(adapterOf(result, 'agent-entry-points')?.issues[0]?.message).toContain('.cursor/rules/agentteams.mdc');
+  }, 20000);
+
+  test('keeps every documented JSON field on the default new-project path', async () => {
+    const cwd = createTempProject();
+
+    const result = await runNewProjectInit(cwd);
+
+    for (const key of [
+      'success',
+      'authUrl',
+      'configPath',
+      'conventionPath',
+      'teamId',
+      'projectId',
+      'agentName',
+      'agentFiles',
+      'seedPlanId',
+      'seedPlanWebUrl',
+      'authMode',
+      'readiness',
+    ]) {
+      expect(result).toHaveProperty(key);
+    }
+    expect(result.readiness.map(({ stage }) => stage)).toEqual([
+      'project-binding',
+      'credential',
+      'convention-sync',
+      'local-adapters',
+    ]);
+    expect(result.localAdapters.map(({ adapter }) => adapter)).toEqual([
+      'gitignore',
+      'agent-entry-points',
+      'gemini-ignore',
+      'post-checkout-hook',
+    ]);
+  }, 20000);
+});
+
 describe('init configured-project fast path', () => {
   /**
    * `synced: true`는 이미 `convention download`를 한 번 돌린 프로젝트다.
@@ -370,6 +678,94 @@ describe('init configured-project fast path', () => {
       status: 'DEGRADED',
       retryCommand: 'agentteams convention download',
     });
+  });
+
+  // 어댑터가 안내하는 retryCommand는 전부 `agentteams init`이다. 그런데 그 시점에는
+  // config가 이미 저장돼 있어 재실행이 이 fast path로 들어온다. 여기서 어댑터를 돌리지
+  // 않으면 "DEGRADED로 보고하고 복구 명령을 안내한다"는 전제가 통째로 무너진다 —
+  // `--auth api-key` 경로에서 .gitignore가 실패하면 30일짜리 agent key가 담긴 config를
+  // 커밋할 위험이 그대로 남는다.
+  test('re-running init repairs .gitignore instead of only verifying the binding', async () => {
+    const { axios, executeInitCommand } = await loadInitModules();
+    const cwd = createConfiguredProject();
+    mockConventionEndpoints(axios);
+    rmSync(join(cwd, '.gitignore'), { force: true });
+
+    const result = await executeInitCommand({ cwd });
+    if (!('mode' in result) || result.mode !== 'configured-project') {
+      throw new Error('Expected the configured-project fast path.');
+    }
+
+    expect(readFileSync(join(cwd, '.gitignore'), 'utf-8')).toContain('.agentteams');
+    expect(result.localAdapters.find((adapter) => adapter.adapter === 'gitignore')?.status).toBe('READY');
+  });
+
+  test('re-running init with --agent-files creates the missing entry point', async () => {
+    const { axios, executeInitCommand } = await loadInitModules();
+    const cwd = createConfiguredProject();
+    mockConventionEndpoints(axios);
+
+    const result = await executeInitCommand({ cwd, agentFiles: 'AGENTS.md' });
+    if (!('mode' in result) || result.mode !== 'configured-project') {
+      throw new Error('Expected the configured-project fast path.');
+    }
+
+    expect(existsSync(join(cwd, 'AGENTS.md'))).toBe(true);
+    expect(result.agentFiles).toEqual([{ relativePath: 'AGENTS.md', type: 'created' }]);
+    // 기존 파일은 여전히 건드리지 않는다.
+    expect(readFileSync(join(cwd, 'CLAUDE.md'), 'utf-8')).toBe('# Existing instructions\n');
+  });
+
+  // fast path는 재실행을 전제로 만든 기능이라 절대 프롬프트로 멈춰서는 안 된다.
+  test('never prompts on the fast path even with a TTY attached', async () => {
+    const { axios, executeInitCommand } = await loadInitModules();
+    const cwd = createConfiguredProject();
+    mockConventionEndpoints(axios);
+    const originalIsTTY = process.stdin.isTTY;
+    Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true });
+
+    try {
+      const result = await executeInitCommand({ cwd });
+      if (!('mode' in result) || result.mode !== 'configured-project') {
+        throw new Error('Expected the configured-project fast path.');
+      }
+      expect(result.agentFiles).toEqual([{ relativePath: 'CLAUDE.md', type: 'skipped' }]);
+    } finally {
+      Object.defineProperty(process.stdin, 'isTTY', { value: originalIsTTY, configurable: true });
+    }
+  });
+
+  // 훅 게이트의 SSOT는 한 곳이다. doctor가 무조건 설치하면 두 번째 init 한 번으로
+  // "워크트리를 쓰지 않는 저장소의 공유 .git/hooks를 건드리지 않는다"는 결정이 뒤집힌다.
+  test('the fast path does not install the worktree hook a new-project run refused to install', async () => {
+    const { axios, executeInitCommand } = await loadInitModules();
+    const cwd = createConfiguredProject();
+    execFileSync('git', ['init', '-b', 'main'], { cwd });
+    mockConventionEndpoints(axios);
+
+    const result = await executeInitCommand({ cwd });
+    if (!('mode' in result) || result.mode !== 'configured-project') {
+      throw new Error('Expected the configured-project fast path.');
+    }
+
+    expect(existsSync(join(cwd, '.git', 'hooks', 'post-checkout'))).toBe(false);
+    expect(result.doctor.rootHook).toBe('skipped');
+    expect(result.localAdapters.find((adapter) => adapter.adapter === 'post-checkout-hook')?.status).toBe('SKIPPED');
+  });
+
+  test('--install-worktree-hook installs it from the fast path too', async () => {
+    const { axios, executeInitCommand } = await loadInitModules();
+    const cwd = createConfiguredProject();
+    execFileSync('git', ['init', '-b', 'main'], { cwd });
+    mockConventionEndpoints(axios);
+
+    const result = await executeInitCommand({ cwd, installWorktreeHook: true });
+    if (!('mode' in result) || result.mode !== 'configured-project') {
+      throw new Error('Expected the configured-project fast path.');
+    }
+
+    expect(existsSync(join(cwd, '.git', 'hooks', 'post-checkout'))).toBe(true);
+    expect(result.localAdapters.find((adapter) => adapter.adapter === 'post-checkout-hook')?.status).toBe('READY');
   });
 });
 

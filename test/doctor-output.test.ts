@@ -103,6 +103,21 @@ const GIT_ROOT_READY_RESULT: DoctorResult = {
   issues: [],
 };
 
+const GIT_ROOT_NO_WORKTREE_RESULT: DoctorResult = {
+  ...GIT_ROOT_READY_RESULT,
+  changedCount: 0,
+  rootHook: 'skipped',
+  issues: [
+    {
+      code: 'post-checkout-hook-no-worktrees',
+      path: null,
+      message:
+        "This repository has no linked git worktrees, so the worktree bootstrap hook was not installed. Run 'agentteams doctor --install-worktree-hook' to install it anyway.",
+      severity: 'info',
+    },
+  ],
+};
+
 const GIT_ROOT_USER_HOOK_RESULT: DoctorResult = {
   ...GIT_ROOT_READY_RESULT,
   changedCount: 0,
@@ -218,7 +233,20 @@ describe('printDoctorResult', () => {
       expect(output).toContain('Status: READY');
       expect(output).toContain('Worktree bootstrap hook: ready');
       expect(output).not.toContain('Member repositories');
-      expect(output).not.toContain('Root entry points');
+      // 진입점은 git 루트에서도 보고한다 — 감지가 빗나가 하나도 없는 상태가
+      // 아무 데도 안 남는 것이 이 뷰의 사각지대였다.
+      expect(output).toContain('Root entry points: (none)');
+    });
+
+    // 워크트리가 없는 저장소는 공유 .git/hooks를 건드리지 않는다. 그 사실과
+    // 되돌리는 플래그가 화면에 없으면 사용자는 훅이 왜 없는지 알 수 없다.
+    it('reports the skipped hook and the opt-in flag when the repository has no worktree', () => {
+      printDoctorResult(GIT_ROOT_NO_WORKTREE_RESULT, 'human');
+
+      const output = captureOutput(logSpy);
+      expect(output).toContain('Worktree bootstrap hook: skipped');
+      expect(output).toContain('agentteams doctor --install-worktree-hook');
+      expect(output).toContain('[post-checkout-hook-no-worktrees]');
     });
 
     it('reports a hook that could not be installed with its issue code and the manual fallback', () => {
@@ -237,7 +265,6 @@ describe('printDoctorResult', () => {
       expect(output).toContain('[root-config-invalid]');
       expect(output).not.toContain('Worktree bootstrap hook');
       expect(output).not.toContain('Member repositories');
-      expect(output).not.toContain('Root entry points');
     });
   });
 });
