@@ -895,6 +895,11 @@ async function runConfiguredProjectInit(
     teamId: projectConfig.teamId,
     projectId: projectConfig.projectId,
     apiUrl: normalizeApiUrl(process.env.AGENTTEAMS_API_URL || projectConfig.apiUrl || DEFAULT_API_URL),
+    // `loadConfigWithCredential` normally discovers the project from
+    // `process.cwd()`, but init may repair an explicit `options.cwd`. An empty
+    // override is intentional: it prevents a legacy key from an unrelated
+    // ambient project from becoming this binding's fallback credential.
+    apiKey: process.env.AGENTTEAMS_API_KEY || projectConfig.apiKey || '',
     ...(projectConfig.authMode ? { authMode: projectConfig.authMode } : {}),
   });
   if (!runtimeConfig) {

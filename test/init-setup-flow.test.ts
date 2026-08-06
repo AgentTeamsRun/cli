@@ -647,16 +647,31 @@ describe('init configured-project fast path', () => {
   test('fails with an auth login retry when an opted-in personal credential is missing', async () => {
     const { axios, executeInitCommand } = await loadInitModules();
     const cwd = createConfiguredProject();
+    const ambientCwd = createTempProject();
+    mkdirSync(join(ambientCwd, '.agentteams'), { recursive: true });
+    writeFileSync(
+      join(ambientCwd, '.agentteams', 'config.json'),
+      JSON.stringify({
+        teamId: 'unrelated-team',
+        projectId: 'unrelated-project',
+        apiUrl: API_URL,
+        apiKey: 'key_unrelated_legacy_credential',
+      }),
+      'utf-8',
+    );
+    const originalCwd = process.cwd();
     const postSpy = jest.spyOn(axios, 'post');
     const { urls, restore } = captureAuthorizeUrls();
     fakePersonalTokenClient.hasCredential.mockReturnValue(false);
     fakeClientState.connected = false;
 
     try {
+      process.chdir(ambientCwd);
       await expect(executeInitCommand({ cwd })).rejects.toThrow(/agentteams auth login/);
       expect(urls).toHaveLength(0);
       expect(postSpy).not.toHaveBeenCalled();
     } finally {
+      process.chdir(originalCwd);
       restore();
     }
   });
