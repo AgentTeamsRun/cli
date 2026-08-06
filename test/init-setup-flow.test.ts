@@ -6,7 +6,7 @@
  * 서버에 POST를 보내 전체 흐름을 돌린다.
  */
 import { afterEach, beforeEach, describe, expect, jest, test } from '@jest/globals';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -49,7 +49,7 @@ const fakeClientState = {
 const fakePersonalTokenClient = {
   exchangeAuthorizationCode,
   state: () => fakeClientState,
-  hasCredential: () => true,
+  hasCredential: jest.fn(() => true),
   getAccessToken: async () => 'atp_access_token',
   invalidateAccessToken: () => {},
 };
@@ -58,6 +58,16 @@ jest.unstable_mockModule('../src/auth/personalTokenClient.js', () => ({
   __esModule: true,
   getPersonalTokenClient: () => fakePersonalTokenClient,
   PersonalTokenError: class PersonalTokenError extends Error {},
+}));
+
+jest.unstable_mockModule('../src/utils/updateCheck.js', () => ({
+  __esModule: true,
+  compareVersions: (current: string, latest: string) => current !== latest,
+  formatUpdateMessage: () => '',
+  getLatestCliVersion: async () => '0.1.92',
+  readCache: () => null,
+  startUpdateCheck: async () => null,
+  writeCache: () => {},
 }));
 
 function createTempProject(): string {
@@ -137,6 +147,10 @@ beforeEach(() => {
   // 테스트 러너에서 실제 브라우저가 열리지 않도록, init이 이미 아는 headless 경로를 탄다.
   process.env.SSH_CONNECTION = '127.0.0.1 0 127.0.0.1 0';
   exchangeAuthorizationCode.mockClear();
+  fakePersonalTokenClient.hasCredential.mockReturnValue(true);
+  fakeClientState.connected = true;
+  fakeClientState.reconnectRequired = false;
+  fakeClientState.refreshFailure = null;
   jest.resetModules();
 });
 
@@ -215,6 +229,110 @@ describe('init unified setup (new CLI x new web)', () => {
       restore();
     }
   }, 20000);
+});
+
+describe('init configured-project fast path', () => {
+  function createConfiguredProject(): string {
+    const cwd = createTempProject();
+    mkdirSync(join(cwd, '.agentteams'), { recursive: true });
+    writeFileSync(
+      join(cwd, '.agentteams', 'config.json'),
+      JSON.stringify({
+        teamId: 'team-1',
+        projectId: 'project-1',
+        apiUrl: API_URL,
+        authMode: 'personal-token',
+      }),
+      'utf-8',
+    );
+    writeFileSync(join(cwd, '.agentteams', 'convention.md'), '# Existing convention\n', 'utf-8');
+    writeFileSync(join(cwd, 'CLAUDE.md'), '# Existing instructions\n', 'utf-8');
+    return cwd;
+  }
+
+  test('reuses the binding without browser, key creation, config rewrite, or example files', async () => {
+    const { axios, executeInitCommand } = await loadInitModules();
+    const cwd = createConfiguredProject();
+    const configPath = join(cwd, '.agentteams', 'config.json');
+    const configBefore = readFileSync(configPath, 'utf-8');
+    const postSpy = jest.spyOn(axios, 'post');
+    const getSpy = jest.spyOn(axios, 'get');
+    const { urls, restore } = captureAuthorizeUrls();
+
+    try {
+      const result = await executeInitCommand({ cwd });
+
+      expect(result).toMatchObject({
+        success: true,
+        mode: 'configured-project',
+        teamId: 'team-1',
+        projectId: 'project-1',
+        conventionsUpdated: false,
+      });
+      if (!('mode' in result) || result.mode !== 'configured-project') {
+        throw new Error('Expected the configured-project fast path.');
+      }
+      expect(result.readiness.map(({ stage }) => stage)).toEqual([
+        'project-binding',
+        'credential',
+        'convention-sync',
+        'local-adapters',
+      ]);
+      expect(result.readiness.every(({ status }) => ['READY', 'DEGRADED', 'SKIPPED'].includes(status))).toBe(true);
+      for (const step of result.readiness.filter(({ status }) => status === 'DEGRADED')) {
+        expect(step.retryCommand).toEqual(expect.any(String));
+        expect(step.retryCommand?.length).toBeGreaterThan(0);
+      }
+      expect(urls).toHaveLength(0);
+      expect(postSpy).not.toHaveBeenCalled();
+      expect(getSpy).not.toHaveBeenCalled();
+      expect(readFileSync(configPath, 'utf-8')).toBe(configBefore);
+      expect(existsSync(join(cwd, 'CLAUDE-example.md'))).toBe(false);
+    } finally {
+      restore();
+    }
+  });
+
+  test('fails with an auth login retry when an opted-in personal credential is missing', async () => {
+    const { axios, executeInitCommand } = await loadInitModules();
+    const cwd = createConfiguredProject();
+    const postSpy = jest.spyOn(axios, 'post');
+    const { urls, restore } = captureAuthorizeUrls();
+    fakePersonalTokenClient.hasCredential.mockReturnValue(false);
+    fakeClientState.connected = false;
+
+    try {
+      await expect(executeInitCommand({ cwd })).rejects.toThrow(/agentteams auth login/);
+      expect(urls).toHaveLength(0);
+      expect(postSpy).not.toHaveBeenCalled();
+    } finally {
+      restore();
+    }
+  });
+
+  test('keeps the binding ready and reports only convention sync as degraded when freshness fails', async () => {
+    const { axios, executeInitCommand } = await loadInitModules();
+    const cwd = createConfiguredProject();
+    writeFileSync(
+      join(cwd, '.agentteams', 'conventions.manifest.json'),
+      JSON.stringify({ version: 1, generatedAt: '2026-08-06T00:00:00.000Z', platformGuidesHash: 'old', entries: [] }),
+      'utf-8',
+    );
+    jest.spyOn(axios, 'get').mockRejectedValueOnce(new Error('network unavailable'));
+
+    const result = await executeInitCommand({ cwd });
+    if (!('mode' in result) || result.mode !== 'configured-project') {
+      throw new Error('Expected the configured-project fast path.');
+    }
+
+    expect(result.conventionError).toContain('network unavailable');
+    expect(result.readiness.find(({ stage }) => stage === 'project-binding')?.status).toBe('READY');
+    expect(result.readiness.find(({ stage }) => stage === 'credential')?.status).toBe('READY');
+    expect(result.readiness.find(({ stage }) => stage === 'convention-sync')).toMatchObject({
+      status: 'DEGRADED',
+      retryCommand: 'agentteams convention download',
+    });
+  });
 });
 
 describe('init unified setup failure paths', () => {

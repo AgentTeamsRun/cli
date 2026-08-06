@@ -17,6 +17,12 @@ const MOCK_INIT_RESULT = {
     { relativePath: 'CLAUDE.md', type: 'created' as const },
     { relativePath: 'AGENTS-example.md', type: 'example' as const },
   ],
+  readiness: [
+    { stage: 'project-binding' as const, status: 'READY' as const, issues: [] },
+    { stage: 'credential' as const, status: 'READY' as const, issues: [] },
+    { stage: 'convention-sync' as const, status: 'READY' as const, issues: [] },
+    { stage: 'local-adapters' as const, status: 'READY' as const, issues: [] },
+  ],
 };
 
 describe('printInitResult', () => {
@@ -190,6 +196,41 @@ describe('printInitResult', () => {
 
       warnSpy.mockRestore();
     });
+
+    it('configured-project readiness와 재시도 명령을 배열 그대로 출력한다', () => {
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+      printInitResult(
+        {
+          success: true,
+          mode: 'configured-project',
+          configPath: '/project/.agentteams/config.json',
+          conventionPath: '/project/.agentteams/convention.md',
+          conventionsUpdated: false,
+          readiness: [
+            { stage: 'project-binding', status: 'READY', issues: [] },
+            { stage: 'credential', status: 'READY', issues: [] },
+            {
+              stage: 'convention-sync',
+              status: 'DEGRADED',
+              issues: [{ code: 'sync-failed', message: 'Network unavailable' }],
+              retryCommand: 'agentteams convention download',
+            },
+            { stage: 'local-adapters', status: 'SKIPPED', issues: [] },
+          ],
+        },
+        'human',
+      );
+
+      const output = captureOutput(logSpy);
+      const warnings = captureOutput(warnSpy);
+      expect(output).toContain('[READY] project-binding');
+      expect(output).toContain('[SKIPPED] local-adapters');
+      expect(warnings).toContain('[DEGRADED] convention-sync');
+      expect(warnings).toContain('Retry: agentteams convention download');
+
+      warnSpy.mockRestore();
+    });
   });
 
   describe('개인 토큰 경로 (human format)', () => {
@@ -245,6 +286,17 @@ describe('printInitResult', () => {
 
       const output = captureOutput(logSpy);
       expect(output).not.toContain('Next steps:');
+    });
+
+    it('기존 필드를 유지하면서 4단계 readiness를 추가한다', () => {
+      printInitResult(MOCK_INIT_RESULT, 'json');
+
+      const parsed = JSON.parse(captureOutput(logSpy)) as Record<string, unknown>;
+      for (const key of Object.keys(MOCK_INIT_RESULT)) {
+        expect(parsed).toHaveProperty(key);
+      }
+      expect(parsed.readiness).toHaveLength(4);
+      expect(parsed.readiness).toEqual(MOCK_INIT_RESULT.readiness);
     });
   });
 });

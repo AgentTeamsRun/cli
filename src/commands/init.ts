@@ -32,7 +32,11 @@ import {
 } from '../utils/authServer.js';
 import {
   DEFAULT_API_URL,
+  findProjectConfig,
+  loadProjectConfig,
   loadConfigWithCredential,
+  planCredential,
+  type CredentialPlan,
   type LegacyApiKeyPersistedConfig,
   type PersistedConfig,
   saveConfig,
@@ -41,7 +45,8 @@ import {
 import { getPersonalTokenClient } from '../auth/personalTokenClient.js';
 import { createSpinner, withSpinner } from '../utils/spinner.js';
 import { withCommandContext } from '../utils/commandContext.js';
-import { conventionDownload } from './convention.js';
+import { conventionDownload, conventionStatus, type ConventionStatusResult } from './convention.js';
+import { executeDoctorCommand, type DoctorResult } from './doctor.js';
 import type { AuthMode, Config } from '../types/index.js';
 import { resolveGitTopLevel, resolveMainCheckoutRoot } from '../utils/git.js';
 import { canonicalizePath } from '../utils/path.js';
@@ -89,6 +94,21 @@ type InitOptions = {
   authMode?: AuthMode;
 };
 
+export type InitReadinessStatus = 'READY' | 'DEGRADED' | 'SKIPPED';
+export type InitReadinessStage = 'project-binding' | 'credential' | 'convention-sync' | 'local-adapters';
+
+export type InitReadinessIssue = {
+  code: string;
+  message: string;
+};
+
+export type InitReadinessStep = {
+  stage: InitReadinessStage;
+  status: InitReadinessStatus;
+  issues: InitReadinessIssue[];
+  retryCommand?: string;
+};
+
 export type AgentFileEntry = {
   relativePath: string;
   type: 'created' | 'example';
@@ -110,6 +130,7 @@ type OAuthInitResult = {
   /** Set only on the personal-token path, where the credential lives outside the repository. */
   personalLogin?: { email: string; nickname: string; persisted: boolean };
   warning?: string;
+  readiness: InitReadinessStep[];
 };
 
 export type WorktreeEntryPointState = ConventionEntryPointState;
@@ -131,7 +152,32 @@ export type WorktreeInitResult = {
   warning?: string;
 };
 
-type InitResult = OAuthInitResult | WorktreeInitResult;
+export type ConfiguredProjectInitResult = {
+  success: true;
+  mode: 'configured-project';
+  configPath: string;
+  conventionPath: string;
+  teamId: string;
+  projectId: string;
+  authMode: AuthMode;
+  credentialSource: 'explicit-api-key' | 'personal-token' | 'config-api-key';
+  conventionsUpdated: boolean;
+  conventionStatus?: ConventionStatusResult;
+  conventionError?: string;
+  doctor: DoctorResult;
+  readiness: InitReadinessStep[];
+};
+
+type InitResult = OAuthInitResult | WorktreeInitResult | ConfiguredProjectInitResult;
+
+export type InitExecutionKind = 'linked-worktree' | 'configured-project' | 'new-project';
+
+export type InitExecutionContext = {
+  kind: InitExecutionKind;
+  configPath: string | null;
+  config: Partial<Config> | null;
+  credentialPlan: CredentialPlan;
+};
 
 function isSshEnvironment(): boolean {
   return Boolean(process.env.SSH_CONNECTION || process.env.SSH_CLIENT || process.env.SSH_TTY);
@@ -446,6 +492,55 @@ function isConfiguredMainCheckout(sourcePath: string): boolean {
   } catch {
     return false;
   }
+}
+
+function isLinkedWorktreeWithConfiguredMainCheckout(cwd: string): boolean {
+  let worktreePath: string;
+  try {
+    worktreePath = canonicalizePath(resolve(cwd));
+  } catch {
+    return false;
+  }
+
+  if (resolveGitTopLevel(worktreePath) !== worktreePath) return false;
+
+  const mainCheckoutRoot = resolveMainCheckoutRoot(worktreePath);
+  if (!mainCheckoutRoot) return false;
+
+  const sourcePath = join(mainCheckoutRoot, CONFIG_DIR);
+  return existsSync(sourcePath) && isConfiguredMainCheckout(sourcePath);
+}
+
+/**
+ * Classify init before it opens a browser or materializes any local adapters.
+ *
+ * This resolver is intentionally read-only. The linked-worktree branch calls
+ * `bootstrapLinkedWorktree` only after classification, while the configured
+ * project branch can reuse the credential decision without consulting a
+ * keychain or refreshing a token.
+ */
+export function detectInitExecutionContext(cwd: string, explicitAuthMode?: AuthMode): InitExecutionContext {
+  const resolvedCwd = resolve(cwd);
+  const configPath = findProjectConfig(resolvedCwd);
+  const config = configPath ? loadProjectConfig(resolvedCwd) : null;
+  const credentialPlan = planCredential(config ?? undefined);
+
+  if (isLinkedWorktreeWithConfiguredMainCheckout(resolvedCwd)) {
+    return { kind: 'linked-worktree', configPath, config, credentialPlan };
+  }
+
+  const hasProjectBinding =
+    typeof config?.teamId === 'string' &&
+    config.teamId.length > 0 &&
+    typeof config.projectId === 'string' &&
+    config.projectId.length > 0;
+
+  // An explicit --auth choice means the caller intends to reconnect instead of
+  // validating the existing binding through the configured-project fast path.
+  const kind: InitExecutionKind =
+    configPath && hasProjectBinding && !explicitAuthMode ? 'configured-project' : 'new-project';
+
+  return { kind, configPath, config, credentialPlan };
 }
 
 /**
@@ -1035,12 +1130,140 @@ async function runLegacyApiKeySetup(context: SetupContext): Promise<SetupOutcome
   }
 }
 
+async function runConfiguredProjectInit(
+  cwd: string,
+  executionContext: InitExecutionContext,
+): Promise<ConfiguredProjectInitResult> {
+  const configPath = executionContext.configPath;
+  const projectConfig = executionContext.config;
+  if (!configPath || !projectConfig) {
+    throw new Error(
+      'The configured project could not be read. Run `agentteams init --auth personal-token` to relink it.',
+    );
+  }
+
+  const runtimeConfig = await loadConfigWithCredential(projectConfig);
+  if (!runtimeConfig) {
+    throw new Error("The existing project binding has no usable credential. Run 'agentteams auth login'.");
+  }
+
+  let freshness: ConventionStatusResult | undefined;
+  let conventionError: string | undefined;
+  let conventionsUpdated = false;
+  try {
+    freshness = await conventionStatus({ cwd, config: runtimeConfig });
+    if (freshness.conventionUpdateAvailable) {
+      await conventionDownload({ cwd, config: runtimeConfig });
+      conventionsUpdated = true;
+    }
+  } catch (error) {
+    conventionError = toErrorMessage(error);
+  }
+
+  const doctor = await executeDoctorCommand({ cwd });
+  const configuredAuthMode: AuthMode =
+    runtimeConfig.credentialSource === 'personal-token' ? 'personal-token' : 'api-key';
+  const readiness = buildConfiguredProjectReadiness(conventionError, doctor);
+
+  return {
+    success: true,
+    mode: 'configured-project',
+    configPath,
+    conventionPath: join(dirname(configPath), CONVENTION_FILE),
+    teamId: runtimeConfig.teamId,
+    projectId: runtimeConfig.projectId,
+    authMode: configuredAuthMode,
+    credentialSource: runtimeConfig.credentialSource,
+    conventionsUpdated,
+    ...(freshness ? { conventionStatus: freshness } : {}),
+    ...(conventionError ? { conventionError } : {}),
+    doctor,
+    readiness,
+  };
+}
+
+function buildConfiguredProjectReadiness(
+  conventionError: string | undefined,
+  doctor: DoctorResult,
+): InitReadinessStep[] {
+  const conventionStep: InitReadinessStep = conventionError
+    ? {
+        stage: 'convention-sync',
+        status: 'DEGRADED',
+        issues: [{ code: 'convention-sync-failed', message: conventionError }],
+        retryCommand: 'agentteams convention download',
+      }
+    : { stage: 'convention-sync', status: 'READY', issues: [] };
+
+  let localAdaptersStep: InitReadinessStep;
+  if (doctor.status === 'NOT_APPLICABLE') {
+    localAdaptersStep = {
+      stage: 'local-adapters',
+      status: 'SKIPPED',
+      issues: doctor.issues.map(({ code, message }) => ({ code, message })),
+    };
+  } else if (doctor.status === 'DEGRADED') {
+    localAdaptersStep = {
+      stage: 'local-adapters',
+      status: 'DEGRADED',
+      issues:
+        doctor.issues.length > 0
+          ? doctor.issues.map(({ code, message }) => ({ code, message }))
+          : [{ code: 'doctor-degraded', message: 'Local adapters still need attention.' }],
+      retryCommand: 'agentteams doctor',
+    };
+  } else {
+    localAdaptersStep = { stage: 'local-adapters', status: 'READY', issues: [] };
+  }
+
+  return [
+    { stage: 'project-binding', status: 'READY', issues: [] },
+    { stage: 'credential', status: 'READY', issues: [] },
+    conventionStep,
+    localAdaptersStep,
+  ];
+}
+
+function buildNewProjectReadiness(postCheckoutHook?: EnsurePostCheckoutHookResult): InitReadinessStep[] {
+  const localAdaptersStep: InitReadinessStep =
+    postCheckoutHook?.status === 'blocked'
+      ? {
+          stage: 'local-adapters',
+          status: 'DEGRADED',
+          issues: [
+            {
+              code: postCheckoutHook.issue?.code ?? 'post-checkout-hook-blocked',
+              message: postCheckoutHook.issue?.message ?? 'The worktree bootstrap hook could not be installed.',
+            },
+          ],
+          retryCommand: 'agentteams doctor',
+        }
+      : { stage: 'local-adapters', status: 'READY', issues: [] };
+
+  return [
+    { stage: 'project-binding', status: 'READY', issues: [] },
+    { stage: 'credential', status: 'READY', issues: [] },
+    { stage: 'convention-sync', status: 'READY', issues: [] },
+    localAdaptersStep,
+  ];
+}
+
 async function executeInitCommandWithContext(options?: InitOptions): Promise<InitResult> {
   const cwd = resolve(options?.cwd ?? process.cwd());
   // Only an explicit compatibility request goes through the agent-key round trip.
   const authMode: AuthMode = options?.authMode === 'api-key' ? 'api-key' : 'personal-token';
-  const worktreeResult = bootstrapLinkedWorktree(cwd);
-  if (worktreeResult) return worktreeResult;
+  const executionContext = detectInitExecutionContext(cwd, options?.authMode);
+  if (executionContext.kind === 'linked-worktree') {
+    const worktreeResult = bootstrapLinkedWorktree(cwd);
+    if (worktreeResult) return worktreeResult;
+  }
+  if (executionContext.kind === 'configured-project') {
+    try {
+      return await runConfiguredProjectInit(cwd, executionContext);
+    } catch (error) {
+      throw new Error(`Initialization failed: ${toErrorMessage(error)}`);
+    }
+  }
 
   const configPath = join(cwd, CONFIG_DIR, CONFIG_FILE);
   const conventionPath = join(cwd, CONFIG_DIR, CONVENTION_FILE);
@@ -1101,6 +1324,7 @@ async function executeInitCommandWithContext(options?: InitOptions): Promise<Ini
     seedPlanWebUrl,
     postCheckoutHook,
     authMode,
+    readiness: buildNewProjectReadiness(postCheckoutHook),
     ...(setup.personalLogin ? { personalLogin: setup.personalLogin } : {}),
   };
 }

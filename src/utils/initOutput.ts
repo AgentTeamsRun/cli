@@ -1,6 +1,11 @@
 import chalk from 'chalk';
 import { formatOutput } from './formatter.js';
-import type { AgentFileEntry, WorktreeInitResult } from '../commands/init.js';
+import type {
+  AgentFileEntry,
+  ConfiguredProjectInitResult,
+  InitReadinessStep,
+  WorktreeInitResult,
+} from '../commands/init.js';
 import type { EnsurePostCheckoutHookResult } from './conventionLink.js';
 
 export type InitOutputFormat = 'human' | 'json';
@@ -17,6 +22,7 @@ interface InitResultShape {
   authMode?: 'api-key' | 'personal-token';
   personalLogin?: { email: string; nickname: string; persisted: boolean };
   warning?: string;
+  readiness?: InitReadinessStep[];
 }
 
 /** Mirrors AGENT_API_KEY_TTL_MS in api/src/services/agentApiKey.ts. */
@@ -53,6 +59,35 @@ function isWorktreeInitResult(result: unknown): result is WorktreeInitResult {
       r.materialization === 'existing' ||
       r.materialization === 'blocked')
   );
+}
+
+function isConfiguredProjectInitResult(result: unknown): result is ConfiguredProjectInitResult {
+  if (!result || typeof result !== 'object') return false;
+  const r = result as Record<string, unknown>;
+  return (
+    r.success === true &&
+    r.mode === 'configured-project' &&
+    typeof r.configPath === 'string' &&
+    typeof r.conventionPath === 'string' &&
+    Array.isArray(r.readiness)
+  );
+}
+
+function printReadiness(readiness: InitReadinessStep[]): void {
+  console.log('');
+  console.log('Readiness:');
+  for (const step of readiness) {
+    const line = `  [${step.status}] ${step.stage}`;
+    if (step.status === 'DEGRADED') {
+      console.warn(line);
+      for (const issue of step.issues) {
+        console.warn(`    ${issue.message}`);
+      }
+      console.warn(`    Retry: ${step.retryCommand}`);
+    } else {
+      console.log(line);
+    }
+  }
 }
 
 export function printInitResult(result: unknown, format: InitOutputFormat): void {
@@ -103,6 +138,21 @@ export function printInitResult(result: unknown, format: InitOutputFormat): void
     return;
   }
 
+  if (isConfiguredProjectInitResult(result)) {
+    console.log('✓ Existing project binding reused; browser authentication was skipped.');
+    console.log(`✓ Config verified:     ${result.configPath}`);
+    if (result.conventionError) {
+      console.warn(`⚠ Convention sync is degraded: ${result.conventionError}`);
+    } else if (result.conventionsUpdated) {
+      console.log('✓ Conventions updated in .agentteams/.');
+    } else {
+      console.log('✓ Conventions/platform guides already up to date.');
+    }
+    console.log(`✓ Local adapters checked by agentteams doctor.`);
+    printReadiness(result.readiness);
+    return;
+  }
+
   if (!isInitResult(result)) {
     console.log(typeof result === 'string' ? result : formatOutput(result));
     return;
@@ -144,6 +194,10 @@ export function printInitResult(result: unknown, format: InitOutputFormat): void
   console.log(`✓ Config saved:      ${result.configPath}`);
   console.log(`✓ Convention saved:  ${result.conventionPath}`);
   console.log(`✓ Conventions synced to .agentteams/`);
+
+  if (result.readiness) {
+    printReadiness(result.readiness);
+  }
 
   const hook = result.postCheckoutHook;
   if (hook) {

@@ -17,6 +17,7 @@ import { join } from 'node:path';
 import {
   bootstrapLinkedWorktree,
   buildAuthorizeUrl,
+  detectInitExecutionContext,
   detectOsType,
   executeInitCommand,
   type WorktreeInitResult,
@@ -131,6 +132,59 @@ afterEach(() => {
 });
 
 describe('init helpers', () => {
+  test('detectInitExecutionContext classifies linked worktree, configured project, and new project without writes', () => {
+    const originalApiKey = process.env.AGENTTEAMS_API_KEY;
+    delete process.env.AGENTTEAMS_API_KEY;
+    const { worktreeDir } = createRepository();
+    const configuredDir = mkdtempSync(join(tmpdir(), 'agentteams-init-configured-test-'));
+    const newProjectDir = mkdtempSync(join(tmpdir(), 'agentteams-init-new-test-'));
+    tempDirs.push(configuredDir, newProjectDir);
+    mkdirSync(join(configuredDir, '.agentteams'), { recursive: true });
+    writeFileSync(
+      join(configuredDir, '.agentteams', 'config.json'),
+      JSON.stringify({
+        teamId: 'team-1',
+        projectId: 'project-1',
+        apiUrl: 'https://api.agentteams.run',
+        authMode: 'personal-token',
+      }),
+      'utf-8',
+    );
+
+    const beforeWorktree = readdirSync(worktreeDir, { recursive: true }).map(String).sort();
+    const beforeConfigured = readdirSync(configuredDir, { recursive: true }).map(String).sort();
+    const beforeNewProject = readdirSync(newProjectDir, { recursive: true }).map(String).sort();
+
+    try {
+      expect(detectInitExecutionContext(worktreeDir)).toMatchObject({ kind: 'linked-worktree' });
+      expect(detectInitExecutionContext(configuredDir)).toMatchObject({
+        kind: 'configured-project',
+        credentialPlan: { source: 'personal-token', optedIn: true },
+      });
+      expect(detectInitExecutionContext(newProjectDir)).toMatchObject({ kind: 'new-project' });
+
+      expect(readdirSync(worktreeDir, { recursive: true }).map(String).sort()).toEqual(beforeWorktree);
+      expect(readdirSync(configuredDir, { recursive: true }).map(String).sort()).toEqual(beforeConfigured);
+      expect(readdirSync(newProjectDir, { recursive: true }).map(String).sort()).toEqual(beforeNewProject);
+    } finally {
+      if (originalApiKey === undefined) delete process.env.AGENTTEAMS_API_KEY;
+      else process.env.AGENTTEAMS_API_KEY = originalApiKey;
+    }
+  });
+
+  test('detectInitExecutionContext treats an explicit auth mode as a relink request', () => {
+    const configuredDir = mkdtempSync(join(tmpdir(), 'agentteams-init-relink-test-'));
+    tempDirs.push(configuredDir);
+    mkdirSync(join(configuredDir, '.agentteams'), { recursive: true });
+    writeFileSync(
+      join(configuredDir, '.agentteams', 'config.json'),
+      JSON.stringify({ teamId: 'team-1', projectId: 'project-1', authMode: 'personal-token' }),
+      'utf-8',
+    );
+
+    expect(detectInitExecutionContext(configuredDir, 'api-key')).toMatchObject({ kind: 'new-project' });
+  });
+
   test('buildAuthorizeUrl includes authPathEnc and osType when provided', () => {
     const url = buildAuthorizeUrl({ port: 9876, projectName: 'demo', authPathEnc: 'enc-value', osType: 'LINUX' });
     const parsed = new URL(url);
