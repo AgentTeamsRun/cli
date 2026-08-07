@@ -39,9 +39,10 @@ export function createMcpServer(
 /**
  * The single `registerTool` loop — tool envelopes are assembled only here.
  *
- * Read specs come from the shared `@agentteams/context-tools` package; write
- * specs are CLI-local by design (see `writeTools.ts`). Both are flattened to the
- * same `(args) => unknown` shape first so there is still exactly one loop.
+ * Read specs come from the shared `@agentteams/context-tools` package; local and
+ * write specs are CLI-local by design (see `localTools.ts` / `writeTools.ts`).
+ * All three are flattened to the same `(args) => unknown` shape first so there
+ * is still exactly one loop.
  */
 function registerTools(server: McpServer, context: McpToolContext, toolProfile: ToolProfile): void {
   const client = createCliContextToolsClient(context);
@@ -50,12 +51,12 @@ function registerTools(server: McpServer, context: McpToolContext, toolProfile: 
     ...spec,
     invoke: (args: Record<string, unknown>) => spec.handler(args, client),
   }));
-  const writeTools = profileSpecs.writeTools.map((spec) => ({
+  const contextTools = [...profileSpecs.localTools, ...profileSpecs.writeTools].map((spec) => ({
     ...spec,
     invoke: (args: Record<string, unknown>) => spec.handler(args, context),
   }));
 
-  for (const spec of [...readTools, ...writeTools]) {
+  for (const spec of [...readTools, ...contextTools]) {
     server.registerTool(
       spec.name,
       {

@@ -2,7 +2,6 @@ import {
   defineToolDiscoveryMetadata,
   omitDocumentEditorMirror,
   stripContextEntityIdPrefix,
-  type ToolDiscoveryMetadata,
 } from '@agentteams/context-tools';
 import { z } from 'zod';
 import {
@@ -16,8 +15,7 @@ import {
   updateReply,
 } from '../api/comment.js';
 import { createDocumentComment, createDocument, deleteDocument, updateDocument } from '../api/document.js';
-import type { McpToolContext } from './context.js';
-import { GUIDE_RECORD_KINDS, describeMissingGuideHash, resolvePlatformGuide, type GuideRecordKind } from './guides.js';
+import { resolveToolHeaders, type McpLocalToolSpec } from './localTools.js';
 
 /**
  * MCP **write** tools. CLI-only on purpose.
@@ -28,18 +26,11 @@ import { GUIDE_RECORD_KINDS, describeMissingGuideHash, resolvePlatformGuide, typ
  * be handed to Direct BYOK conversations — the exact `DESKTOP_LIMITED` boundary
  * that must not grant blanket project write access.
  *
- * The spec shape mirrors `ContextToolSpec`, but is declared locally so the shared
+ * The spec shape is the CLI-local one declared in `localTools.ts`, so the shared
  * read package stays read-only. No MCP SDK import belongs here — `server.ts` is
  * the only adapter (see `test/mcp-boundary.test.ts`).
  */
-export interface McpWriteToolSpec {
-  name: string;
-  title: string;
-  description: string;
-  inputSchema: z.ZodType<Record<string, unknown>>;
-  discovery: ToolDiscoveryMetadata;
-  handler(args: Record<string, unknown>, context: McpToolContext): Promise<unknown>;
-}
+export type McpWriteToolSpec = McpLocalToolSpec;
 
 const GUIDE_FIRST = 'Call agentteams_guide_get("document") first and follow that guide.';
 const COMMENT_GUIDE_FIRST = 'Call agentteams_guide_get("comment") first and follow that guide.';
@@ -80,10 +71,6 @@ const visibilityField = z
   .optional()
   .describe('PRIVATE (default) is author-only; PROJECT is visible to every project member.');
 
-const guideDiscovery = defineToolDiscoveryMetadata({
-  domain: 'guides',
-  profiles: ['full', 'documents', 'comments'],
-});
 const documentWriteDiscovery = defineToolDiscoveryMetadata({
   domain: 'documents',
   profiles: ['full', 'documents'],
@@ -94,47 +81,11 @@ const commentWriteDiscovery = defineToolDiscoveryMetadata({
 });
 
 /** Credentials can expire mid-session, so headers are resolved per call, never captured. */
-const auth = (context: McpToolContext): Promise<Record<string, string>> =>
-  context.resolveHeaders?.() ?? Promise.resolve(context.headers);
+const auth = resolveToolHeaders;
 
 /** Drop keys the caller omitted so an absent optional never reaches the server as `undefined`. */
 const definedFields = <T extends Record<string, unknown>>(fields: T): Record<string, unknown> =>
   Object.fromEntries(Object.entries(fields).filter(([, value]) => value !== undefined));
-
-const guideGetSpec: McpWriteToolSpec = {
-  name: 'agentteams_guide_get',
-  title: 'Get AgentTeams Record Guide',
-  description: [
-    'Fetch the platform guide that governs how a record type must be written.',
-    'Reads this project’s local copy when the session sits in it, and falls back to the server otherwise.',
-    'Returns the full guide body plus the guideHash to pass to the matching write tool.',
-    'Read this before any AgentTeams write tool call — the rules it states (visibility, tag policy, structure) are enforced server-side.',
-    'If it reports that the local guide hash is unknown, run `agentteams convention download` in the project.',
-  ].join(' '),
-  discovery: guideDiscovery,
-  inputSchema: z.strictObject({
-    recordKind: z
-      .enum(GUIDE_RECORD_KINDS)
-      .describe('Record type whose guide you need. "document" and "comment" are write-enabled.'),
-  }),
-  handler: async (args, context) => {
-    const guide = await resolvePlatformGuide(args.recordKind as GuideRecordKind, {
-      projectRoot: context.projectRoot,
-      apiUrl: context.apiUrl,
-      headers: await auth(context),
-    });
-    const warning = describeMissingGuideHash(guide);
-    return {
-      recordKind: guide.recordKind,
-      fileName: guide.fileName,
-      source: guide.source,
-      ...(guide.filePath ? { filePath: guide.filePath } : {}),
-      guideHash: guide.guideHash,
-      content: guide.content,
-      ...(warning ? { warning } : {}),
-    };
-  },
-};
 
 const documentCreateSpec: McpWriteToolSpec = {
   name: 'agentteams_document_create',
@@ -543,7 +494,6 @@ const commentReplyDeleteSpec: McpWriteToolSpec = {
 /** Every write tool the CLI MCP server exposes, in registration order. */
 export function getWriteToolSpecs(): McpWriteToolSpec[] {
   return [
-    guideGetSpec,
     documentCreateSpec,
     documentUpdateSpec,
     documentDeleteSpec,
