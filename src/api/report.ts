@@ -43,6 +43,12 @@ export async function updateReport(
   return response.data;
 }
 
+export async function dismissReportReview(apiUrl: string, projectId: string, headers: any, id: string): Promise<any> {
+  const baseUrl = `${apiUrl}/api/projects/${projectId}/completion-reports`;
+  const response = await httpClient.post(`${baseUrl}/${id}/dismiss-review`, {}, { headers });
+  return response.data;
+}
+
 export async function deleteReport(apiUrl: string, projectId: string, headers: any, id: string): Promise<any> {
   const baseUrl = `${apiUrl}/api/projects/${projectId}/completion-reports`;
   const response = await httpClient.delete(`${baseUrl}/${id}`, {

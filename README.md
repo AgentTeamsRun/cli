@@ -357,6 +357,8 @@ External references are never fetched for you: `resolve` derives the URL and the
 
 Every response also carries `fallbackCommand`, the equivalent per-type command (`report download --id`, `code-review get --finding-id`, `task get --task-id`, `linear issue get --issue-id`, …) for older CLI versions that do not ship `resolve`.
 
+Agents connected over MCP get the same dispatch as the `agentteams_resolve` tool (`full` profile only), so they can resolve a reference without shelling out. One difference: there is no `file` kind — a plan or report body comes back inline as a `record` rather than downloaded, since an MCP server has no working-directory contract. A `localFile` result still carries an absolute `filePath`, plus the reference's project-root-relative `path`; when the MCP session is not bound to a local checkout only `path` comes back, and — as with the command — a path that does not exist under `.agentteams/` degrades to the server record.
+
 ### `config`
 
 ```bash

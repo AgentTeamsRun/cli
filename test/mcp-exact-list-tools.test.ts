@@ -11,6 +11,7 @@ import {
 } from '@agentteams/context-tools';
 import { z } from 'zod';
 import { startMcpServer } from '../src/mcp/server.js';
+import { getLocalToolSpecs } from '../src/mcp/localTools.js';
 import { getWriteToolSpecs } from '../src/mcp/writeTools.js';
 import { connect, discover, MODERN_META, TEST_TOOL_CONTEXT } from './helpers/mcp.js';
 
@@ -200,6 +201,27 @@ const READ_ERROR_CASES = [
 const MINIMAL_PROFILE_TOOLS = ['agentteams_search', 'agentteams_plan_get', 'agentteams_document_get'] as const;
 
 /**
+ * The catalog the server actually assembles: shared read specs, then the
+ * CLI-local specs, then the write specs. Kept in one place so a new source has
+ * to be added here rather than in each test that measures the catalog.
+ */
+const buildFullCatalog = () =>
+  buildToolCatalog([
+    { kind: 'read', specs: getContextToolSpecs() },
+    { kind: 'read', specs: getLocalToolSpecs() },
+    { kind: 'write', specs: getWriteToolSpecs() },
+  ]);
+
+/** Provider-facing definitions for the CLI-local specs, which have no shared `getDefinitions`. */
+const cliLocalDefinitions = () =>
+  [...getLocalToolSpecs(), ...getWriteToolSpecs()].map((spec) => ({
+    name: spec.name,
+    title: spec.title,
+    description: spec.description,
+    inputSchema: z.toJSONSchema(spec.inputSchema),
+  }));
+
+/**
  * Definition-budget baseline measured on 2026-08-05. `estimatedTokens` from
  * `measureToolDefinitionBudget` is the chars/4 heuristic, NOT a model tokenizer
  * count; `o200kTokens` below is the separately measured `o200k_base` figure and is
@@ -208,6 +230,17 @@ const MINIMAL_PROFILE_TOOLS = ['agentteams_search', 'agentteams_plan_get', 'agen
 const BUDGET_BASELINE = {
   full: { totalChars: 45_240, heuristicTokens: 11_310, o200kTokens: 10_906 },
   minimal: { totalChars: 3_407, heuristicTokens: 852, o200kTokens: 782 },
+} as const;
+
+/**
+ * Re-measured on 2026-08-07 after `agentteams_resolve` joined the catalog:
+ * `full` +1,688 chars (+422 heuristic tokens), `minimal` unchanged — which is the
+ * measured reason the tool is kept out of `minimal` rather than a stylistic one.
+ * No o200k figure was taken this round, so that column is deliberately absent.
+ */
+const BUDGET_BASELINE_RESOLVE = {
+  full: { totalChars: 46_928, heuristicTokens: 11_732 },
+  minimal: { totalChars: 3_407, heuristicTokens: 852 },
 } as const;
 
 const PROFILE_CASES: Array<['read' | 'documents' | 'comments' | 'minimal', readonly string[]]> = [
@@ -261,9 +294,10 @@ describe('mcp exact list and missing detail tools', () => {
     const response = await client.request('tools/list', { _meta: MODERN_META });
     const names = (response.result?.tools ?? []).map((tool: { name: string }) => tool.name);
 
-    // 20 read tools + 10 write tools; agentteams_guide_get also ends in `_get`.
-    expect(names).toHaveLength(30);
-    expect(new Set(names).size).toBe(30);
+    // 20 shared read tools + 2 CLI-local tools + 9 write tools; agentteams_guide_get
+    // also ends in `_get`, while agentteams_resolve matches none of the suffixes.
+    expect(names).toHaveLength(31);
+    expect(new Set(names).size).toBe(31);
     expect(names.filter((name: string) => name.endsWith('_list'))).toHaveLength(9);
     expect(names.filter((name: string) => name.endsWith('_get'))).toHaveLength(11);
     expect(names.filter((name: string) => name === 'agentteams_search')).toHaveLength(1);
@@ -273,24 +307,12 @@ describe('mcp exact list and missing detail tools', () => {
 
   it('classifies the complete catalog into stable public profiles and reports its definition budget', () => {
     const readSpecs = getContextToolSpecs();
-    const writeSpecs = getWriteToolSpecs();
-    const catalog = buildToolCatalog([
-      { kind: 'read', specs: readSpecs },
-      { kind: 'write', specs: writeSpecs },
-    ]);
-    const definitions = [
-      ...getContextToolDefinitions(),
-      ...writeSpecs.map((spec) => ({
-        name: spec.name,
-        title: spec.title,
-        description: spec.description,
-        inputSchema: z.toJSONSchema(spec.inputSchema),
-      })),
-    ];
+    const catalog = buildFullCatalog();
+    const definitions = [...getContextToolDefinitions(), ...cliLocalDefinitions()];
     const budget = measureToolDefinitionBudget(definitions);
 
-    expect(catalog).toHaveLength(30);
-    expect(new Set(catalog.map(({ name }) => name)).size).toBe(30);
+    expect(catalog).toHaveLength(31);
+    expect(new Set(catalog.map(({ name }) => name)).size).toBe(31);
     expect(getToolNamesForProfile(catalog, 'full')).toEqual(catalog.map(({ name }) => name));
     expect(getToolNamesForProfile(catalog, 'read')).toEqual(readSpecs.map(({ name }) => name));
     expect(getToolNamesForProfile(catalog, 'documents')).toEqual([
@@ -321,7 +343,14 @@ describe('mcp exact list and missing detail tools', () => {
       'agentteams_plan_get',
       'agentteams_document_get',
     ]);
-    expect(budget).toMatchObject({ toolCount: 30 });
+    // `agentteams_resolve` dispatches to every entity type, so it belongs to the
+    // unrestricted profile only — a narrow profile carrying it would be a way
+    // around its own scope.
+    expect(getToolNamesForProfile(catalog, 'full')).toContain('agentteams_resolve');
+    for (const profile of ['read', 'documents', 'comments', 'minimal'] as const) {
+      expect(getToolNamesForProfile(catalog, profile)).not.toContain('agentteams_resolve');
+    }
+    expect(budget).toMatchObject({ toolCount: 31 });
     expect(budget.descriptionChars).toBeGreaterThan(15_000);
     expect(budget.schemaChars).toBeGreaterThan(25_000);
     expect(budget.totalChars).toBeGreaterThan(43_000);
@@ -332,11 +361,7 @@ describe('mcp exact list and missing detail tools', () => {
 
   it('scopes the minimal profile to the always-on set and keeps its definition budget under 4,000 chars', () => {
     const readSpecs = getContextToolSpecs();
-    const writeSpecs = getWriteToolSpecs();
-    const catalog = buildToolCatalog([
-      { kind: 'read', specs: readSpecs },
-      { kind: 'write', specs: writeSpecs },
-    ]);
+    const catalog = buildFullCatalog();
     const minimalNames = getToolNamesForProfile(catalog, 'minimal');
 
     // `minimal` is *defined* as the always-on set: assert the equality rather than
@@ -352,15 +377,7 @@ describe('mcp exact list and missing detail tools', () => {
       minimalNames.includes(definition.name),
     );
     const minimalBudget = measureToolDefinitionBudget(minimalDefinitions);
-    const fullBudget = measureToolDefinitionBudget([
-      ...getContextToolDefinitions(),
-      ...writeSpecs.map((spec) => ({
-        name: spec.name,
-        title: spec.title,
-        description: spec.description,
-        inputSchema: z.toJSONSchema(spec.inputSchema),
-      })),
-    ]);
+    const fullBudget = measureToolDefinitionBudget([...getContextToolDefinitions(), ...cliLocalDefinitions()]);
 
     expect(minimalBudget.toolCount).toBe(3);
     expect(minimalBudget.totalChars).toBeLessThan(4_000);
@@ -372,6 +389,7 @@ describe('mcp exact list and missing detail tools', () => {
       `[mcp minimal budget] ${JSON.stringify({
         measured: { full: fullBudget, minimal: minimalBudget },
         baseline_2026_08_05: BUDGET_BASELINE,
+        baseline_2026_08_07: BUDGET_BASELINE_RESOLVE,
       })}\n`,
     );
   });

@@ -1,10 +1,16 @@
 import httpClient from '../utils/httpClient.js';
 
-export async function getLinearIssue(apiUrl: string, headers: any, issueId: string): Promise<any> {
+export async function getLinearIssue(apiUrl: string, headers: any, issueId: string, projectId?: string): Promise<any> {
   // A LINEAR_ISSUE reference locator is not an AgentTeams id, so it is not
   // UUID-validated upstream — encode it so it stays a single path segment.
   const baseUrl = `${apiUrl}/api/linear/issues/${encodeURIComponent(issueId)}`;
-  const response = await httpClient.get(baseUrl, { headers });
+  // The route picks the project from `request.user.projectId` first and the
+  // `projectId` query second. Only an agent API key carries the former, so a
+  // personal-token or JWT session that omits the query has no project to look
+  // the Linear token up against and comes back 401 — which reads as "expired
+  // credential" rather than "missing scope". Send it whenever the caller knows it.
+  const requestConfig = projectId ? { headers, params: { projectId } } : { headers };
+  const response = await httpClient.get(baseUrl, requestConfig);
   return response.data;
 }
 

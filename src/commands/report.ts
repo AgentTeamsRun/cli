@@ -1,9 +1,17 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { createReport, deleteReport, getReport, listReports, updateReport } from '../api/report.js';
+import { isAxiosError } from 'axios';
+import {
+  createReport,
+  deleteReport,
+  dismissReportReview,
+  getReport,
+  listReports,
+  updateReport,
+} from '../api/report.js';
 import { findProjectConfig } from '../utils/config.js';
 import { getGitRemoteOriginUrl } from '../utils/git.js';
-import { parseReportOptions, parseReviewRecommendation } from '../utils/report.js';
+import { parseReportOptions } from '../utils/report.js';
 
 import {
   deleteIfTempFile,
@@ -114,7 +122,7 @@ export async function executeReportCommand(apiUrl: string, headers: any, action:
       const commitEnd = toNonEmptyString(options.commitEnd);
       const pullRequestId = toNonEmptyString(options.pullRequestId);
       const qualityScore = toNonNegativeInteger(options.qualityScore);
-      const reviewRecommendation = parseReviewRecommendation(options.reviewRecommendation);
+      const reviewRecommendation = toNonEmptyString(options.reviewRecommendation);
       const reviewReason = toNonEmptyString(options.reviewReason);
 
       if (commitHash !== undefined) body.commitHash = commitHash;
@@ -127,10 +135,53 @@ export async function executeReportCommand(apiUrl: string, headers: any, action:
       if (commitEnd !== undefined) body.commitEnd = commitEnd;
       if (pullRequestId !== undefined) body.pullRequestId = pullRequestId;
       if (qualityScore !== undefined) body.qualityScore = qualityScore;
-      if (reviewRecommendation !== undefined) body.reviewRecommendation = reviewRecommendation;
-      if (reviewReason !== undefined) body.reviewReason = reviewReason;
+
+      if (reviewRecommendation !== undefined || reviewReason !== undefined) {
+        const notice =
+          reviewRecommendation === 'NOT_NEEDED'
+            ? '--review-recommendation/--review-reason cannot be changed with report update. ' +
+              'Use `agentteams report dismiss-review --id <reportId>` instead.'
+            : reviewRecommendation !== undefined
+              ? '--review-recommendation cannot be changed to REQUIRED after report creation. ' +
+                'Recreate the report or use `agentteams code-review create` to register a review directly.'
+              : '--review-reason cannot be changed after report creation. Correct it in the web UI.';
+
+        if (Object.keys(body).length === 0) {
+          throw new Error(notice);
+        }
+        console.warn(notice);
+      }
 
       return updateReport(apiUrl, options.projectId, headers, options.id, body);
+    }
+    case 'dismiss-review': {
+      if (!options.id) throw new Error('--id is required for report dismiss-review');
+      return withSpinner(
+        'Dismissing report review...',
+        async () => {
+          try {
+            return await dismissReportReview(apiUrl, options.projectId, headers, options.id);
+          } catch (error) {
+            if (isAxiosError(error)) {
+              const errorData = error.response?.data as { errorDetailCode?: unknown; message?: unknown } | undefined;
+              const errorDetailCode =
+                typeof errorData?.errorDetailCode === 'string' ? errorData.errorDetailCode : undefined;
+              const details = typeof errorData?.message === 'string' ? `\nDetails: ${errorData.message}` : '';
+
+              if (error.response?.status === 409 && errorDetailCode === 'COMPLETION_REPORT_REVIEW_ALREADY_LINKED') {
+                throw new Error(
+                  `An active (non-cancelled) code review is already linked, so the report review cannot be dismissed.${details}`,
+                );
+              }
+              if (error.response?.status === 404 && errorDetailCode === 'COMPLETION_REPORT_NOT_FOUND') {
+                throw new Error(`Completion report not found: ${options.id}${details}`);
+              }
+            }
+            throw error;
+          }
+        },
+        'Report review dismissed',
+      );
     }
     case 'delete': {
       if (!options.id) throw new Error('--id is required for report delete');

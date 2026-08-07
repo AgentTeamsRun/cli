@@ -106,7 +106,7 @@ async function resolveRecord(parsed: ParsedEntityRef, context: ResolveApiContext
     case 'convention':
       return getConvention(apiUrl, projectId, headers, parsed.id);
     case 'LINEAR_ISSUE':
-      return getLinearIssue(apiUrl, headers, parsed.id);
+      return getLinearIssue(apiUrl, headers, parsed.id, projectId);
     default:
       throw new Error(`No record lookup for reference type: ${parsed.refType}`);
   }

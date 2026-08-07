@@ -24,7 +24,7 @@ export interface ReportPayload {
 
 /**
  * --review-recommendation 값을 검증한다. REQUIRED/NOT_NEEDED만 허용하고,
- * 그 외 비어있지 않은 값은 경고 후 무시한다. report create/update가 공유한다.
+ * 그 외 비어있지 않은 값은 경고 후 무시한다. report create와 plan finish의 보고서 생성 경로가 공유한다.
  */
 export function parseReviewRecommendation(value: unknown): string | undefined {
   const raw = toNonEmptyString(value);

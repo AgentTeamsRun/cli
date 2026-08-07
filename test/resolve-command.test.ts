@@ -157,7 +157,13 @@ describe('resolve command', () => {
 
       const result = await executeResolveCommand({ ref: `LINEAR_ISSUE:${uuid}` }, loadContext);
 
-      expect(getSpy).toHaveBeenCalledWith(`${apiUrl}/api/linear/issues/${uuid}`, { headers });
+      // The project scope has to ride along as a query: only an agent API key
+      // carries it on the token, so a personal-token session would get a 401
+      // that reads as an expired credential.
+      expect(getSpy).toHaveBeenCalledWith(`${apiUrl}/api/linear/issues/${uuid}`, {
+        headers,
+        params: { projectId },
+      });
       expect(result).toMatchObject({ kind: 'record', refType: 'LINEAR_ISSUE', id: uuid });
     });
   });
