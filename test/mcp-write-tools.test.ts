@@ -386,11 +386,14 @@ describe('mcp write tools', () => {
     expect(postSpy.mock.calls[1]?.[1]).toEqual({ content: '태스크', ...contract });
   });
 
+  // 이 계약은 예전에 최상위 union 이 지켰지만, union input_schema 를 400 으로 거부하는
+  // 백엔드가 있어 스키마를 평탄화했다. 계약은 핸들러 검증으로 옮겼으므로 여기서 고정한다.
   it('rejects a create that names no target or more than one', async () => {
     const postSpy = jest.spyOn(axios, 'post').mockResolvedValue({ data: { data: { id: 'comment-1' } } } as never);
 
     const none = await callTool('agentteams_comment_create', { content: '부모 없음' });
     expect(none.result?.isError).toBe(true);
+    expect(none.result?.content[0].text).toContain('needs a parent');
 
     const two = await callTool('agentteams_comment_create', {
       planId: 'plan-1',
@@ -399,9 +402,70 @@ describe('mcp write tools', () => {
       content: '부모 둘',
     });
     expect(two.result?.isError).toBe(true);
+    // 무엇이 충돌했는지 오류에 드러나야 모델이 다음 호출을 고칠 수 있다.
+    expect(two.result?.content[0].text).toContain('planId, documentId');
 
-    // 스키마 단계에서 걸러야 서버까지 가지 않는다.
+    // 서버까지 가지 않아야 한다.
     expect(postSpy).not.toHaveBeenCalled();
+  });
+
+  it('states that taskId and planId cannot be paired when creating a comment', async () => {
+    const { client, handle } = connect(boundContext());
+    openHandle = handle;
+    await discover(client);
+
+    const response = await client.request('tools/list', { _meta: MODERN_META });
+    const description = (response.result?.tools ?? []).find(
+      (tool: { name: string }) => tool.name === 'agentteams_comment_create',
+    )?.description;
+
+    expect(description).toContain('Do not pair taskId with planId when creating a comment');
+  });
+
+  it('keeps the plan-only fields plan-only after the schema was flattened', async () => {
+    const postSpy = jest.spyOn(axios, 'post').mockResolvedValue({ data: { data: { id: 'comment-1' } } } as never);
+
+    // 평탄화로 type 이 스키마상 optional 이 되었으므로 plan 코멘트의 필수 조건은 런타임이 지킨다.
+    const untypedPlan = await callTool('agentteams_comment_create', { planId: 'plan-1', content: '타입 없음' });
+    expect(untypedPlan.result?.isError).toBe(true);
+    expect(untypedPlan.result?.content[0].text).toContain('requires type');
+
+    const typedTask = await callTool('agentteams_comment_create', {
+      taskId: 'task-1',
+      type: 'RISK',
+      content: '태스크에 타입',
+    });
+    expect(typedTask.result?.isError).toBe(true);
+    expect(typedTask.result?.content[0].text).toContain('only accepts type with planId');
+
+    const filedDocument = await callTool('agentteams_comment_create', {
+      documentId: 'doc-1',
+      affectedFiles: ['api/src/index.ts'],
+      content: '문서에 파일',
+    });
+    expect(filedDocument.result?.isError).toBe(true);
+    expect(filedDocument.result?.content[0].text).toContain('only accepts affectedFiles with planId');
+
+    expect(postSpy).not.toHaveBeenCalled();
+  });
+
+  // Kiro 의 Bedrock 백엔드는 최상위 union input_schema 를 400 으로 거부하고 그 400 이 대화
+  // 전체를 죽인다. 쓰기 표면에 union 이 다시 생기면 그 클라이언트가 다시 브릭된다.
+  it('publishes every advertised tool with an object root, never a top-level union', async () => {
+    const { client, handle } = connect(boundContext());
+    openHandle = handle;
+
+    await discover(client);
+    const response = await client.request('tools/list', { _meta: MODERN_META });
+    const tools = (response.result?.tools ?? []) as Array<{ name: string; inputSchema?: Record<string, any> }>;
+
+    expect(tools.length).toBeGreaterThan(0);
+    for (const tool of tools) {
+      expect(tool.inputSchema).toBeDefined();
+      expect(tool.inputSchema).not.toHaveProperty('anyOf');
+      expect(tool.inputSchema).not.toHaveProperty('oneOf');
+      expect(tool.inputSchema?.type).toBe('object');
+    }
   });
 
   it('keeps root comment ids and reply ids on separate tools', async () => {

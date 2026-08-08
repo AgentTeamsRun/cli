@@ -315,6 +315,15 @@ describe('agent entry point selection inputs', () => {
     expect(detectAgentEntryPointFiles(createDetectionDir(['.claude', '.gemini']))).toEqual(['CLAUDE.md', 'GEMINI.md']);
   });
 
+  // Verified 2026-08-08 with kiro-cli 2.16.2: it reads AGENTS.md and ignores
+  // CLAUDE.md. Without the marker a Kiro-only repository fell through to the
+  // CLAUDE.md fallback, so init produced a file Kiro never opens and the runner
+  // had no path to `.agentteams/convention.md`.
+  test('a Kiro-only repository selects AGENTS.md rather than the CLAUDE.md fallback', () => {
+    expect(detectAgentEntryPointFiles(createDetectionDir(['.kiro']))).toEqual(['AGENTS.md']);
+    expect(detectAgentEntryPointFiles(createDetectionDir(['.kimi-code']))).toEqual(['AGENTS.md']);
+  });
+
   // An existing entry point never produces a write — init leaves it alone — but
   // it does say which client the folder uses, and the adapters downstream act on
   // that: a hand-written GEMINI.md is what makes `.geminiignore` applicable.

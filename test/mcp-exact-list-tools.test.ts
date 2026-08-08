@@ -352,7 +352,8 @@ describe('mcp exact list and missing detail tools', () => {
     }
     expect(budget).toMatchObject({ toolCount: 31 });
     expect(budget.descriptionChars).toBeGreaterThan(15_000);
-    expect(budget.schemaChars).toBeGreaterThan(25_000);
+    // 코멘트 두 툴의 최상위 union 을 평탄화하면서 중복 분기가 사라져 스키마가 줄었다(2026-08-08).
+    expect(budget.schemaChars).toBeGreaterThan(24_000);
     expect(budget.totalChars).toBeGreaterThan(43_000);
     expect(budget.totalChars).toBeLessThan(48_000);
     expect(budget.estimatedTokens).toBe(Math.ceil(budget.totalChars / 4));

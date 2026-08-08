@@ -174,9 +174,39 @@ describe('mcp install', () => {
     it.each([
       ['kimi-cli', () => join(home, '.kimi-code', 'mcp.json')],
       ['antigravity', () => join(home, '.gemini', 'config', 'mcp_config.json')],
+      ['kiro-cli', () => join(home, '.kiro', 'settings', 'mcp.json')],
     ])('writes %s user config at its documented path', (clientId, pathFor) => {
       expect(install({ client: clientId, scope: 'user' }).exitCode).toBe(0);
       expect(JSON.parse(readFileSync(pathFor(), 'utf-8')).mcpServers.agentteams.command).toBe('agentteams');
+    });
+
+    it('merges into an existing Kiro mcp.json without dropping the servers already there', () => {
+      // Verified 2.16.2: `kiro-cli mcp add` writes this exact file/shape, so a full
+      // overwrite here would silently delete the user's own registrations.
+      const target = join(home, '.kiro', 'settings', 'mcp.json');
+      mkdirSync(join(home, '.kiro', 'settings'), { recursive: true });
+      writeFileSync(
+        target,
+        JSON.stringify({ mcpServers: { existing: { command: 'echo', args: ['hi'], env: {} } } }, null, 2),
+        'utf-8',
+      );
+
+      expect(install({ client: 'kiro-cli', scope: 'user' }).exitCode).toBe(0);
+
+      const parsed = JSON.parse(readFileSync(target, 'utf-8'));
+      expect(Object.keys(parsed.mcpServers).sort()).toEqual(['agentteams', 'existing']);
+      expect(parsed.mcpServers.existing).toEqual({ command: 'echo', args: ['hi'], env: {} });
+      expect(parsed.mcpServers.agentteams.env).toEqual({});
+      expect(readFileSync(target, 'utf-8')).not.toContain(CANARY_API_KEY);
+    });
+
+    it('writes the Kiro project scope inside the workspace .kiro directory', () => {
+      expect(install({ client: 'kiro-cli', scope: 'project' }).exitCode).toBe(0);
+
+      const projectConfig = readFileSync(join(cwd, '.kiro', 'settings', 'mcp.json'), 'utf-8');
+      expect(projectConfig).not.toContain(CANARY_API_KEY);
+      expect(projectConfig).not.toContain('AGENTTEAMS_');
+      expect(JSON.parse(projectConfig).mcpServers.agentteams.command).toBe('agentteams');
     });
 
     it('treats a zero-byte config as "create it" rather than as corruption', () => {

@@ -12,7 +12,7 @@ import { join } from 'node:path';
  */
 export const AGENT_ENTRY_POINT_FILES = [
   { value: 'CLAUDE.md', label: 'CLAUDE.md', hint: 'Claude Code' },
-  { value: 'AGENTS.md', label: 'AGENTS.md', hint: 'OpenCode / Codex' },
+  { value: 'AGENTS.md', label: 'AGENTS.md', hint: 'OpenCode / Codex / Kimi CLI / Kiro CLI' },
   { value: 'GEMINI.md', label: 'GEMINI.md', hint: 'Antigravity' },
   { value: '.cursor/rules/agentteams.mdc', label: '.cursor/rules/agentteams.mdc', hint: 'Cursor' },
 ] as const;
@@ -24,10 +24,19 @@ export const AGENT_ENTRY_POINT_VALUES: AgentEntryPointValue[] = AGENT_ENTRY_POIN
 /** The literal `--agent-files` value that means "create nothing". */
 export const AGENT_FILES_NONE = 'none';
 
-/** The client configuration directory that proves a folder uses that client. */
+/**
+ * The client configuration directory that proves a folder uses that client.
+ *
+ * A marker only earns a place here once the client is known to read the entry
+ * point it maps to — otherwise init writes a file the agent never opens and the
+ * repository looks configured while the agent still cannot reach
+ * `.agentteams/convention.md`. Verified 2026-08-08 with kiro-cli 2.16.2: it reads
+ * `AGENTS.md` and does *not* read `CLAUDE.md`, so a `.kiro`-only repository would
+ * otherwise fall back to `CLAUDE.md` and hand Kiro nothing.
+ */
 const AGENT_CLIENT_MARKER_DIRS: Record<AgentEntryPointValue, readonly string[]> = {
   'CLAUDE.md': ['.claude'],
-  'AGENTS.md': ['.codex', '.opencode'],
+  'AGENTS.md': ['.codex', '.opencode', '.kimi-code', '.kiro'],
   'GEMINI.md': ['.gemini', '.antigravity'],
   '.cursor/rules/agentteams.mdc': ['.cursor'],
 };

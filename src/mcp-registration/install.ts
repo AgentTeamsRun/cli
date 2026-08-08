@@ -6,6 +6,7 @@ import { detectClients, type DetectionDependencies } from './detect.js';
 import { McpConfigParseError, upsertContainerEntry } from './jsonc.js';
 import { buildEntryValue, redactKeyMaterial, renderConfigSnippet, renderVendorCommandLine } from './render.js';
 import { buildServerSpec, MCP_SERVER_NAME, type McpCredentials } from './serverSpec.js';
+import { resolveClientToolProfile } from './toolProfileSupport.js';
 import type { DetectionSignal, InstallResult, McpClientDefinition, McpPathContext, McpScope } from './types.js';
 import { runVendorCommand, type VendorRunner } from './vendorCommand.js';
 
@@ -18,6 +19,8 @@ export interface InstallClientOptions {
   serverName?: string;
   vendorRunner?: VendorRunner;
   toolProfile?: ToolProfile;
+  /** True when `--tool-profile` was named; an implicit `full` may be narrowed by a schema constraint. */
+  explicitToolProfile?: boolean;
 }
 
 function firstLines(text: string, limit = 4): string {
@@ -173,8 +176,28 @@ function installViaJsonMerge(options: InstallClientOptions, configPath: string, 
   }
 }
 
-/** Apply (or explicitly decline to apply) the AgentTeams entry for one client/scope. */
+/**
+ * Apply (or explicitly decline to apply) the AgentTeams entry for one client/scope.
+ *
+ * The profile is resolved here rather than at the command layer so every caller —
+ * single install, batch install, and the snippets rendered from either — writes
+ * the same catalog a client can actually load.
+ */
 export function installClient(options: InstallClientOptions): InstallResult {
+  const resolved = resolveClientToolProfile(
+    options.client,
+    options.toolProfile ?? 'full',
+    options.explicitToolProfile ?? false,
+  );
+  const result = applyClient({ ...options, toolProfile: resolved.toolProfile });
+  return {
+    ...result,
+    toolProfile: resolved.toolProfile,
+    ...(resolved.notice ? { toolProfileNotice: resolved.notice } : {}),
+  };
+}
+
+function applyClient(options: InstallClientOptions): InstallResult {
   const { client, scope } = options;
   const serverName = options.serverName ?? MCP_SERVER_NAME;
   const definition = client.scopes[scope];
@@ -279,6 +302,7 @@ export interface RunBatchInstallOptions extends BuildBatchPlanOptions {
   serverName?: string;
   vendorRunner?: VendorRunner;
   toolProfile?: ToolProfile;
+  explicitToolProfile?: boolean;
 }
 
 /**
@@ -317,6 +341,7 @@ export function runBatchInstall(options: RunBatchInstallOptions): { plan: BatchP
         serverName: options.serverName,
         vendorRunner: options.vendorRunner,
         toolProfile: options.toolProfile,
+        explicitToolProfile: options.explicitToolProfile,
       }),
     );
   }

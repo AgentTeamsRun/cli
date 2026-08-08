@@ -197,7 +197,9 @@ async function executeCommandWithContext(
     case 'linear': {
       const config = await loadRequiredConfig(buildConfigOverrides(options));
       const { apiUrl, headers } = resolveApiContext(config);
-      return withApiErrorContext(apiUrl, () => executeLinearCommand(apiUrl, headers, action, options));
+      return withApiErrorContext(apiUrl, () =>
+        executeLinearCommand(apiUrl, config.projectId, headers, action, options),
+      );
     }
     case 'attachment': {
       const config = await loadRequiredConfig(buildConfigOverrides(options));

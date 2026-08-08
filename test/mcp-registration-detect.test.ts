@@ -90,25 +90,47 @@ describe('mcp client detection', () => {
     expect(signals['kimi-cli'].executablePath).toBe(join(kimiBin, 'kimi'));
   });
 
-  it('detects Codex and Copilot from their overridden homes', () => {
+  it('finds Kiro CLI through the ~/.local/bin symlink its installer leaves outside the runner PATH', () => {
+    const localBin = join(home, '.local', 'bin');
+    mkdirSync(localBin, { recursive: true });
+    writeFileSync(join(localBin, 'kiro-cli'), '#!/bin/sh\n', { mode: 0o755 });
+
+    const signals = byId(detectClients({ context }));
+    expect(signals['kiro-cli'].executablePath).toBe(join(localBin, 'kiro-cli'));
+  });
+
+  it('detects Kiro CLI from its settings directory alone', () => {
+    mkdirSync(join(home, '.kiro', 'settings'), { recursive: true });
+    writeFileSync(join(home, '.kiro', 'settings', 'mcp.json'), '{}\n');
+
+    const signals = byId(detectClients({ context }));
+    expect(signals['kiro-cli'].evidence).toBe('configured');
+    expect(signals['kiro-cli'].detected).toBe(true);
+  });
+
+  it('detects Codex, Copilot and Kiro from their overridden homes', () => {
     const codexHome = join(home, 'custom-codex');
     const copilotHome = join(home, 'custom-copilot');
+    const kiroHome = join(home, 'custom-kiro');
     mkdirSync(codexHome, { recursive: true });
     mkdirSync(copilotHome, { recursive: true });
+    mkdirSync(join(kiroHome, 'settings'), { recursive: true });
     writeFileSync(join(codexHome, 'config.toml'), '');
     writeFileSync(join(copilotHome, 'mcp-config.json'), '{}\n');
+    writeFileSync(join(kiroHome, 'settings', 'mcp.json'), '{}\n');
 
     const signals = byId(
       detectClients({
         context: {
           ...context,
-          env: { ...context.env, CODEX_HOME: codexHome, COPILOT_HOME: copilotHome },
+          env: { ...context.env, CODEX_HOME: codexHome, COPILOT_HOME: copilotHome, KIRO_HOME: kiroHome },
         },
       }),
     );
 
     expect(signals.codex.configPaths).toEqual([join(codexHome, 'config.toml'), codexHome]);
     expect(signals['copilot-cli'].configPaths).toEqual([join(copilotHome, 'mcp-config.json'), copilotHome]);
+    expect(signals['kiro-cli'].configPaths).toEqual([join(kiroHome, 'settings', 'mcp.json'), kiroHome]);
   });
 
   describe('batch install', () => {
@@ -146,7 +168,7 @@ describe('mcp client detection', () => {
       expect(result.text).toContain('claude-code [INSTALLED]');
       expect(result.text).toContain('cursor-cli [INSTALLED]');
       expect(result.text).toContain('amp [SKIPPED_NOT_DETECTED]');
-      expect(result.text).toContain('Summary: 2 registered, 6 skipped, 0 failed.');
+      expect(result.text).toContain('Summary: 2 registered, 7 skipped, 0 failed.');
     });
 
     /**
@@ -168,7 +190,7 @@ describe('mcp client detection', () => {
       expect(result.text).toContain('claude-code [FAILED]');
       expect(result.text).toContain('codex [SKIPPED_CONFIG_ONLY]');
       expect(result.text).toContain('cursor-cli [INSTALLED]');
-      expect(result.text).toContain('Summary: 1 registered, 6 skipped, 1 failed.');
+      expect(result.text).toContain('Summary: 1 registered, 7 skipped, 1 failed.');
     });
 
     it('plans --scope project in batch mode without touching anything and refuses --yes', () => {

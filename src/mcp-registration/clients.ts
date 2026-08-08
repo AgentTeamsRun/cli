@@ -2,9 +2,9 @@ import { join } from 'node:path';
 import type { McpClientDefinition, McpClientId, McpPathContext, McpServerSpec } from './types.js';
 
 /**
- * Registry of the eight AgentTeams runner engines that can host an MCP client.
+ * Registry of the AgentTeams runner engines that can host an MCP client.
  *
- * Every entry below was verified on 2026-07-25 against the vendor's public docs
+ * Every entry below was verified on 2026-07-25 (kiro-cli: 2026-08-08) against the vendor's public docs
  * *and* against a local install (`<tool> mcp add --help`, plus a two-run
  * idempotency check where the tool ships a registration command). The
  * `verifiedAt` / `docsUrl` fields exist so a future contract drift is traceable
@@ -28,6 +28,13 @@ function xdgConfigHome(context: McpPathContext): string {
 function kimiHome(context: McpPathContext): string {
   const override = context.env.KIMI_CODE_HOME;
   return override && override.length > 0 ? override : join(context.homeDir, '.kimi-code');
+}
+
+function kiroHome(context: McpPathContext): string {
+  // Verified 2.16.2: `KIRO_HOME=<dir> kiro-cli mcp list` loads `<dir>/settings/mcp.json`,
+  // so writing to `~/.kiro` under an override would register into a file Kiro never reads.
+  const override = context.env.KIRO_HOME;
+  return override && override.length > 0 ? override : join(context.homeDir, '.kiro');
 }
 
 function codexHome(context: McpPathContext): string {
@@ -344,6 +351,74 @@ export const MCP_CLIENTS: McpClientDefinition[] = [
       },
       project: {
         configPath: (context) => join(context.cwd, '.agents', 'mcp_config.json'),
+        format: 'json',
+        containerKey: 'mcpServers',
+        entryShape: 'plain',
+        strategy: 'jsonMerge',
+      },
+    },
+  },
+  {
+    id: 'kiro-cli',
+    runnerType: 'KIRO_CLI',
+    label: 'Kiro CLI',
+    executables: ['kiro-cli'],
+    // Verified 2.16.2 on macOS: the installer drops a symlink in `~/.local/bin`
+    // that points into the app bundle, and widens PATH through the shell rc —
+    // which a GUI-launched client never reads. Only home-relative paths belong
+    // here; the macOS app-bundle location is machine-absolute and would make
+    // detection ignore the caller's context (the daemon keeps that fallback
+    // instead, where resolving the real binary is the point).
+    extraBinDirs: (context) => [join(context.homeDir, '.local', 'bin')],
+    configSignals: (context) => [join(kiroHome(context), 'settings', 'mcp.json'), kiroHome(context)],
+    docsUrl: 'https://kiro.dev/docs/mcp/',
+    verifiedAt: '2026-08-08',
+    nativeDiscovery: {
+      status: 'unknown',
+      verifiedAt: '2026-08-08',
+      evidenceUrl: 'https://kiro.dev/docs/mcp/',
+      version: '2.16.2',
+      reason: 'The official Kiro MCP guide does not document host-side progressive tool definition loading.',
+    },
+    // Verified 2.16.2: Kiro's Bedrock backend rejects a tool whose `input_schema`
+    // is a top-level union (`anyOf`) with a 400 — and it fails the *whole*
+    // request, so a single such tool makes every Kiro conversation unusable, not
+    // just the tool call. Registration therefore falls back to a union-free
+    // profile instead of reporting INSTALLED on a config that bricks the client.
+    //
+    // As of 2026-08-08 this narrows nothing in practice: the two comment tools
+    // that carried a union root were flattened, so the whole catalog is
+    // union-free and Kiro registers on `full`. The constraint stays declared
+    // because the resolver reads the *live* catalog and conservatively scans
+    // every schema depth — the day a tool ships any union again, Kiro falls back
+    // on its own instead of bricking.
+    schemaConstraint: {
+      kind: 'topLevelUnion',
+      fallbackToolProfile: 'documents',
+      reason:
+        "Kiro's Bedrock backend rejects a tool whose input schema is a top-level union, and the 400 fails every request in the conversation — not only the tool call.",
+    },
+    scopes: {
+      // Verified 2.16.2: `kiro-cli mcp add --scope global|workspace` reports the
+      // exact files below, and writes a `mcpServers` map of
+      // `{ command, args, env }` — the same shape this registry merges. We merge
+      // the file directly rather than shelling out so registration does not
+      // depend on the CLI being installed at the time `mcp config` runs.
+      //
+      // Verified 2.16.2 that a plain `chat --no-interactive` run does load the
+      // global mcp.json (a deliberately broken entry plus `--require-mcp-startup`
+      // exits 3). Runs that pass `--agent`, however, only inherit it while the
+      // agent config keeps `includeMcpJson` at its default `true`; an agent that
+      // sets it to false silently ignores this registration.
+      user: {
+        configPath: (context) => join(kiroHome(context), 'settings', 'mcp.json'),
+        format: 'json',
+        containerKey: 'mcpServers',
+        entryShape: 'plain',
+        strategy: 'jsonMerge',
+      },
+      project: {
+        configPath: (context) => join(context.cwd, '.kiro', 'settings', 'mcp.json'),
         format: 'json',
         containerKey: 'mcpServers',
         entryShape: 'plain',
