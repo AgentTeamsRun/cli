@@ -1355,7 +1355,7 @@ function addMcpRegistrationOptions(command: Command): Command {
     .option('--scope <scope>', 'Configuration scope (user, project)', 'project')
     .option(
       '--tool-profile <profile>',
-      'Tool catalog profile (full, read, documents, comments, minimal); full is the compatibility default, limited profiles reduce upfront schemas',
+      'Tool catalog profile (full, read, documents, comments, minimal); full is the compatibility default, limited profiles reduce upfront schemas. A client whose backend rejects part of the catalog is narrowed automatically unless you name a profile here',
     )
     .option(
       '--server-entry <path>',

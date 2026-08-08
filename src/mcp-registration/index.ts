@@ -7,6 +7,7 @@ import type { DetectionDependencies } from './detect.js';
 import { buildBatchPlan, installClient, resolveInstallExitCode, runBatchInstall, type BatchPlan } from './install.js';
 import { renderConfigSnippet, renderVendorCommandLine } from './render.js';
 import { buildServerSpec, MCP_SERVER_NAME, type McpCredentials } from './serverSpec.js';
+import { isExplicitToolProfile, resolveClientToolProfile } from './toolProfileSupport.js';
 import type {
   InstallResult,
   McpClientDefinition,
@@ -29,6 +30,8 @@ export type {
   McpDoctorReport,
 } from './doctor.js';
 export { buildBatchPlan, installClient, resolveInstallExitCode, runBatchInstall } from './install.js';
+export { isExplicitToolProfile, resolveClientToolProfile } from './toolProfileSupport.js';
+export type { ResolvedClientToolProfile } from './toolProfileSupport.js';
 export { renderConfigSnippet, renderVendorCommandLine, redactKeyMaterial } from './render.js';
 export { buildServerSpec, MCP_SERVER_NAME } from './serverSpec.js';
 export type { McpCredentials } from './serverSpec.js';
@@ -159,6 +162,7 @@ export function runMcpConfigCommand(
   const context = resolvePathContext(dependencies?.context);
   const scope = parseScope(options.scope);
   const toolProfile = parseToolProfile(options.toolProfile);
+  const explicitToolProfile = isExplicitToolProfile(options.toolProfile);
   const clientIds = options.client ? [parseClientId(options.client)] : MCP_CLIENT_ID_LIST;
 
   const spec = buildServerSpec({ serverEntry: options.serverEntry, context, toolProfile });
@@ -167,6 +171,13 @@ export function runMcpConfigCommand(
     const client = findClient(clientId);
     if (!client) throw new Error(`Unknown client: ${clientId}`);
     const definition = client.scopes[scope];
+    // A client whose backend rejects part of the catalog gets its own profile — and
+    // therefore its own spec — so the printed snippet is the one it can actually load.
+    const resolved = resolveClientToolProfile(client, toolProfile, explicitToolProfile);
+    const clientSpec =
+      resolved.toolProfile === toolProfile
+        ? spec
+        : buildServerSpec({ serverEntry: options.serverEntry, context, toolProfile: resolved.toolProfile });
     return {
       clientId,
       label: client.label,
@@ -177,11 +188,12 @@ export function runMcpConfigCommand(
       docsUrl: client.docsUrl,
       verifiedAt: client.verifiedAt,
       nativeDiscovery: client.nativeDiscovery,
-      profileGuidance: describeNativeDiscovery(client, toolProfile),
-      toolProfile,
-      server: spec,
-      snippet: renderConfigSnippet(client, scope, spec, MCP_SERVER_NAME),
-      vendorCommand: renderVendorCommandLine(client, scope, spec, MCP_SERVER_NAME),
+      profileGuidance: describeNativeDiscovery(client, resolved.toolProfile),
+      toolProfile: resolved.toolProfile,
+      toolProfileNotice: resolved.notice ?? null,
+      server: clientSpec,
+      snippet: renderConfigSnippet(client, scope, clientSpec, MCP_SERVER_NAME),
+      vendorCommand: renderVendorCommandLine(client, scope, clientSpec, MCP_SERVER_NAME),
       configOnlyReason: definition.configOnlyReason ?? null,
     };
   });
@@ -199,6 +211,7 @@ export function runMcpConfigCommand(
     lines.push(`File: ${section.configPath}`);
     if (section.configOnlyReason) lines.push(`Note: ${section.configOnlyReason}`);
     if (section.vendorCommand) lines.push(`Command: ${section.vendorCommand}`);
+    if (section.toolProfileNotice) lines.push(section.toolProfileNotice);
     lines.push(section.snippet);
     lines.push(section.profileGuidance);
     lines.push(`Docs: ${section.docsUrl} (verified ${section.verifiedAt})`);
@@ -216,7 +229,8 @@ function formatDetectionEvidence(entry: BatchPlan['entries'][number]): string {
 }
 
 function renderResultLine(result: InstallResult): string {
-  return `- ${result.clientId} [${result.outcome}] ${result.detail}`;
+  const line = `- ${result.clientId} [${result.outcome}] ${result.detail}`;
+  return result.toolProfileNotice ? `${line}\n    ${result.toolProfileNotice}` : line;
 }
 
 function summarize(results: InstallResult[]): { applied: number; skipped: number; failed: number } {
@@ -241,6 +255,7 @@ export function runMcpInstallCommand(
   const context = resolvePathContext(dependencies?.context);
   const scope = parseScope(options.scope);
   const toolProfile = parseToolProfile(options.toolProfile);
+  const explicitToolProfile = isExplicitToolProfile(options.toolProfile);
   const spec = buildServerSpec({ serverEntry: options.serverEntry, context, toolProfile });
 
   if (options.client) {
@@ -254,6 +269,7 @@ export function runMcpInstallCommand(
       context,
       serverEntry: options.serverEntry,
       toolProfile,
+      explicitToolProfile,
       vendorRunner: dependencies?.vendorRunner,
     });
 
@@ -323,6 +339,7 @@ export function runMcpInstallCommand(
     scope,
     serverEntry: options.serverEntry,
     toolProfile,
+    explicitToolProfile,
     vendorRunner: dependencies?.vendorRunner,
     detectionDependencies: dependencies?.detectionDependencies,
   });

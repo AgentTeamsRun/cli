@@ -1,3 +1,5 @@
+import type { ToolProfile } from '@agentteams/context-tools';
+
 /** Client ids accepted by `--client`. Orca is not a client and GEMINI is a deprecated runner type, so neither appears here. */
 export const MCP_CLIENT_IDS = [
   'claude-code',
@@ -8,6 +10,7 @@ export const MCP_CLIENT_IDS = [
   'cursor-cli',
   'kimi-cli',
   'antigravity',
+  'kiro-cli',
 ] as const;
 
 export type McpClientId = (typeof MCP_CLIENT_IDS)[number];
@@ -22,6 +25,24 @@ export interface McpNativeDiscoveryCapability {
   evidenceUrl?: string;
   version?: string;
   reason?: string;
+}
+
+/**
+ * A tool-schema shape this client's model backend cannot accept.
+ *
+ * This is not a preference — a rejected schema fails the request, so registering
+ * a profile that contains such a tool leaves the client worse off than not
+ * registering at all. The constraint names the *shape*, not a profile list, so
+ * the profiles it rules out are derived from the live catalog: flattening the
+ * offending schema lifts the restriction with no edit here.
+ */
+export interface McpSchemaConstraint {
+  /** The backend rejects a tool whose input schema is a top-level union (`anyOf`). */
+  kind: 'topLevelUnion';
+  /** Profile registered instead when the requested one contains a rejected tool. */
+  fallbackToolProfile: ToolProfile;
+  /** User-facing explanation, printed whenever the constraint changes or contradicts the request. */
+  reason: string;
 }
 
 /** How the AgentTeams entry reaches the client's configuration. */
@@ -98,6 +119,8 @@ export interface McpClientDefinition {
   verifiedAt: string;
   /** Native host-side progressive discovery; never changes the profile automatically. */
   nativeDiscovery: McpNativeDiscoveryCapability;
+  /** Present only when the client's backend rejects part of the catalog outright. */
+  schemaConstraint?: McpSchemaConstraint;
   scopes: Record<McpScope, McpScopeDefinition>;
 }
 
@@ -120,6 +143,10 @@ export interface InstallResult {
   backupPath?: string;
   /** Manual fallback, always present for non-INSTALLED outcomes. */
   manualSnippet?: string;
+  /** The profile actually written, which a `schemaConstraint` may have narrowed. */
+  toolProfile?: ToolProfile;
+  /** Why the written profile differs from (or contradicts) the requested one. */
+  toolProfileNotice?: string;
 }
 
 export interface DetectionSignal {
