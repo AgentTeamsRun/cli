@@ -1,5 +1,5 @@
 import type { ToolProfile } from '@agentteams/context-tools';
-import { getTopLevelUnionToolNames, getUnionFreeToolProfiles } from '../mcp/catalog.js';
+import { getUnionFreeToolProfiles, getUnionToolNames } from '../mcp/catalog.js';
 import type { McpClientDefinition } from './types.js';
 
 export interface ResolvedClientToolProfile {
@@ -12,7 +12,7 @@ export interface ResolvedClientToolProfile {
 /** Tools in `profile` that this client's backend would reject outright. */
 function rejectedToolNames(client: McpClientDefinition, profile: ToolProfile): string[] {
   if (client.schemaConstraint?.kind !== 'topLevelUnion') return [];
-  return getTopLevelUnionToolNames(profile);
+  return getUnionToolNames(profile);
 }
 
 function suggestFallback(client: McpClientDefinition, requested: ToolProfile): ToolProfile {

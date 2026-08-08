@@ -385,6 +385,13 @@ export const MCP_CLIENTS: McpClientDefinition[] = [
     // request, so a single such tool makes every Kiro conversation unusable, not
     // just the tool call. Registration therefore falls back to a union-free
     // profile instead of reporting INSTALLED on a config that bricks the client.
+    //
+    // As of 2026-08-08 this narrows nothing in practice: the two comment tools
+    // that carried a union root were flattened, so the whole catalog is
+    // union-free and Kiro registers on `full`. The constraint stays declared
+    // because the resolver reads the *live* catalog and conservatively scans
+    // every schema depth — the day a tool ships any union again, Kiro falls back
+    // on its own instead of bricking.
     schemaConstraint: {
       kind: 'topLevelUnion',
       fallbackToolProfile: 'documents',

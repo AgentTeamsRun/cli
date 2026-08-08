@@ -36,29 +36,37 @@ export function getProfileToolSpecs(profile: ToolProfile): ProfileToolSpecs {
   };
 }
 
-/** A JSON Schema whose root is a union — `anyOf`/`oneOf` instead of an object. */
-function isTopLevelUnionSchema(schema: unknown): boolean {
+/** Whether a JSON Schema contains an `anyOf`/`oneOf` union at any depth. */
+export function containsUnionSchema(schema: unknown, seen = new Set<object>()): boolean {
   if (typeof schema !== 'object' || schema === null) return false;
-  const root = schema as Record<string, unknown>;
-  return Array.isArray(root.anyOf) || Array.isArray(root.oneOf);
+  if (seen.has(schema)) return false;
+  seen.add(schema);
+
+  if (Array.isArray(schema)) {
+    return schema.some((item) => containsUnionSchema(item, seen));
+  }
+
+  const node = schema as Record<string, unknown>;
+  if (Array.isArray(node.anyOf) || Array.isArray(node.oneOf)) return true;
+  return Object.values(node).some((value) => containsUnionSchema(value, seen));
 }
 
 /**
- * Names of the exposed tools whose input schema is a top-level union.
+ * Names of the exposed tools whose input schema contains a union.
  *
  * Some model backends (Kiro's Bedrock, verified 2.16.2) reject such a tool with a
  * 400 that fails the whole request, so registration needs to know which profiles
  * contain one. Derived from the live catalog rather than a hand-kept list: when
  * a union is flattened the answer changes on its own.
  */
-export function getTopLevelUnionToolNames(profile: ToolProfile): string[] {
+export function getUnionToolNames(profile: ToolProfile): string[] {
   const { readTools, localTools, writeTools } = getProfileToolSpecs(profile);
   return [...readTools, ...localTools, ...writeTools]
-    .filter((spec) => isTopLevelUnionSchema(z.toJSONSchema(spec.inputSchema)))
+    .filter((spec) => containsUnionSchema(z.toJSONSchema(spec.inputSchema)))
     .map(({ name }) => name);
 }
 
-/** Profiles whose catalog is free of top-level union input schemas, in declaration order. */
+/** Profiles whose catalog is free of union input schemas, in declaration order. */
 export function getUnionFreeToolProfiles(): ToolProfile[] {
-  return TOOL_PROFILES.filter((profile) => getTopLevelUnionToolNames(profile).length === 0);
+  return TOOL_PROFILES.filter((profile) => getUnionToolNames(profile).length === 0);
 }

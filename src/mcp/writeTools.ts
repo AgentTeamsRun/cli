@@ -208,51 +208,99 @@ const commentExpectedUpdatedAtField = z
   .optional()
   .describe("The comment's updatedAt as you last read it. The write is rejected if someone else changed it since.");
 
+const COMMENT_PARENT_KEYS = ['planId', 'taskId', 'documentId', 'findingId'] as const;
+type CommentParentKey = (typeof COMMENT_PARENT_KEYS)[number];
+
+// comment_list만 taskId + planId를 부모 제한 조합으로 허용한다. 생성은 부모를 하나만
+// 받아야 하므로 같은 조합도 거부하며, 모델이 두 계약을 혼동하지 않도록 설명에도 명시한다.
+const EXACTLY_ONE_PARENT =
+  'Pass exactly one of planId, taskId, documentId, findingId — a comment has one parent by construction.';
+const CREATE_PARENT_PAIRING_RULE = 'Do not pair taskId with planId when creating a comment.';
+
 /**
- * Exactly one target. The server would reject two anyway, but rejecting at the schema means the
- * model is told which shape is wrong instead of receiving a generic 400 after the call.
+ * Exactly one target, enforced at runtime rather than by the schema.
+ *
+ * This used to be a top-level `z.union`, which said the same thing in JSON Schema. But some model
+ * backends (Kiro's Bedrock, verified 2.16.2) answer 400 to a tool whose `input_schema` root is a
+ * union, and that 400 fails the whole request — one such tool makes every conversation in that
+ * client unusable. So the root is a single object and the constraint the union used to carry lives
+ * in {@link resolveCommentParent}: the model still learns which shape is wrong before the call
+ * reaches the server.
  */
-const commentTargetSchema = z.union([
-  z.strictObject({
-    planId: z.string().min(1).describe('Plan id (bare uuid or agentteams_pln_-prefixed).'),
-    type: z
-      .enum(['RISK', 'MODIFICATION', 'GENERAL'])
-      .describe('Plan comments carry a type. RISK stops a runner executing the plan — do not use it lightly.'),
-    affectedFiles: z
-      .array(z.string().min(1))
-      .optional()
-      .describe('Repository paths this comment is about. Plan comments only.'),
-    content: z.string().min(1).describe('Comment body in Markdown.'),
-    guideHash: guideHashField,
-    idempotencyKey: idempotencyKeyField,
-  }),
-  z.strictObject({
-    taskId: z.string().min(1).describe('Plan task id (bare uuid or agentteams_tsk_-prefixed).'),
-    content: z.string().min(1).describe('Comment body in Markdown.'),
-    guideHash: guideHashField,
-    idempotencyKey: idempotencyKeyField,
-  }),
-  z.strictObject({
-    documentId: z.string().min(1).describe('Document id (bare uuid or agentteams_doc_-prefixed).'),
-    content: z.string().min(1).describe('Comment body in Markdown.'),
-    guideHash: guideHashField,
-    idempotencyKey: idempotencyKeyField,
-  }),
-  z.strictObject({
-    findingId: z.string().min(1).describe('Code-review finding id (bare uuid or agentteams_rvf_-prefixed).'),
-    content: z.string().min(1).describe('Comment body in Markdown.'),
-    guideHash: guideHashField,
-    idempotencyKey: idempotencyKeyField,
-  }),
-]);
+const commentTargetSchema = z.strictObject({
+  planId: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(`Plan id (bare uuid or agentteams_pln_-prefixed). ${EXACTLY_ONE_PARENT}`),
+  taskId: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(`Plan task id (bare uuid or agentteams_tsk_-prefixed). ${EXACTLY_ONE_PARENT}`),
+  documentId: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(`Document id (bare uuid or agentteams_doc_-prefixed). ${EXACTLY_ONE_PARENT}`),
+  findingId: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(`Code-review finding id (bare uuid or agentteams_rvf_-prefixed). ${EXACTLY_ONE_PARENT}`),
+  type: z
+    .enum(['RISK', 'MODIFICATION', 'GENERAL'])
+    .optional()
+    .describe(
+      'Plan comments carry a type, and it is required with planId — rejected with any other parent. RISK stops a runner executing the plan — do not use it lightly.',
+    ),
+  affectedFiles: z
+    .array(z.string().min(1))
+    .optional()
+    .describe('Repository paths this comment is about. Plan comments only — rejected with any other parent.'),
+  content: z.string().min(1).describe('Comment body in Markdown.'),
+  guideHash: guideHashField,
+  idempotencyKey: idempotencyKeyField,
+});
+
+/** Which parent this call targets, or a tool error naming exactly what is wrong with the shape. */
+function resolveCommentParent(args: Record<string, unknown>): CommentParentKey {
+  const present = COMMENT_PARENT_KEYS.filter((key) => args[key] !== undefined);
+  if (present.length === 0) {
+    throw new Error(`agentteams_comment_create needs a parent. ${EXACTLY_ONE_PARENT}`);
+  }
+  if (present.length > 1) {
+    throw new Error(
+      `agentteams_comment_create received more than one parent: ${present.join(', ')}. ${EXACTLY_ONE_PARENT}`,
+    );
+  }
+
+  const [parent] = present;
+  if (parent === 'planId') {
+    if (args.type === undefined) {
+      throw new Error('agentteams_comment_create requires type (RISK | MODIFICATION | GENERAL) for a plan comment.');
+    }
+    return parent;
+  }
+  // PLAN 전용 필드는 조용히 버리지 않는다 — 예전 union 도 거부였고, 무시하면 모델은 값이
+  // 실렸다고 믿은 채 다른 부모에 코멘트를 단다.
+  const planOnly = (['type', 'affectedFiles'] as const).filter((key) => args[key] !== undefined);
+  if (planOnly.length > 0) {
+    throw new Error(
+      `agentteams_comment_create only accepts ${planOnly.join(', ')} with planId, but the parent is ${parent}.`,
+    );
+  }
+  return parent;
+}
 
 const commentCreateSpec: McpWriteToolSpec = {
   name: 'agentteams_comment_create',
   title: 'Create AgentTeams Comment',
   description: [
     'Add a root comment to a plan, a plan task, a document, or a code-review finding.',
-    'Pass exactly one of planId, taskId, documentId, findingId — a comment has one parent by construction.',
-    'Only a plan comment carries type and affectedFiles; the other targets take content alone.',
+    EXACTLY_ONE_PARENT,
+    CREATE_PARENT_PAIRING_RULE,
+    'Only a plan comment carries type (required there) and affectedFiles; passing either with another parent is rejected, and the other targets take content alone.',
     COMMENT_GUIDE_FIRST,
     'Comments on a DONE or CANCELLED plan (and on its tasks) are rejected.',
     PROJECT_SCOPE,
@@ -261,6 +309,7 @@ const commentCreateSpec: McpWriteToolSpec = {
   discovery: commentWriteDiscovery,
   inputSchema: commentTargetSchema,
   handler: async (args, context) => {
+    const parent = resolveCommentParent(args);
     const headers = await auth(context);
     // 도구 축은 모델이 고르는 값이 아니라 세션의 속성이라 inputSchema에 노출하지 않는다.
     // 데몬 밖 세션에는 값이 없고, 그때는 키 자체를 보내지 않아 현재 동작이 그대로 유지된다.
@@ -270,7 +319,7 @@ const commentCreateSpec: McpWriteToolSpec = {
       agentConfigId: context.agentConfigId,
     });
 
-    if ('planId' in args) {
+    if (parent === 'planId') {
       return createComment(
         context.apiUrl,
         context.projectId,
@@ -284,7 +333,7 @@ const commentCreateSpec: McpWriteToolSpec = {
         },
       );
     }
-    if ('taskId' in args) {
+    if (parent === 'taskId') {
       return createTaskComment(
         context.apiUrl,
         context.projectId,
@@ -296,7 +345,7 @@ const commentCreateSpec: McpWriteToolSpec = {
         },
       );
     }
-    if ('findingId' in args) {
+    if (parent === 'findingId') {
       return createFindingComment(
         context.apiUrl,
         context.projectId,

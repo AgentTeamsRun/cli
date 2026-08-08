@@ -301,10 +301,15 @@ describe('shared context-tools contract', () => {
       listDocumentComments,
     } as unknown as ContextToolsClient;
 
-    await expect(executeContextTool('agentteams_comment_list', {}, client)).rejects.toThrow();
+    await expect(executeContextTool('agentteams_comment_list', {}, client)).rejects.toThrow(/requires a parent scope/);
+    // 최상위 union 이 지키던 계약이라 평탄화 후에는 오류에 충돌 키가 드러나야 원인을 알 수 있다.
     await expect(
       executeContextTool('agentteams_comment_list', { planId: 'plan-1', findingId: 'finding-1' }, client),
-    ).rejects.toThrow();
+    ).rejects.toThrow(/more than one parent: planId, findingId/);
+    // type 은 planId 단독일 때만 의미가 있다(예전 union 의 planId 분기).
+    await expect(
+      executeContextTool('agentteams_comment_list', { findingId: 'finding-1', type: 'RISK' }, client),
+    ).rejects.toThrow(/only accepts type with planId/);
 
     await executeContextTool(
       'agentteams_comment_list',
@@ -340,7 +345,7 @@ describe('shared context-tools contract', () => {
 
     await expect(
       executeContextTool('agentteams_comment_list', { documentId: 'document-1', planId: 'plan-1' }, client),
-    ).rejects.toThrow();
+    ).rejects.toThrow(/more than one parent: planId, documentId/);
 
     await executeContextTool(
       'agentteams_comment_list',
@@ -354,6 +359,45 @@ describe('shared context-tools contract', () => {
       order: 'asc',
       pageSize: 50,
     });
+  });
+
+  // Kiro 의 Bedrock 백엔드는 최상위 union input schema 를 400 으로 거부하고 그 400 이 대화
+  // 전체를 죽인다. 평탄화가 풀리면 그 클라이언트가 다시 브릭되므로 루트 모양을 고정한다.
+  it('publishes every read tool with an object root, never a top-level union', () => {
+    for (const spec of getContextToolSpecs()) {
+      const schema = z.toJSONSchema(spec.inputSchema) as Record<string, unknown>;
+
+      expect(schema).not.toHaveProperty('anyOf');
+      expect(schema).not.toHaveProperty('oneOf');
+      expect(schema.type).toBe('object');
+    }
+  });
+
+  it('routes each single comment parent to its own client method after flattening', async () => {
+    const listComments = jest.fn(async () => ({ data: [] }));
+    const listFindingComments = jest.fn(async () => ({ data: [] }));
+    const listTaskComments = jest.fn(async () => ({ data: [] }));
+    const listDocumentComments = jest.fn(async () => ({ data: [] }));
+    const client = {
+      listComments,
+      listFindingComments,
+      listTaskComments,
+      listDocumentComments,
+    } as unknown as ContextToolsClient;
+
+    await executeContextTool(
+      'agentteams_comment_list',
+      { planId: 'agentteams_pln_plan-1', type: 'RISK', order: 'asc' },
+      client,
+    );
+    await executeContextTool('agentteams_comment_list', { findingId: 'agentteams_rvf_finding-1' }, client);
+    await executeContextTool('agentteams_comment_list', { taskId: 'agentteams_tsk_task-1' }, client);
+    await executeContextTool('agentteams_comment_list', { documentId: 'agentteams_doc_document-1' }, client);
+
+    expect(listComments).toHaveBeenCalledWith('plan-1', { type: 'RISK', order: 'asc' });
+    expect(listFindingComments).toHaveBeenCalledWith('finding-1', {});
+    expect(listTaskComments).toHaveBeenCalledWith('task-1', {});
+    expect(listDocumentComments).toHaveBeenCalledWith('document-1', {});
   });
 
   it('normalizes entity-bearing filters and finding ids but leaves raw comment ids unchanged', async () => {
