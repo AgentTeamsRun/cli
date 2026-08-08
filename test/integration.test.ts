@@ -482,7 +482,10 @@ describe('CLI Integration Tests', () => {
           title: 'Linear issue',
         },
       });
-      expect(axiosGetSpy).toHaveBeenCalledWith(`${API_URL}/api/linear/issues/issue-1`, { headers: authHeaders() });
+      expect(axiosGetSpy).toHaveBeenCalledWith(`${API_URL}/api/linear/issues/issue-1`, {
+        headers: authHeaders(),
+        params: { projectId: PROJECT_ID },
+      });
     });
 
     it('linear comment create: should post to the linear comment endpoint', async () => {
@@ -509,7 +512,92 @@ describe('CLI Integration Tests', () => {
       expect(axiosPostSpy).toHaveBeenCalledWith(
         `${API_URL}/api/linear/issues/issue-1/comments`,
         { body: 'Created from CLI' },
-        { headers: authHeaders() },
+        { headers: authHeaders(), params: { projectId: PROJECT_ID } },
+      );
+    });
+
+    // 서버는 프로젝트를 request.user.projectId → ?projectId 순으로 찾는다. 에이전트 API 키만
+    // 앞의 축을 싣기 때문에, 개인 토큰/JWT 세션은 CLI가 쿼리를 보내지 않으면 프로젝트를 특정하지
+    // 못하고 401("로그인 만료"처럼 읽히는)로 끝난다. 다섯 하위 명령 전부가 쿼리를 실어야 한다.
+    it('linear issue get: should prefer an explicit --project-id over the configured project', async () => {
+      axiosGetSpy.mockResolvedValue({ data: { data: { id: 'issue-1' } } } as any);
+
+      await executeCommand('linear', 'issue-get', { issueId: 'issue-1', projectId: 'project_override' });
+
+      expect(axiosGetSpy).toHaveBeenCalledWith(`${API_URL}/api/linear/issues/issue-1`, {
+        headers: authHeaders(),
+        params: { projectId: 'project_override' },
+      });
+    });
+
+    it('linear issue create: should send the configured projectId as a query param', async () => {
+      axiosPostSpy.mockResolvedValue({ data: { data: { id: 'issue-1' } } } as any);
+
+      await executeCommand('linear', 'issue-create', { title: 'Created from CLI' });
+
+      expect(axiosPostSpy).toHaveBeenCalledWith(
+        `${API_URL}/api/linear/issues`,
+        { title: 'Created from CLI' },
+        { headers: authHeaders(), params: { projectId: PROJECT_ID } },
+      );
+    });
+
+    it('linear issue update: should send the configured projectId as a query param', async () => {
+      axiosPatchSpy.mockResolvedValue({ data: { data: { id: 'issue-1' } } } as any);
+
+      await executeCommand('linear', 'issue-update', { issueId: 'issue-1', state: 'Done' });
+
+      expect(axiosPatchSpy).toHaveBeenCalledWith(
+        `${API_URL}/api/linear/issues/issue-1`,
+        { state: 'Done' },
+        { headers: authHeaders(), params: { projectId: PROJECT_ID } },
+      );
+    });
+
+    it('linear comment list: should send the configured projectId as a query param', async () => {
+      axiosGetSpy.mockResolvedValue({ data: { data: [] } } as any);
+
+      await executeCommand('linear', 'comment-list', { issueId: 'issue-1' });
+
+      expect(axiosGetSpy).toHaveBeenCalledWith(`${API_URL}/api/linear/issues/issue-1/comments`, {
+        headers: authHeaders(),
+        params: { projectId: PROJECT_ID },
+      });
+    });
+
+    // LINEAR_ISSUE 식별자는 AgentTeams id가 아니라 상류에서 UUID 검증을 거치지 않는다.
+    // '/'나 '?'가 섞이면 경로 세그먼트가 쪼개져 라우트 미스매치나 쿼리 오염이 되므로,
+    // 이슈를 경로에 싣는 헬퍼 네 개가 전부 같은 인코딩을 써야 한다.
+    it('linear: should encode the issue id in every issue-scoped endpoint', async () => {
+      axiosGetSpy.mockResolvedValue({ data: { data: {} } } as any);
+      axiosPatchSpy.mockResolvedValue({ data: { data: {} } } as any);
+      axiosPostSpy.mockResolvedValue({ data: { data: {} } } as any);
+
+      const issueId = 'AGE-1/../teams?x=1';
+      const encoded = encodeURIComponent(issueId);
+
+      await executeCommand('linear', 'issue-get', { issueId });
+      await executeCommand('linear', 'issue-update', { issueId, state: 'Done' });
+      await executeCommand('linear', 'comment-list', { issueId });
+      await executeCommand('linear', 'comment-create', { issueId, body: 'hi' });
+
+      expect(axiosGetSpy).toHaveBeenCalledWith(`${API_URL}/api/linear/issues/${encoded}`, {
+        headers: authHeaders(),
+        params: { projectId: PROJECT_ID },
+      });
+      expect(axiosPatchSpy).toHaveBeenCalledWith(
+        `${API_URL}/api/linear/issues/${encoded}`,
+        { state: 'Done' },
+        { headers: authHeaders(), params: { projectId: PROJECT_ID } },
+      );
+      expect(axiosGetSpy).toHaveBeenCalledWith(`${API_URL}/api/linear/issues/${encoded}/comments`, {
+        headers: authHeaders(),
+        params: { projectId: PROJECT_ID },
+      });
+      expect(axiosPostSpy).toHaveBeenCalledWith(
+        `${API_URL}/api/linear/issues/${encoded}/comments`,
+        { body: 'hi' },
+        { headers: authHeaders(), params: { projectId: PROJECT_ID } },
       );
     });
 
