@@ -1,0 +1,2 @@
+export declare function executeAttachmentCommand(apiUrl: string, headers: Record<string, string>, action: string, options: Record<string, unknown>): Promise<unknown>;
+//# sourceMappingURL=attachment.d.ts.map
