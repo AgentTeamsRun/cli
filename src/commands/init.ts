@@ -27,6 +27,8 @@ import {
   saveLegacyApiKeyConfig,
 } from '../utils/config.js';
 import { getPersonalTokenClient } from '../auth/personalTokenClient.js';
+import { DEVICE_AUTH_INIT_HINT, decorateLoopbackTimeout, performDeviceAuthLogin, shouldUseDeviceAuth } from './auth.js';
+import { setDeviceAuthDefault } from '../utils/config.js';
 import { createSpinner, withSpinner } from '../utils/spinner.js';
 import { withCommandContext } from '../utils/commandContext.js';
 import {
@@ -87,6 +89,15 @@ type InitOptions = {
   agentFilesExample?: boolean;
   /** Install the managed post-checkout hook even without a linked worktree. */
   installWorktreeHook?: boolean;
+  /**
+   * Explicit opt-in to the RFC 8628 device-code flow — no loopback port, approval
+   * happens on another device. Same flag name as `agentteams auth login`.
+   * Nothing detects the environment; only this flag (or the machine-wide default
+   * the user declared) selects it.
+   */
+  deviceAuth?: boolean;
+  /** Persist the device-code flow as this machine's default in `~/.agentteams/config.json`. */
+  setDefault?: boolean;
 };
 
 export type InitReadinessStatus = 'READY' | 'DEGRADED' | 'SKIPPED';
@@ -303,6 +314,10 @@ async function tryOpenBrowser(url: string): Promise<void> {
   printAuthorizeUrl(url);
 
   if (isSshEnvironment()) {
+    // Detection is only ever allowed to add a sentence. It must never pick the flow:
+    // a false negative here would open a loopback port on a remote box, which is the
+    // original bug this hint points at.
+    console.log(DEVICE_AUTH_INIT_HINT);
     return;
   }
 
@@ -811,6 +826,70 @@ async function runUnifiedSetup(context: SetupContext): Promise<SetupOutcome> {
 }
 
 /**
+ * The `--device-auth` variant of the unified setup.
+ *
+ * Same destination as {@link runUnifiedSetup} — credential stored, config written,
+ * conventions downloaded — reached without opening a local port. The selection the
+ * user makes in the approval screen comes back on the poll response instead of a
+ * loopback callback.
+ *
+ * `projectName` / `osType` / `machineId` / `authPathEnc` are sent to the server on
+ * start, because they are exactly what the approval screen needs to create the same
+ * AgentConfig the loopback path would. Dropping any of them silently loses runner
+ * binding on the remote machine, which no error would ever surface.
+ */
+async function runDeviceAuthSetup(context: SetupContext): Promise<SetupOutcome> {
+  const outcome = await performDeviceAuthLogin({
+    apiUrl: context.apiUrl,
+    flow: 'setup',
+    projectName: context.projectName,
+    ...(detectOsType() ? { osType: detectOsType() } : {}),
+    ...(readOrCreateMachineId() ? { machineId: readOrCreateMachineId()! } : {}),
+    ...(context.authPathEnc ? { authPathEnc: context.authPathEnc } : {}),
+  });
+
+  if (!outcome.setup) {
+    throw new Error(SETUP_METADATA_MISSING_HINT);
+  }
+
+  const setup = outcome.setup;
+  saveConfig(context.configPath, toConfig(setup, context.apiUrl));
+
+  const runtimeConfig = await loadConfigWithCredential({
+    teamId: setup.teamId,
+    projectId: setup.projectId,
+    apiUrl: context.apiUrl,
+    authMode: 'personal-token',
+  });
+
+  if (!runtimeConfig) {
+    throw new Error(
+      'Signed in, but the stored credential could not be read back, so the convention template was not downloaded. ' +
+        'Check `agentteams auth status`, then run `agentteams convention download` in this folder.',
+    );
+  }
+
+  await conventionDownload({
+    cwd: context.cwd,
+    agentConfigId: setup.agentConfigId,
+    config: runtimeConfig,
+  });
+
+  return {
+    authUrl: outcome.verificationUri,
+    teamId: setup.teamId,
+    projectId: setup.projectId,
+    agentName: setup.agentName,
+    seedPlanId: setup.seedPlanId,
+    personalLogin: {
+      email: outcome.identity.email,
+      nickname: outcome.identity.nickname,
+      persisted: outcome.persisted,
+    },
+  };
+}
+
+/**
  * The explicit `--auth api-key` compatibility path, unchanged.
  *
  * It keeps the legacy authorize URL (no `flow=setup`, no `code_challenge`), the
@@ -1253,6 +1332,16 @@ async function executeInitCommandWithContext(options?: InitOptions): Promise<Ini
   const cwd = resolve(options?.cwd ?? process.cwd());
   // Only an explicit compatibility request goes through the agent-key round trip.
   const authMode: AuthMode = options?.authMode === 'api-key' ? 'api-key' : 'personal-token';
+  // Device authorization issues a personal token; there is no device grant for the
+  // legacy agent-key path. Combining them silently would take one of the two flags
+  // and ignore the other, so it is refused outright.
+  const useDeviceAuth = shouldUseDeviceAuth({ deviceAuth: options?.deviceAuth });
+  if (useDeviceAuth && authMode === 'api-key') {
+    throw new Error(
+      'Initialization failed: --device-auth cannot be combined with --auth api-key. ' +
+        'Device authorization issues a personal login; drop --auth api-key, or drop --device-auth to keep the API-key path.',
+    );
+  }
   // Parsed before anything opens a browser: a typo in --agent-files must not be
   // discovered after the user has already signed in.
   const explicitAgentFiles = parseAgentFilesOption(options?.agentFiles);
@@ -1297,9 +1386,19 @@ async function executeInitCommandWithContext(options?: InitOptions): Promise<Ini
 
   let setup: SetupOutcome;
   try {
-    setup = authMode === 'api-key' ? await runLegacyApiKeySetup(context) : await runUnifiedSetup(context);
+    setup = useDeviceAuth
+      ? await runDeviceAuthSetup(context)
+      : authMode === 'api-key'
+        ? await runLegacyApiKeySetup(context)
+        : await runUnifiedSetup(context);
   } catch (error) {
-    throw new Error(`Initialization failed: ${error instanceof Error ? error.message : String(error)}`);
+    const decorated = decorateLoopbackTimeout(error, DEVICE_AUTH_INIT_HINT);
+    throw new Error(`Initialization failed: ${decorated instanceof Error ? decorated.message : String(decorated)}`);
+  }
+
+  // Only ever on an explicit --set-default, and only after the flow actually worked.
+  if (useDeviceAuth && options?.setDefault === true) {
+    setDeviceAuthDefault(true);
   }
 
   // Everything below runs *after* the credential and the config are stored, so

@@ -116,6 +116,18 @@ function printCommandResult(params: {
   console.log(outputText);
 }
 
+/**
+ * One constant for both `init` and `auth login`.
+ *
+ * The flag has to read identically in both `--help` outputs: a user who learns it
+ * from one command types it at the other. Sharing the string makes that structural
+ * rather than something a reviewer has to notice drifting.
+ */
+const DEVICE_AUTH_OPTION_DESCRIPTION =
+  'authorize with a short code on another device instead of a local browser callback (for SSH, containers, and other headless shells)';
+const DEVICE_AUTH_SET_DEFAULT_DESCRIPTION =
+  "with --device-auth: remember device-code login as this machine's default in ~/.agentteams/config.json";
+
 const CONVENTION_HINT = `\nFor workflow rules and reporting guidelines, see: .agentteams/convention.md`;
 
 program.name('agentteams').description('CLI tool for AgentTeams API').version(pkg.version);
@@ -153,6 +165,10 @@ program
     "Install the managed git post-checkout hook even if this repository has no linked worktrees yet. By default the hook is installed only when linked worktrees exist; 'agentteams doctor' can install it later.",
     false,
   )
+  // Explicit opt-in only. There is deliberately no `--no-device-auth`: the default
+  // already is the browser callback, so the way to turn this off is not to pass it.
+  .option('--device-auth', DEVICE_AUTH_OPTION_DESCRIPTION, false)
+  .option('--set-default', DEVICE_AUTH_SET_DEFAULT_DESCRIPTION, false)
   .option('--format <format>', 'Output format (json; defaults to human-readable view)')
   .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
   .option('--verbose', 'Print full raw output to stdout; with --output-file, also echo it', false)
@@ -164,6 +180,8 @@ program
         agentFiles: options.agentFiles,
         agentFilesExample: options.agentFilesExample === true,
         installWorktreeHook: options.installWorktreeHook === true,
+        deviceAuth: options.deviceAuth === true,
+        setDefault: options.setDefault === true,
       });
       const format = normalizeInteractiveFormat(options.format);
 
@@ -184,13 +202,22 @@ program
     'logout only: clear the local credential without contacting the server (the token stays valid — revoke it in the web app)',
     false,
   )
+  // Same flag name as `init` on purpose — one vocabulary for one behaviour.
+  // Same flag name and same wording as `init` — one vocabulary for one behaviour.
+  .option('--device-auth', DEVICE_AUTH_OPTION_DESCRIPTION, false)
+  .option('--set-default', DEVICE_AUTH_SET_DEFAULT_DESCRIPTION, false)
   .option('--format <format>', 'Output format (json; defaults to human-readable text)')
   .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
   .option('--verbose', 'Print full raw output to stdout; with --output-file, also echo it', false)
   .addHelpText('after', CONVENTION_HINT)
   .action(async (action, options) => {
     try {
-      const result = await executeCommand('auth', action, { apiUrl: options.apiUrl, local: options.local === true });
+      const result = await executeCommand('auth', action, {
+        apiUrl: options.apiUrl,
+        local: options.local === true,
+        deviceAuth: options.deviceAuth === true,
+        setDefault: options.setDefault === true,
+      });
 
       // `auth` is read by a person, so text is the default; scripts that read the
       // documented fields ask for JSON explicitly.

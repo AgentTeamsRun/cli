@@ -8,15 +8,19 @@
  */
 
 import open from 'open';
-import type { CredentialBackendId, CredentialStoreReason } from '../auth/credentialStore.js';
+import { getCredentialStore, type CredentialBackendId, type CredentialStoreReason } from '../auth/credentialStore.js';
+import { pollDeviceAuthorization, startDeviceAuthorization } from '../auth/deviceAuthClient.js';
 import { getPersonalTokenClient, PersonalTokenError } from '../auth/personalTokenClient.js';
 import type { Config } from '../types/index.js';
 import { startAuthorizationCodeServer, createAuthState, createPkcePair } from '../utils/authServer.js';
 import {
   DEFAULT_API_URL,
   findProjectConfig,
+  globalConfigPath,
+  isDeviceAuthDefaultEnabled,
   loadProjectConfig,
   resolveCredential,
+  setDeviceAuthDefault,
   setProjectAuthMode,
   type CredentialSource,
 } from '../utils/config.js';
@@ -41,6 +45,10 @@ export type AuthLoginResult = {
   storeReason: CredentialStoreReason;
   configPath: string | null;
   authMode: 'personal-token';
+  /** true when this login used the device-code flow instead of the browser callback. */
+  deviceAuth: boolean;
+  /** Set only when `--set-default` wrote the machine-wide device-auth preference. */
+  deviceAuthDefaultPath?: string;
   warning?: string;
 };
 
@@ -51,6 +59,17 @@ export type AuthStatusResult = {
   credentialSource: CredentialSource | null;
   authMode: Config['authMode'] | null;
   hasProjectApiKey: boolean;
+  /**
+   * Machine-wide device-auth default (`--set-default` or AGENTTEAMS_DEVICE_AUTH).
+   * Reported here because otherwise there is no way to discover that this machine
+   * is on the device flow, nor how to turn it back off.
+   */
+  deviceAuthDefault: {
+    enabled: boolean;
+    /** Where the preference lives, and therefore where to remove it. */
+    configPath: string;
+    disableHint: string;
+  };
   personalToken: {
     connected: boolean;
     persisted: boolean;
@@ -109,6 +128,20 @@ function isSshEnvironment(): boolean {
   return Boolean(process.env.SSH_CONNECTION || process.env.SSH_CLIENT || process.env.SSH_TTY);
 }
 
+/**
+ * Discoverability line for the device flow.
+ *
+ * This is the *only* thing `isSshEnvironment()` is allowed to influence. It never
+ * selects a flow: a false positive here costs one extra line of text, whereas a
+ * false positive in flow selection would downgrade a working one-click login on a
+ * local machine into copying a code by hand.
+ */
+export const DEVICE_AUTH_HINT =
+  "If you cannot open that URL here, run 'agentteams auth login --device-auth' to authorize with a short code on another device instead.";
+
+export const DEVICE_AUTH_INIT_HINT =
+  "If you cannot open that URL here, run 'agentteams init --device-auth' to authorize with a short code on another device instead.";
+
 async function tryOpenBrowser(url: string): Promise<void> {
   console.log('🔐 Complete the AgentTeams login in your browser:');
   console.log(url);
@@ -116,6 +149,7 @@ async function tryOpenBrowser(url: string): Promise<void> {
   // Headless and SSH sessions have no browser to open; the printed URL is the
   // whole interface there, exactly as in `init`.
   if (isSshEnvironment()) {
+    console.log(DEVICE_AUTH_HINT);
     return;
   }
 
@@ -123,6 +157,111 @@ async function tryOpenBrowser(url: string): Promise<void> {
     await open(url);
   } catch {
     // Already printed.
+  }
+}
+
+/**
+ * Whether this invocation should take the device-code path.
+ *
+ * Three inputs, all of them **explicit user declarations**: the flag, the env var,
+ * and the machine-wide default written by `--set-default`. Nothing detects the
+ * environment. Adding detection here is the one change this feature must not take:
+ * a false positive strands a local user on code entry, and a false negative opens
+ * a loopback port on a remote box, which is the original bug.
+ */
+export function shouldUseDeviceAuth(options: Record<string, unknown>, userHomeDir?: string): boolean {
+  return options.deviceAuth === true || isDeviceAuthDefaultEnabled(userHomeDir);
+}
+
+/**
+ * Refuse before asking the user to do anything.
+ *
+ * The compensation for an unstorable token (revoke it, report it) already exists
+ * downstream, but by then the user has walked to another machine and approved a
+ * request that is about to be thrown away. Checking first turns that into an
+ * immediate, actionable failure.
+ */
+function assertCredentialStoreUsable(): void {
+  const status = getCredentialStore().status();
+  if (status.reason === 'OK') return;
+
+  const cause =
+    status.reason === 'NO_BACKEND'
+      ? 'this machine has no usable OS credential store'
+      : status.reason === 'UNSUPPORTED_PLATFORM'
+        ? 'this platform has no supported OS credential store'
+        : 'the OS credential store rejected a write';
+
+  throw new PersonalTokenError(
+    'STORE_UNAVAILABLE',
+    `Cannot start device authorization: ${cause}. ` +
+      'On Linux install and unlock libsecret (for example `sudo apt install libsecret-tools` plus a running keyring), ' +
+      'or use an API key instead (AGENTTEAMS_API_KEY) on CI, containers and headless machines.',
+  );
+}
+
+/**
+ * Run the device-code round trip.
+ *
+ * Exported so `init --device-auth` reuses the identical handshake instead of
+ * growing a second copy of the polling state machine.
+ */
+export async function performDeviceAuthLogin(input: {
+  apiUrl: string;
+  flow?: 'login' | 'setup';
+  projectName?: string;
+  osType?: string;
+  machineId?: string;
+  authPathEnc?: string;
+  signal?: AbortSignal;
+}): Promise<{
+  verificationUri: string;
+  identity: AuthLoginResult['identity'];
+  setup: Awaited<ReturnType<typeof pollDeviceAuthorization>>['setup'];
+  persisted: boolean;
+  storeBackend: CredentialBackendId;
+  storeReason: CredentialStoreReason;
+}> {
+  assertCredentialStoreUsable();
+
+  const start = await startDeviceAuthorization({
+    apiUrl: input.apiUrl,
+    flow: input.flow ?? 'login',
+    ...(input.projectName ? { projectName: input.projectName } : {}),
+    ...(input.osType ? { osType: input.osType } : {}),
+    ...(input.machineId ? { machineId: input.machineId } : {}),
+    ...(input.authPathEnc ? { authPathEnc: input.authPathEnc } : {}),
+  });
+
+  // The server owns this URL. Rebuilding it from AUTH_BASE_URL would send a
+  // dev-API login to the production web app (and vice versa). The device code
+  // itself is never printed — only the short code the user has to read out.
+  console.log('🔐 On any device with a browser, open:');
+  console.log(`   ${start.verificationUri}`);
+  console.log(`   and enter the code: ${start.userCode}`);
+  console.log(`   (direct link: ${start.verificationUriComplete})`);
+
+  const spinner = createSpinner('Waiting for approval... (Ctrl+C to cancel)');
+  try {
+    const result = await pollDeviceAuthorization({
+      apiUrl: input.apiUrl,
+      start,
+      ...(input.signal ? { signal: input.signal } : {}),
+    });
+    spinner?.succeed();
+
+    const state = getPersonalTokenClient(input.apiUrl).state();
+    return {
+      verificationUri: start.verificationUri,
+      identity: result.identity,
+      setup: result.setup,
+      persisted: state.persisted,
+      storeBackend: state.storeBackend,
+      storeReason: state.storeReason,
+    };
+  } catch (error) {
+    spinner?.fail();
+    throw error;
   }
 }
 
@@ -174,12 +313,28 @@ export async function performPersonalTokenLogin(input: { apiUrl: string; project
     };
   } catch (error) {
     spinner?.fail();
-    throw error;
+    throw decorateLoopbackTimeout(error, DEVICE_AUTH_HINT);
   } finally {
     if (authContext.server.listening) {
       authContext.server.close();
     }
   }
+}
+
+/**
+ * Attach the device-code hint to the loopback timeout.
+ *
+ * That timeout is exactly the failure this feature exists for: the browser
+ * called back to *its own* localhost, so a login started over SSH waits 60
+ * seconds and dies with no idea what to do next. The hint is added where the
+ * user-facing message is built rather than inside `authServer`, so the local
+ * (working) path keeps its message unchanged.
+ */
+export function decorateLoopbackTimeout(error: unknown, hint: string): unknown {
+  if (error instanceof Error && error.message.startsWith('OAuth callback timed out')) {
+    return new PersonalTokenError('TRANSIENT', `${error.message} ${hint}`);
+  }
+  return error;
 }
 
 async function login(options: Record<string, unknown>): Promise<AuthLoginResult> {
@@ -199,7 +354,15 @@ async function login(options: Record<string, unknown>): Promise<AuthLoginResult>
     );
   }
 
-  const outcome = await performPersonalTokenLogin({ apiUrl });
+  const useDeviceAuth = shouldUseDeviceAuth(options);
+  const outcome = useDeviceAuth
+    ? await performDeviceAuthLogin({ apiUrl })
+    : await performPersonalTokenLogin({ apiUrl });
+  const authUrl = 'authUrl' in outcome ? outcome.authUrl : outcome.verificationUri;
+
+  // Only ever on an explicit --set-default. A login that silently made itself the
+  // machine default would turn "just this once" into a permanent setting.
+  const deviceAuthDefaultPath = useDeviceAuth && options.setDefault === true ? setDeviceAuthDefault(true) : null;
 
   const configPath = findProjectConfig(process.cwd());
   // Opting the project in is what makes later commands prefer this credential.
@@ -210,7 +373,7 @@ async function login(options: Record<string, unknown>): Promise<AuthLoginResult>
 
   const result: AuthLoginResult = {
     success: true,
-    authUrl: outcome.authUrl,
+    authUrl,
     apiUrl,
     identity: outcome.identity,
     persisted: outcome.persisted,
@@ -218,7 +381,12 @@ async function login(options: Record<string, unknown>): Promise<AuthLoginResult>
     storeReason: outcome.storeReason,
     configPath: opted ? configPath : null,
     authMode: 'personal-token',
+    deviceAuth: useDeviceAuth,
   };
+
+  if (deviceAuthDefaultPath) {
+    result.deviceAuthDefaultPath = deviceAuthDefaultPath;
+  }
 
   if (!outcome.persisted) {
     result.warning =
@@ -259,6 +427,11 @@ async function status(options: Record<string, unknown> = {}): Promise<AuthStatus
     credentialSource,
     authMode: projectConfig?.authMode ?? null,
     hasProjectApiKey: typeof projectConfig?.apiKey === 'string' && projectConfig.apiKey.length > 0,
+    deviceAuthDefault: {
+      enabled: isDeviceAuthDefaultEnabled(),
+      configPath: globalConfigPath(),
+      disableHint: `Remove "deviceAuth" from ${globalConfigPath()} (and unset AGENTTEAMS_DEVICE_AUTH) to go back to the browser callback login.`,
+    },
     personalToken: {
       connected: tokenState.connected,
       persisted: tokenState.persisted,

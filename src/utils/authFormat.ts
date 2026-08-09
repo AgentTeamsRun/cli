@@ -66,6 +66,12 @@ function formatLogin(result: Record<string, unknown>): string[] {
   // below explains — so only claim the switch when it actually happened.
   if (configPath) lines.push(`Project: ${configPath} (switched to personal login)`);
 
+  if (result.deviceAuth === true) lines.push('Flow: device code (--device-auth)');
+  const deviceAuthDefaultPath = asString(result.deviceAuthDefaultPath);
+  if (deviceAuthDefaultPath) {
+    lines.push(`Machine default: device-code login saved to ${deviceAuthDefaultPath}`);
+  }
+
   return lines;
 }
 
@@ -93,6 +99,15 @@ function formatStatus(result: Record<string, unknown>): string[] {
 
   const expiresAt = asString(token.expiresAt);
   if (expiresAt) lines.push(`Access token expires: ${expiresAt}`);
+
+  // Without this line there is no way to discover that this machine is on the
+  // device flow, nor how to turn it back off.
+  const deviceAuthDefault = asRecord(result.deviceAuthDefault);
+  if (deviceAuthDefault.enabled === true) {
+    lines.push("Login flow: device code is this machine's default");
+    const disableHint = asString(deviceAuthDefault.disableHint);
+    if (disableHint) lines.push(disableHint);
+  }
 
   // A stored-but-rejected token is the case where "connected" alone misleads.
   if (token.reconnectRequired === true) {

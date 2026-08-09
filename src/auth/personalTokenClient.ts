@@ -190,6 +190,53 @@ export async function parseTokenResponse(response: Response): Promise<ParsedToke
   };
 }
 
+/** `flow: 'setup'` result the approval screen chose; `init` writes these into the project config. */
+export interface DeviceSetupResult {
+  teamId: string;
+  projectId: string;
+  agentConfigId: string;
+  agentName: string;
+  seedPlanId: string | null;
+}
+
+/**
+ * One poll's outcome, in the server's own vocabulary (RFC 8628 error codes).
+ *
+ * `transient` is deliberately separate from `denied`/`expired`: only the latter
+ * two are decisions, and treating a dropped connection as a decision would end a
+ * login the user is still completing.
+ */
+export type DevicePollOutcome =
+  | { kind: 'approved'; session: PersonalTokenSession; setup: DeviceSetupResult | null }
+  | { kind: 'pending' }
+  | { kind: 'slowDown'; intervalSeconds: number | null }
+  | { kind: 'denied' }
+  | { kind: 'expired' }
+  | { kind: 'invalid' }
+  | { kind: 'transient'; detail: string };
+
+const parseDeviceSetupResult = (value: unknown): DeviceSetupResult | null => {
+  if (!value || typeof value !== 'object') return null;
+  const setup = value as Record<string, unknown>;
+
+  if (
+    typeof setup.teamId !== 'string' ||
+    typeof setup.projectId !== 'string' ||
+    typeof setup.agentConfigId !== 'string' ||
+    typeof setup.agentName !== 'string'
+  ) {
+    return null;
+  }
+
+  return {
+    teamId: setup.teamId,
+    projectId: setup.projectId,
+    agentConfigId: setup.agentConfigId,
+    agentName: setup.agentName,
+    seedPlanId: typeof setup.seedPlanId === 'string' ? setup.seedPlanId : null,
+  };
+};
+
 export class PersonalTokenClient {
   private accessToken: string | null = null;
   private accessExpiresAt = 0;
@@ -216,6 +263,115 @@ export class PersonalTokenClient {
 
   hasCredential(): boolean {
     return this.deps.store.read() !== null;
+  }
+
+  /**
+   * One poll of the RFC 8628 device token endpoint.
+   *
+   * Lives here rather than in the polling loop because the *storage* invariants
+   * are the same as a PKCE exchange: a credential the next process cannot find
+   * is not a login, so an unstorable token pair is revoked instead of orphaned.
+   * The loop only decides *when* to call this; the outcome vocabulary below is
+   * the server's error contract verbatim.
+   */
+  async pollDeviceToken(deviceCode: string): Promise<DevicePollOutcome> {
+    const doFetch = this.deps.fetch ?? globalThis.fetch;
+
+    let response: Response;
+    try {
+      response = await doFetch(`${this.baseUrl()}/api/auth/desktop/device/token`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clientId: CLI_OAUTH_CLIENT_ID, deviceCode }),
+        signal: AbortSignal.timeout(TOKEN_REQUEST_TIMEOUT_MS),
+      });
+    } catch (error) {
+      // A flaky network is not a denial. Reporting it as one would abort a login
+      // the user is still in the middle of completing in their browser.
+      return { kind: 'transient', detail: error instanceof Error ? error.message : String(error) };
+    }
+
+    if (!response.ok) {
+      let body: unknown;
+      try {
+        body = await response.json();
+      } catch {
+        return { kind: 'transient', detail: `HTTP ${response.status} with an unreadable body` };
+      }
+
+      const payload = (body ?? {}) as { error?: unknown; interval?: unknown };
+      switch (payload.error) {
+        case 'authorization_pending':
+          return { kind: 'pending' };
+        case 'slow_down':
+          return {
+            kind: 'slowDown',
+            intervalSeconds: typeof payload.interval === 'number' ? payload.interval : null,
+          };
+        case 'access_denied':
+          return { kind: 'denied' };
+        case 'expired_token':
+          return { kind: 'expired' };
+        case 'invalid_grant':
+        case 'invalid_client':
+          return { kind: 'invalid' };
+        default:
+          return { kind: 'transient', detail: `HTTP ${response.status}` };
+      }
+    }
+
+    let body: unknown;
+    try {
+      body = await response.json();
+    } catch {
+      return { kind: 'transient', detail: 'the server returned an unreadable token payload' };
+    }
+
+    const data =
+      body && typeof body === 'object' && 'data' in body
+        ? (body as { data?: Record<string, unknown> }).data
+        : undefined;
+    const identity =
+      data?.identity && typeof data.identity === 'object' ? (data.identity as Record<string, unknown>) : undefined;
+
+    if (
+      typeof data?.accessToken !== 'string' ||
+      typeof data.refreshToken !== 'string' ||
+      typeof data.expiresIn !== 'number' ||
+      !identity ||
+      typeof identity.memberId !== 'string' ||
+      typeof identity.email !== 'string' ||
+      typeof identity.nickname !== 'string'
+    ) {
+      return { kind: 'transient', detail: 'the server returned an unexpected token payload' };
+    }
+
+    const tokens: TokenResponse = {
+      accessToken: data.accessToken,
+      refreshToken: data.refreshToken,
+      expiresIn: data.expiresIn,
+      identity: {
+        memberId: identity.memberId,
+        email: identity.email,
+        nickname: identity.nickname,
+      },
+    };
+
+    const stored = this.acceptTokens(tokens);
+    this.reconnectRequired = false;
+    if (!stored.persisted) {
+      await this.discardUnstorableTokens(stored);
+    }
+
+    return {
+      kind: 'approved',
+      session: {
+        accessToken: tokens.accessToken,
+        expiresAt: this.accessExpiresAt,
+        identity: tokens.identity,
+      },
+      setup: parseDeviceSetupResult(data.setup),
+    };
   }
 
   /**

@@ -47,18 +47,56 @@ const fakeClientState = {
   refreshFailure: null,
 };
 
+/** device 경로는 인가 코드 대신 폴링 응답으로 setup 결과를 받는다. */
+const pollDeviceToken = jest.fn(async () => ({
+  kind: 'approved' as const,
+  session: {
+    accessToken: 'atp_access_token',
+    expiresAt: Date.now() + 60_000,
+    identity: { memberId: 'member-1', email: 'dev@example.com', nickname: 'dev' },
+  },
+  setup: {
+    teamId: 'team-1',
+    projectId: 'project-1',
+    agentConfigId: 'config-1',
+    agentName: 'remote-agent',
+    seedPlanId: 'plan-1',
+  } as Record<string, unknown> | null,
+}));
+
 const fakePersonalTokenClient = {
   exchangeAuthorizationCode,
+  pollDeviceToken,
   state: () => fakeClientState,
   hasCredential: jest.fn(() => true),
   getAccessToken: async () => 'atp_access_token',
   invalidateAccessToken: () => {},
 };
 
+jest.unstable_mockModule('../src/auth/credentialStore.js', () => ({
+  __esModule: true,
+  getCredentialStore: () => ({
+    status: () => ({ backend: 'macos-keychain', persisted: true, reason: 'OK' }),
+    read: () => null,
+    save: () => ({ persisted: true, reason: 'OK' }),
+    remove: () => {},
+  }),
+}));
+
 jest.unstable_mockModule('../src/auth/personalTokenClient.js', () => ({
   __esModule: true,
+  // device 클라이언트가 start 요청에 실어 보내는 값이라, mock에도 있어야 모듈이 링크된다.
+  CLI_OAUTH_CLIENT_ID: 'agentteams-cli',
   getPersonalTokenClient: () => fakePersonalTokenClient,
-  PersonalTokenError: class PersonalTokenError extends Error {},
+  PersonalTokenError: class PersonalTokenError extends Error {
+    constructor(
+      readonly code: string,
+      message: string,
+    ) {
+      super(message);
+      this.name = 'PersonalTokenError';
+    }
+  },
 }));
 
 jest.unstable_mockModule('../src/utils/updateCheck.js', () => ({
@@ -962,4 +1000,122 @@ describe('init --auth api-key (compatibility path)', () => {
       restore();
     }
   }, 20000);
+});
+
+describe('init --device-auth', () => {
+  const DEVICE_START_PAYLOAD = {
+    data: {
+      deviceCode: 'atd_secret_device_code',
+      userCode: 'BCDF-GHJK',
+      verificationUri: `${WEB_ORIGIN}/cli/device`,
+      verificationUriComplete: `${WEB_ORIGIN}/cli/device?code=BCDF-GHJK`,
+      expiresIn: 900,
+      // 테스트가 실제 interval만큼 기다리지 않도록 서버가 짧은 값을 지시한 상황을 쓴다.
+      interval: 1,
+    },
+  };
+
+  let originalFetch: typeof fetch;
+
+  beforeEach(() => {
+    originalFetch = globalThis.fetch;
+    pollDeviceToken.mockClear();
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  test('로컬 콜백 서버 없이 승인 결과로 config와 컨벤션을 완성한다', async () => {
+    const { axios, executeInitCommand } = await loadInitModules();
+    const cwd = createTempProject();
+    mockConventionEndpoints(axios);
+    const postSpy = jest.spyOn(axios, 'post');
+    const { urls, restore } = captureAuthorizeUrls();
+
+    const startBodies: Record<string, unknown>[] = [];
+    globalThis.fetch = jest.fn(async (url: unknown, init: unknown) => {
+      if (String(url).endsWith('/api/auth/desktop/device/start')) {
+        startBodies.push(JSON.parse(String((init as RequestInit).body)) as Record<string, unknown>);
+        return new Response(JSON.stringify(DEVICE_START_PAYLOAD), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      throw new Error(`unexpected fetch ${String(url)}`);
+    }) as unknown as typeof fetch;
+
+    try {
+      const result = await executeInitCommand({ cwd, deviceAuth: true });
+
+      expect(result).toMatchObject({
+        success: true,
+        teamId: 'team-1',
+        projectId: 'project-1',
+        agentName: 'remote-agent',
+        seedPlanId: 'plan-1',
+      });
+      // loopback authorize URL은 한 줄도 출력되지 않는다 = 로컬 포트를 열지 않았다.
+      expect(urls).toHaveLength(0);
+      expect(postSpy).not.toHaveBeenCalled();
+      expect(exchangeAuthorizationCode).not.toHaveBeenCalled();
+
+      // 러너 자동 바인딩에 필요한 메타가 start 요청에 실린다.
+      expect(startBodies[0]).toMatchObject({
+        flow: 'setup',
+        projectName: basename(cwd),
+        machineId: expect.any(String),
+        authPathEnc: expect.any(String),
+      });
+
+      const config = JSON.parse(readFileSync(join(cwd, '.agentteams', 'config.json'), 'utf-8')) as Record<
+        string,
+        unknown
+      >;
+      expect(config).toMatchObject({ teamId: 'team-1', projectId: 'project-1', authMode: 'personal-token' });
+      expect(readFileSync(join(cwd, '.agentteams', 'convention.md'), 'utf-8')).toBe(CONVENTION_TEMPLATE);
+    } finally {
+      restore();
+    }
+  }, 20_000);
+
+  test('승인 결과에 setup 메타가 없으면 명확한 오류로 끝난다', async () => {
+    const { axios, executeInitCommand } = await loadInitModules();
+    const cwd = createTempProject();
+    mockConventionEndpoints(axios);
+    const { restore } = captureAuthorizeUrls();
+
+    globalThis.fetch = jest.fn(
+      async () =>
+        new Response(JSON.stringify(DEVICE_START_PAYLOAD), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+    ) as unknown as typeof fetch;
+    pollDeviceToken.mockResolvedValueOnce({
+      kind: 'approved' as const,
+      session: {
+        accessToken: 'atp_access_token',
+        expiresAt: Date.now() + 60_000,
+        identity: { memberId: 'member-1', email: 'dev@example.com', nickname: 'dev' },
+      },
+      setup: null,
+    });
+
+    try {
+      await expect(executeInitCommand({ cwd, deviceAuth: true })).rejects.toThrow(/Initialization failed/);
+      expect(existsSync(join(cwd, '.agentteams', 'config.json'))).toBe(false);
+    } finally {
+      restore();
+    }
+  }, 20_000);
+
+  test('--device-auth와 --auth api-key 조합은 명확한 오류로 거절된다', async () => {
+    const { executeInitCommand } = await loadInitModules();
+    const cwd = createTempProject();
+
+    await expect(executeInitCommand({ cwd, deviceAuth: true, authMode: 'api-key' })).rejects.toThrow(
+      /--device-auth cannot be combined with --auth api-key/,
+    );
+  });
 });
