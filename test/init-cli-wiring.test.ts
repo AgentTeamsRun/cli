@@ -98,6 +98,33 @@ describe('agentteams init CLI wiring', () => {
     expect(options.installWorktreeHook).toBe(false);
   });
 
+  // 두 명령이 같은 이름의 플래그를 노출해야 한다. 한쪽에서 배운 플래그를 다른 쪽에서
+  // 그대로 칠 수 있어야 하고, 이름이 갈리면 사용자는 매번 --help를 다시 읽어야 한다.
+  test('--device-auth / --set-default가 init에서 그대로 전달된다', async () => {
+    await runCli(['init', '--device-auth', '--set-default']);
+
+    const [, , options] = executeCommand.mock.calls[0] as [string, string, Record<string, unknown>];
+    expect(options.deviceAuth).toBe(true);
+    expect(options.setDefault).toBe(true);
+  });
+
+  test('플래그가 없으면 device 흐름은 선택되지 않는다', async () => {
+    await runCli(['init']);
+
+    const [, , options] = executeCommand.mock.calls[0] as [string, string, Record<string, unknown>];
+    expect(options.deviceAuth).toBe(false);
+    expect(options.setDefault).toBe(false);
+  });
+
+  test('auth login도 같은 이름의 --device-auth를 노출한다', async () => {
+    await runCli(['auth', 'login', '--device-auth']);
+
+    const [resource, action, options] = executeCommand.mock.calls[0] as [string, string, Record<string, unknown>];
+    expect(resource).toBe('auth');
+    expect(action).toBe('login');
+    expect(options.deviceAuth).toBe(true);
+  });
+
   test('--agent-files / --agent-files-example / --install-worktree-hook가 그대로 전달된다', async () => {
     await runCli(['init', '--agent-files', 'CLAUDE.md,AGENTS.md', '--agent-files-example', '--install-worktree-hook']);
 

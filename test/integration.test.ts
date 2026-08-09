@@ -149,6 +149,8 @@ describe('CLI Integration Tests', () => {
         identity: { memberId: 'member-1', email: 'dev@example.com', nickname: 'dev' },
       }));
       (jest as any).unstable_mockModule('../src/auth/personalTokenClient.js', () => ({
+        // device 클라이언트가 이 상수를 import하므로 mock에도 있어야 모듈이 링크된다.
+        CLI_OAUTH_CLIENT_ID: 'agentteams-cli',
         getPersonalTokenClient: () => ({
           exchangeAuthorizationCode,
           state: () => ({ persisted: true, identity: { email: 'dev@example.com' }, expiresAt: null }),

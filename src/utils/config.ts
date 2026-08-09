@@ -545,3 +545,65 @@ function writeConfigDocument(configPath: string, config: object): void {
     throw error;
   }
 }
+
+/**
+ * Machine-wide default for the device-code login flow.
+ *
+ * Deliberately **not** part of {@link PersistedConfig}: whether this machine can
+ * reach a browser is a property of the machine, not of a project. Keeping the key
+ * out of that type means there is no code path — not even an accidental one —
+ * through which `saveConfig()` could write it into a project config.
+ *
+ * Two more reasons the project config is the wrong home for it:
+ *  - The first `init` on a new server runs in a folder that has no project config
+ *    yet, which is exactly the moment this preference has to be readable.
+ *  - `auth login` has no project at all; the credential is machine-scoped.
+ *
+ * This is a **declaration**, not environment detection: the user either sets the
+ * env var or runs `--set-default`. Nothing here inspects SSH/container/WSL state.
+ */
+const GLOBAL_DEVICE_AUTH_KEY = 'deviceAuth';
+
+export function globalConfigPath(userHomeDir: string = homedir()): string {
+  return join(userHomeDir, CONFIG_DIR, CONFIG_FILE);
+}
+
+/**
+ * Read the machine-wide device-auth default.
+ *
+ * Reads the global file and the environment only — it does **not** go through
+ * {@link mergeConfigSources}, so a stray `deviceAuth` key in a project config is
+ * ignored rather than silently changing that project's login flow.
+ */
+export function isDeviceAuthDefaultEnabled(userHomeDir: string = homedir()): boolean {
+  const envValue = process.env.AGENTTEAMS_DEVICE_AUTH?.trim().toLowerCase();
+  if (envValue !== undefined && envValue.length > 0) {
+    return envValue === '1' || envValue === 'true' || envValue === 'yes';
+  }
+
+  const globalConfig = readConfigFile(globalConfigPath(userHomeDir)) as Record<string, unknown> | null;
+  return globalConfig?.[GLOBAL_DEVICE_AUTH_KEY] === true;
+}
+
+/**
+ * Set or clear the machine-wide device-auth default in `~/.agentteams/config.json`.
+ *
+ * Read-merge-write so the other keys in the global config survive; the file is
+ * created (with the directory) when it does not exist yet. Only ever called from
+ * an explicit `--set-default`, never as a side effect of a successful login —
+ * "just this once" must not turn into a permanent setting.
+ */
+export function setDeviceAuthDefault(enabled: boolean, userHomeDir: string = homedir()): string {
+  const path = globalConfigPath(userHomeDir);
+  const current = (readConfigFile(path) as Record<string, unknown> | null) ?? {};
+
+  const next = { ...current };
+  if (enabled) {
+    next[GLOBAL_DEVICE_AUTH_KEY] = true;
+  } else {
+    delete next[GLOBAL_DEVICE_AUTH_KEY];
+  }
+
+  writeConfigDocument(path, next);
+  return path;
+}

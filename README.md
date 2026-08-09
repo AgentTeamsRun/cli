@@ -28,7 +28,67 @@ The `init` command:
 - Saves the convention template to `.agentteams/convention.md`
 - Syncs convention files into `.agentteams/<category>/*.md`
 
-In SSH/remote environments, open the URL printed in the terminal manually.
+### Choosing a login method
+
+The browser callback is always the default. Nothing is auto-detected — you pick a
+method by what you type.
+
+| Situation                                                    | What to run                                                             | How it authenticates                                                          |
+| ------------------------------------------------------------ | ----------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| Local machine with a browser (default)                       | `agentteams init` / `agentteams auth login`                             | The browser calls back to a temporary port on **this** machine                |
+| Remote or headless shell (SSH, container, WSL, no `DISPLAY`) | `agentteams init --device-auth` / `agentteams auth login --device-auth` | A short code you approve in a browser on **any other** device — no local port |
+| CI and unattended automation                                 | `AGENTTEAMS_API_KEY`, or a project service token                        | No human approval step at all                                                 |
+
+> The default path opens a local port and waits for the browser to call back. Over
+> SSH the browser runs on your laptop, so the callback reaches your laptop's
+> `localhost` and never the remote shell — that is the case `--device-auth` exists
+> for. Device authorization is **not** a CI mechanism: it always requires a person
+> to approve the request.
+
+#### `--device-auth`
+
+```bash
+# Log in only
+agentteams auth login --device-auth
+
+# Initialize a project (team/project/agent are chosen on the approval screen)
+agentteams init --device-auth
+```
+
+The terminal prints a verification URL and an 8-character code. Open the URL on any
+device, sign in, check that the code on screen matches the one in your terminal, and
+approve. The CLI stores the login and continues.
+
+To avoid typing the flag on every command on a remote machine, declare it once for
+that machine:
+
+```bash
+# Persist it in ~/.agentteams/config.json (never in a project config)
+agentteams auth login --device-auth --set-default
+
+# Or per shell / per service unit
+export AGENTTEAMS_DEVICE_AUTH=1
+```
+
+`agentteams auth status` reports whether this machine defaults to device
+authorization. To turn it back off, remove `"deviceAuth"` from
+`~/.agentteams/config.json` and unset `AGENTTEAMS_DEVICE_AUTH`.
+
+Before starting, the CLI checks that this machine has a usable OS credential store
+(macOS Keychain, Windows Credential Manager, or libsecret on Linux). On a minimal
+Linux server install `libsecret` and unlock a keyring, e.g.
+`sudo apt install libsecret-tools` — otherwise use `AGENTTEAMS_API_KEY` instead.
+
+#### Troubleshooting
+
+| Message                                                             | Cause                                                                  | What to do                                                        |
+| ------------------------------------------------------------------- | ---------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| `OAuth callback timed out after 60 seconds.`                        | The default flow was used from a shell the browser cannot call back to | Re-run with `--device-auth`                                       |
+| `does not support device authorization`                             | The server is an older AgentTeams API                                  | Re-run **without** `--device-auth`, or upgrade the server         |
+| `device authorization turned off because the server has no APP_URL` | Server configuration                                                   | Ask the operator to set `APP_URL`; use the default flow meanwhile |
+| `The device code expired before it was approved`                    | The code is valid for 15 minutes                                       | Run the command again for a new code                              |
+| `The sign-in request was denied in the browser`                     | Deny was clicked                                                       | Run the command again if that was a mistake                       |
+| `Cannot start device authorization: ... credential store`           | No usable OS credential store                                          | Install/unlock libsecret, or use `AGENTTEAMS_API_KEY`             |
 
 ### Service URLs (Defaults and Overrides)
 
