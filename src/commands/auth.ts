@@ -9,6 +9,7 @@
 
 import open from 'open';
 import { getCredentialStore, type CredentialBackendId, type CredentialStoreReason } from '../auth/credentialStore.js';
+import { FILE_CREDENTIALS_DISABLED_ENV, isFileCredentialFallbackDisabled } from '../auth/fileCredentialStore.js';
 import { pollDeviceAuthorization, startDeviceAuthorization } from '../auth/deviceAuthClient.js';
 import { getPersonalTokenClient, PersonalTokenError } from '../auth/personalTokenClient.js';
 import type { Config } from '../types/index.js';
@@ -40,9 +41,11 @@ export type AuthLoginResult = {
    * half-login. The field stays in the payload because scripts read it.
    */
   persisted: boolean;
-  /** Which OS store holds the credential — the same vocabulary as `auth status`. */
+  /** Which store holds the credential — the same vocabulary as `auth status`. */
   storeBackend: CredentialBackendId;
   storeReason: CredentialStoreReason;
+  /** Why that store, when there is more to say than its name. */
+  storeDetail?: string;
   configPath: string | null;
   authMode: 'personal-token';
   /** true when this login used the device-code flow instead of the browser callback. */
@@ -75,6 +78,7 @@ export type AuthStatusResult = {
     persisted: boolean;
     storeBackend: CredentialBackendId;
     storeReason: CredentialStoreReason;
+    storeDetail?: string;
     reconnectRequired: boolean;
     identity: { memberId: string; email: string; nickname: string } | null;
     expiresAt: string | null;
@@ -180,6 +184,11 @@ export function shouldUseDeviceAuth(options: Record<string, unknown>, userHomeDi
  * downstream, but by then the user has walked to another machine and approved a
  * request that is about to be thrown away. Checking first turns that into an
  * immediate, actionable failure.
+ *
+ * The store answers `OK` whenever it can persist *somehow*, including through the
+ * protected-file fallback — so on a remote box this now lets the flow start
+ * instead of stopping it. Reaching the refusal below means even the fallback is
+ * unavailable, which on a default install only happens when it was switched off.
  */
 function assertCredentialStoreUsable(): void {
   const status = getCredentialStore().status();
@@ -192,11 +201,26 @@ function assertCredentialStoreUsable(): void {
         ? 'this platform has no supported OS credential store'
         : 'the OS credential store rejected a write';
 
+  // The diagnostic is what separates "libsecret is not installed" from
+  // "libsecret is installed and exits non-zero", which look identical otherwise
+  // and send the user after a package they already have. It now also carries the
+  // file fallback's own reason when that is what failed.
+  const diagnostic = status.detail ? ` (${status.detail})` : '';
+
+  // Advising an unset only when the variable is actually set: on a machine where
+  // the fallback failed for its own reasons, that line points at the wrong thing
+  // and pushes the real diagnostic out of sight.
+  const optOutAdvice = isFileCredentialFallbackDisabled(process.env)
+    ? `Unset ${FILE_CREDENTIALS_DISABLED_ENV} to let this machine keep the login in a permission-protected file instead, or use `
+    : 'Or use ';
+
   throw new PersonalTokenError(
     'STORE_UNAVAILABLE',
-    `Cannot start device authorization: ${cause}. ` +
-      'On Linux install and unlock libsecret (for example `sudo apt install libsecret-tools` plus a running keyring), ' +
-      'or use an API key instead (AGENTTEAMS_API_KEY) on CI, containers and headless machines.',
+    `Cannot start device authorization: ${cause}${diagnostic}. ` +
+      'Fix the OS credential store for your platform — on Linux install and unlock libsecret ' +
+      '(for example `sudo apt install libsecret-tools` plus a running keyring), on macOS unlock the login keychain ' +
+      '(`security unlock-keychain`), on Windows sign in interactively so the Credential Manager vault is available. ' +
+      `${optOutAdvice}an API key (AGENTTEAMS_API_KEY) for CI, containers and other unattended runs.`,
   );
 }
 
@@ -221,6 +245,7 @@ export async function performDeviceAuthLogin(input: {
   persisted: boolean;
   storeBackend: CredentialBackendId;
   storeReason: CredentialStoreReason;
+  storeDetail?: string;
 }> {
   assertCredentialStoreUsable();
 
@@ -258,6 +283,7 @@ export async function performDeviceAuthLogin(input: {
       persisted: state.persisted,
       storeBackend: state.storeBackend,
       storeReason: state.storeReason,
+      ...(state.storeDetail === undefined ? {} : { storeDetail: state.storeDetail }),
     };
   } catch (error) {
     spinner?.fail();
@@ -277,6 +303,7 @@ export async function performPersonalTokenLogin(input: { apiUrl: string; project
   persisted: boolean;
   storeBackend: CredentialBackendId;
   storeReason: CredentialStoreReason;
+  storeDetail?: string;
 }> {
   const client = getPersonalTokenClient(input.apiUrl);
   const pkce = createPkcePair();
@@ -310,6 +337,7 @@ export async function performPersonalTokenLogin(input: { apiUrl: string; project
       persisted: state.persisted,
       storeBackend: state.storeBackend,
       storeReason: state.storeReason,
+      ...(state.storeDetail === undefined ? {} : { storeDetail: state.storeDetail }),
     };
   } catch (error) {
     spinner?.fail();
@@ -379,6 +407,7 @@ async function login(options: Record<string, unknown>): Promise<AuthLoginResult>
     persisted: outcome.persisted,
     storeBackend: outcome.storeBackend,
     storeReason: outcome.storeReason,
+    ...(outcome.storeDetail === undefined ? {} : { storeDetail: outcome.storeDetail }),
     configPath: opted ? configPath : null,
     authMode: 'personal-token',
     deviceAuth: useDeviceAuth,
@@ -437,6 +466,7 @@ async function status(options: Record<string, unknown> = {}): Promise<AuthStatus
       persisted: tokenState.persisted,
       storeBackend: tokenState.storeBackend,
       storeReason: tokenState.storeReason,
+      ...(tokenState.storeDetail === undefined ? {} : { storeDetail: tokenState.storeDetail }),
       reconnectRequired: refreshedState.reconnectRequired,
       identity: refreshedState.identity,
       expiresAt: refreshedState.expiresAt ? new Date(refreshedState.expiresAt).toISOString() : null,

@@ -285,7 +285,7 @@ export type CredentialPlan =
  * Priority, highest first:
  *   1. `--api-key` / `AGENTTEAMS_API_KEY` — the CI path, and an explicit
  *      override always beats stored state.
- *   2. A personal token from the OS credential store — but **only** when the
+ *   2. A personal token from the credential store — but **only** when the
  *      project opted in (`authMode: 'personal-token'`) or there is no `key_` to
  *      fall back to. A project that still carries an agent key must never pay
  *      for a keychain lookup, let alone be blocked by one that fails.

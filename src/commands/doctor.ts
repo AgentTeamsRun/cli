@@ -353,7 +353,7 @@ function validateRootPreflight(rootDir: string): DoctorIssue[] {
     });
   } else {
     // A personal-login project deliberately keeps no `apiKey` on disk — the
-    // credential lives in the OS credential store. Requiring one here would fail
+    // credential lives in the credential store. Requiring one here would fail
     // preflight for every project created by the default `agentteams init`, and
     // `runGitRootDoctor` returns before `ensurePostCheckoutHook` on failure, so
     // the worktree bootstrap hook would never be installed.

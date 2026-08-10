@@ -19,6 +19,7 @@
  */
 
 import type { CredentialBackendId, CredentialSaveOutcome, CredentialStoreReason } from './credentialStore.js';
+import { FILE_CREDENTIALS_DISABLED_ENV, isFileCredentialFallbackDisabled } from './fileCredentialStore.js';
 import { createPersonalTokenStore, personalTokenSlot, type PersonalTokenStore } from './personalTokenStore.js';
 import {
   createFileRefreshLock,
@@ -92,9 +93,15 @@ export interface PersonalTokenState {
   connected: boolean;
   /** false → the refresh token is session-memory only and disappears with this process. */
   persisted: boolean;
-  /** Which OS store is in play, regardless of whether it currently works. */
+  /** Which store holds this slot, regardless of whether it currently works. */
   storeBackend: CredentialBackendId;
   storeReason: CredentialStoreReason;
+  /**
+   * Why that backend, when the store had something to say — a rejected write, or
+   * the reason the OS store was skipped in favour of the file fallback. Absent
+   * on the ordinary path, where the backend name is the whole story.
+   */
+  storeDetail?: string;
   identity: PersonalTokenIdentity | null;
   expiresAt: number | null;
   /** The server rejected the refresh token; only a fresh login recovers. */
@@ -254,6 +261,7 @@ export class PersonalTokenClient {
       persisted: storeStatus.persisted,
       storeBackend: storeStatus.backend,
       storeReason: storeStatus.reason,
+      ...(storeStatus.detail === undefined ? {} : { storeDetail: storeStatus.detail }),
       identity: this.identity,
       expiresAt: this.accessToken ? this.accessExpiresAt : null,
       reconnectRequired: this.reconnectRequired,
@@ -441,10 +449,24 @@ export class PersonalTokenClient {
       this.clear();
     }
 
-    const cause =
+    const summary =
       outcome.reason === 'WRITE_FAILED'
-        ? `the OS credential store rejected the write${outcome.detail ? ` (${outcome.detail})` : ''}`
-        : 'this machine has no usable OS credential store';
+        ? 'the OS credential store rejected the write'
+        : outcome.reason === 'UNSUPPORTED_PLATFORM'
+          ? 'this platform has no supported OS credential store'
+          : 'this machine has no usable OS credential store';
+    // The detail is attached whatever the reason, because reaching here means the
+    // protected-file fallback failed too and its half of the story only ever
+    // arrives this way. Dropping it for NO_BACKEND left the user with a sentence
+    // they already knew and no idea why the documented fallback did not save them.
+    const cause = outcome.detail ? `${summary} (${outcome.detail})` : summary;
+
+    // Only advise unsetting the opt-out when it is actually set: telling someone
+    // to unset a variable they never exported buries the real cause under a
+    // wrong instruction.
+    const optOutAdvice = isFileCredentialFallbackDisabled(process.env)
+      ? `Unset ${FILE_CREDENTIALS_DISABLED_ENV} to let this machine keep the login in a permission-protected file, or use `
+      : 'Use ';
 
     throw new PersonalTokenError(
       'STORE_UNAVAILABLE',
@@ -452,7 +474,7 @@ export class PersonalTokenClient {
         (serverRevoked
           ? 'The issued token was revoked so nothing is left behind. '
           : 'The token could not be revoked either — cancel it from the AgentTeams web app. ') +
-        'On CI, containers and headless machines use an API key (AGENTTEAMS_API_KEY) instead.',
+        `${optOutAdvice}an API key (AGENTTEAMS_API_KEY) for CI, containers and other unattended runs.`,
     );
   }
 

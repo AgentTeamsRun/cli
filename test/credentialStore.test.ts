@@ -1,8 +1,8 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from '@jest/globals';
+import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
 import {
   CREDENTIAL_SERVICE,
   buildReadCommand,
@@ -13,11 +13,15 @@ import {
   resolveBackendId,
   type CommandResult,
   type CommandRunner,
+  type CreateCredentialStoreOptions,
   type CredentialCommand,
 } from '../src/auth/credentialStore.js';
+import { FILE_CREDENTIALS_DISABLED_ENV, credentialFileName } from '../src/auth/fileCredentialStore.js';
 
 const SECRET = 'acr_super_secret_refresh_token';
 const ACCOUNT = 'https://api.agentteams.run';
+const OTHER_ACCOUNT = 'https://dev-api.agentteams.run';
+const posixIt = process.platform === 'win32' ? it.skip : it;
 
 type RunnerScript = (command: CredentialCommand) => CommandResult;
 
@@ -32,6 +36,42 @@ function recordingRunner(script: RunnerScript): { runner: CommandRunner; calls: 
 
 const ok = (stdout = ''): CommandResult => ({ status: 0, stdout, stderr: '' });
 const fail = (status: number | null, stderr = ''): CommandResult => ({ status, stdout: '', stderr });
+
+/**
+ * Every store in this file is pointed at a throwaway home.
+ *
+ * The file fallback writes under `~/.agentteams/credentials`, so a test that let
+ * the default home through would drop real credential files into the developer's
+ * account — and, worse, could read one back and call it a pass.
+ */
+let tempHome: string;
+
+beforeEach(() => {
+  tempHome = mkdtempSync(join(tmpdir(), 'agentteams-credstore-'));
+});
+
+afterEach(() => {
+  rmSync(tempHome, { recursive: true, force: true });
+});
+
+function storeIn(options: CreateCredentialStoreOptions): ReturnType<typeof createCredentialStore> {
+  return createCredentialStore({ homeDir: tempHome, ...options });
+}
+
+/**
+ * A store with the file fallback switched off — the pre-fallback contract.
+ *
+ * Used by every test that is about what the *OS* backend does, so a failure there
+ * cannot be papered over by the fallback quietly persisting the value anyway.
+ */
+function osOnlyStore(options: CreateCredentialStoreOptions): ReturnType<typeof createCredentialStore> {
+  return storeIn({ ...options, env: { [FILE_CREDENTIALS_DISABLED_ENV]: '1' } });
+}
+
+function credentialFiles(): string[] {
+  const directory = join(tempHome, '.agentteams', 'credentials');
+  return existsSync(directory) ? readdirSync(directory) : [];
+}
 
 describe('credentialStore backend selection', () => {
   it('maps each supported platform to its own backend', () => {
@@ -125,15 +165,16 @@ describe('credentialStore command assembly', () => {
   });
 });
 
-describe('credentialStore without a usable backend', () => {
+describe('credentialStore without a usable backend and without the file fallback', () => {
   it('refuses to persist and never writes a file when the probe fails', () => {
     const { runner, calls } = recordingRunner(() => fail(null, 'command not found'));
-    const store = createCredentialStore({ runner, platform: 'linux' });
+    const store = osOnlyStore({ runner, platform: 'linux' });
 
     const outcome = store.save(ACCOUNT, SECRET);
 
-    expect(outcome).toEqual({ persisted: false, reason: 'NO_BACKEND' });
-    expect(store.status()).toEqual({ backend: 'libsecret', persisted: false, reason: 'NO_BACKEND' });
+    expect(outcome).toMatchObject({ persisted: false, reason: 'NO_BACKEND' });
+    expect(store.status()).toMatchObject({ backend: 'libsecret', persisted: false, reason: 'NO_BACKEND' });
+    expect(credentialFiles()).toHaveLength(0);
     // Only the availability probe ran — no store command was attempted.
     expect(calls).toHaveLength(1);
     expect(calls[0]?.args).toEqual(['--version']);
@@ -141,34 +182,352 @@ describe('credentialStore without a usable backend', () => {
 
   it('reports an unsupported platform without probing anything', () => {
     const { runner, calls } = recordingRunner(() => ok());
-    const store = createCredentialStore({ runner, platform: 'aix' });
+    const store = osOnlyStore({ runner, platform: 'aix' });
 
-    expect(store.save(ACCOUNT, SECRET)).toEqual({ persisted: false, reason: 'UNSUPPORTED_PLATFORM' });
+    expect(store.save(ACCOUNT, SECRET)).toMatchObject({ persisted: false, reason: 'UNSUPPORTED_PLATFORM' });
     expect(store.status().reason).toBe('UNSUPPORTED_PLATFORM');
     expect(calls).toHaveLength(0);
   });
 
   it('keeps the secret in session memory only, so it is readable in-process but not on disk', () => {
     const { runner } = recordingRunner(() => fail(null));
-    const store = createCredentialStore({ runner, platform: 'linux' });
-    const homeEntriesBefore = readdirSync(homedir()).length;
+    const store = osOnlyStore({ runner, platform: 'linux' });
 
     store.save(ACCOUNT, SECRET);
 
     expect(store.read(ACCOUNT)).toBe(SECRET);
-    expect(existsSync(join(homedir(), '.agentteams', 'credentials.json'))).toBe(false);
-    expect(readdirSync(homedir()).length).toBe(homeEntriesBefore);
+    expect(credentialFiles()).toHaveLength(0);
+  });
+
+  it('tells a backend that could not be started apart from one that rejected the probe', () => {
+    // The two need different advice: a missing `secret-tool` is an install, while
+    // a `secret-tool` that exits non-zero is a broken or unsupported build. The
+    // old code collapsed both into a bare NO_BACKEND, which sent Linux users
+    // after a package they had already installed.
+    const missing = osOnlyStore({ runner: () => fail(null, 'spawn ENOENT'), platform: 'linux' });
+    const rejected = osOnlyStore({ runner: () => fail(2, 'Usage: secret-tool ...'), platform: 'linux' });
+
+    expect(missing.status().detail).toMatch(/could not be started/i);
+    expect(rejected.status().detail).toMatch(/2/);
+    expect(rejected.status().detail).not.toMatch(/could not be started/i);
   });
 
   it('caches the probe result instead of shelling out on every call', () => {
     const { runner, calls } = recordingRunner(() => fail(null));
-    const store = createCredentialStore({ runner, platform: 'darwin' });
+    const store = osOnlyStore({ runner, platform: 'darwin' });
 
     store.status();
     store.status();
     store.read(ACCOUNT);
 
     expect(calls).toHaveLength(1);
+  });
+});
+
+describe('credentialStore falling back to a protected file', () => {
+  /** libsecret is not installed at all — the Linux SSH case the user hit. */
+  const linuxWithoutSecretTool = () => recordingRunner(() => fail(null, 'command not found'));
+
+  /**
+   * A macOS session whose login keychain is locked: `list-keychains` still exits
+   * 0, so the probe passes and the failure only lands on the write. Before the
+   * fallback this cost the user an approval on another device *and then* a
+   * revoke.
+   */
+  const macOsWithLockedKeychain = () =>
+    recordingRunner((command) => {
+      if (command.args.includes('list-keychains')) return ok();
+      if (command.args.includes('find-generic-password')) return fail(44, 'could not be found');
+      return fail(1, 'User interaction is not allowed.');
+    });
+
+  /** A Windows session whose PasswordVault rejects the write; the probe never touches the vault. */
+  const windowsWithRejectedVault = () =>
+    recordingRunner((command) => {
+      if (command.command === 'icacls') {
+        const inspecting = !command.args.some((arg) => arg.startsWith('/grant'));
+        return inspecting ? ok(`${command.args[0]} DESKTOP-1\\dev:(F)\r\n`) : ok();
+      }
+      const script = command.args.join(' ');
+      if (script.includes('exit 0')) return ok();
+      return fail(1, 'PasswordVault.Add failed');
+    });
+
+  const windowsEnv = { USERDOMAIN: 'DESKTOP-1', USERNAME: 'dev' };
+
+  posixIt('persists on Linux when the OS backend is missing entirely', () => {
+    const { runner } = linuxWithoutSecretTool();
+    const store = storeIn({ runner, platform: 'linux' });
+
+    expect(store.save(ACCOUNT, SECRET)).toEqual({ persisted: true, reason: 'OK' });
+    expect(store.status(ACCOUNT)).toMatchObject({ backend: 'protected-file', persisted: true, reason: 'OK' });
+    expect(credentialFiles()).toEqual([credentialFileName(ACCOUNT)]);
+
+    // The next CLI process has no memory cache, so this can only come off disk.
+    const nextProcess = storeIn({ runner: linuxWithoutSecretTool().runner, platform: 'linux' });
+    expect(nextProcess.read(ACCOUNT)).toBe(SECRET);
+  });
+
+  it('lets device authorization start on Linux instead of refusing before approval', () => {
+    // `assertCredentialStoreUsable()` gates the whole device flow on this one
+    // value, so "can this machine keep a login at all" has to be true here.
+    const { runner } = linuxWithoutSecretTool();
+
+    expect(storeIn({ runner, platform: 'linux' }).status()).toMatchObject({
+      backend: 'protected-file',
+      persisted: true,
+      reason: 'OK',
+    });
+  });
+
+  posixIt('persists on macOS when a locked keychain rejects the write', () => {
+    const { runner } = macOsWithLockedKeychain();
+    const store = storeIn({ runner, platform: 'darwin' });
+
+    expect(store.save(ACCOUNT, SECRET)).toEqual({ persisted: true, reason: 'OK' });
+    expect(store.status(ACCOUNT).backend).toBe('protected-file');
+    expect(storeIn({ runner: macOsWithLockedKeychain().runner, platform: 'darwin' }).read(ACCOUNT)).toBe(SECRET);
+  });
+
+  it('persists on Windows when the vault rejects the write', () => {
+    const { runner } = windowsWithRejectedVault();
+    const store = storeIn({ runner, platform: 'win32', env: windowsEnv });
+
+    expect(store.save(ACCOUNT, SECRET)).toEqual({ persisted: true, reason: 'OK' });
+    expect(store.status(ACCOUNT).backend).toBe('protected-file');
+    expect(
+      storeIn({ runner: windowsWithRejectedVault().runner, platform: 'win32', env: windowsEnv }).read(ACCOUNT),
+    ).toBe(SECRET);
+  });
+
+  posixIt('persists on a platform with no OS backend at all', () => {
+    // A file is platform-neutral, so there is no reason for FreeBSD and friends
+    // to be locked out of a personal login.
+    const store = storeIn({ runner: () => ok(), platform: 'aix' });
+
+    expect(store.save(ACCOUNT, SECRET)).toEqual({ persisted: true, reason: 'OK' });
+    expect(storeIn({ runner: () => ok(), platform: 'aix' }).read(ACCOUNT)).toBe(SECRET);
+  });
+
+  posixIt('keeps one file per API server so logging out of one leaves the other signed in', () => {
+    const { runner } = linuxWithoutSecretTool();
+    const store = storeIn({ runner, platform: 'linux' });
+
+    store.save(ACCOUNT, SECRET);
+    store.save(OTHER_ACCOUNT, `${SECRET}_dev`);
+    expect(credentialFiles()).toHaveLength(2);
+
+    store.remove(ACCOUNT);
+
+    const nextProcess = storeIn({ runner: linuxWithoutSecretTool().runner, platform: 'linux' });
+    expect(nextProcess.read(ACCOUNT)).toBeNull();
+    expect(nextProcess.read(OTHER_ACCOUNT)).toBe(`${SECRET}_dev`);
+  });
+
+  posixIt('rotates in place rather than leaving the superseded token on disk', () => {
+    const { runner } = linuxWithoutSecretTool();
+    const store = storeIn({ runner, platform: 'linux' });
+
+    store.save(ACCOUNT, SECRET);
+    store.save(ACCOUNT, `${SECRET}_rotated`);
+
+    expect(credentialFiles()).toEqual([credentialFileName(ACCOUNT)]);
+    expect(storeIn({ runner: linuxWithoutSecretTool().runner, platform: 'linux' }).read(ACCOUNT)).toBe(
+      `${SECRET}_rotated`,
+    );
+  });
+
+  posixIt('reads the rotated file copy rather than a stale token in a recovered OS backend', () => {
+    // The exact way a fallback turns into a lockout: the file holds the token the
+    // family is actually on, the keychain holds the one from before the failure,
+    // and presenting the old one is reuse — which revokes the whole family.
+    const home = tempHome;
+    const stale = `${SECRET}_stale`;
+    const withStaleKeychain = () =>
+      recordingRunner((command) => {
+        if (command.args.includes('list-keychains')) return ok();
+        if (command.args.includes('find-generic-password')) return ok(`${stale}\n`);
+        return fail(1, 'User interaction is not allowed.');
+      });
+
+    // The write fails, so the rotated token lands in the file.
+    const duringOutage = createCredentialStore({
+      homeDir: home,
+      runner: withStaleKeychain().runner,
+      platform: 'darwin',
+    });
+    expect(duringOutage.save(ACCOUNT, `${SECRET}_rotated`)).toEqual({ persisted: true, reason: 'OK' });
+
+    // A later process finds a keychain that reads fine again.
+    const afterRecovery = createCredentialStore({
+      homeDir: home,
+      runner: withStaleKeychain().runner,
+      platform: 'darwin',
+    });
+    expect(afterRecovery.read(ACCOUNT)).toBe(`${SECRET}_rotated`);
+    expect(afterRecovery.read(ACCOUNT, { fresh: true })).toBe(`${SECRET}_rotated`);
+    expect(afterRecovery.status(ACCOUNT).backend).toBe('protected-file');
+  });
+
+  posixIt('drops the file copy only after the OS backend has kept and returned the value', () => {
+    const state: { stored?: string } = {};
+    let acceptWrites = false;
+    const runner: CommandRunner = (command) => {
+      if (command.args.includes('list-keychains')) return ok();
+      if (command.args.includes('add-generic-password')) {
+        if (!acceptWrites) return fail(1, 'User interaction is not allowed.');
+        state.stored = command.input?.split('\n')[0];
+        return ok();
+      }
+      if (command.args.includes('find-generic-password')) {
+        return state.stored === undefined ? fail(44, 'could not be found') : ok(`${state.stored}\n`);
+      }
+      return fail(1);
+    };
+
+    const store = createCredentialStore({ homeDir: tempHome, runner, platform: 'darwin' });
+    store.save(ACCOUNT, SECRET);
+    expect(credentialFiles()).toHaveLength(1);
+
+    acceptWrites = true;
+    expect(store.save(ACCOUNT, `${SECRET}_promoted`)).toEqual({ persisted: true, reason: 'OK' });
+
+    // Promotion completed, so the plaintext copy must not linger.
+    expect(credentialFiles()).toHaveLength(0);
+    expect(store.status(ACCOUNT).backend).toBe('macos-keychain');
+  });
+
+  posixIt('keeps the file copy when the OS write cannot be verified', () => {
+    // `add-generic-password` exits 0 but the value never lands. Removing the file
+    // here would throw away the only usable copy of the token.
+    const runner: CommandRunner = (command) => {
+      if (command.args.includes('list-keychains')) return ok();
+      if (command.args.includes('add-generic-password')) return ok();
+      if (command.args.includes('find-generic-password')) return fail(44, 'could not be found');
+      return fail(1);
+    };
+    const store = createCredentialStore({ homeDir: tempHome, runner, platform: 'darwin' });
+
+    expect(store.save(ACCOUNT, SECRET)).toEqual({ persisted: true, reason: 'OK' });
+    expect(credentialFiles()).toEqual([credentialFileName(ACCOUNT)]);
+  });
+
+  it('removes both copies on logout', () => {
+    const { runner } = macOsWithLockedKeychain();
+    const store = storeIn({ runner, platform: 'darwin' });
+
+    store.save(ACCOUNT, SECRET);
+    store.remove(ACCOUNT);
+
+    expect(credentialFiles()).toHaveLength(0);
+    expect(storeIn({ runner: macOsWithLockedKeychain().runner, platform: 'darwin' }).read(ACCOUNT)).toBeNull();
+  });
+
+  it('says why the OS backend is not in use so the fallback is not a mystery', () => {
+    const { runner } = linuxWithoutSecretTool();
+
+    expect(storeIn({ runner, platform: 'linux' }).status().detail).toMatch(/could not be started/i);
+  });
+
+  it('never writes a token into the machine-wide config file', () => {
+    const { runner } = linuxWithoutSecretTool();
+    storeIn({ runner, platform: 'linux' }).save(ACCOUNT, SECRET);
+
+    expect(existsSync(join(tempHome, '.agentteams', 'config.json'))).toBe(false);
+    for (const name of credentialFiles()) {
+      expect(name).not.toContain('config');
+    }
+  });
+
+  it('leaves the real home directory alone', () => {
+    const homeEntriesBefore = readdirSync(homedir()).length;
+    const { runner } = linuxWithoutSecretTool();
+
+    storeIn({ runner, platform: 'linux' }).save(ACCOUNT, SECRET);
+
+    expect(readdirSync(homedir()).length).toBe(homeEntriesBefore);
+  });
+
+  it('keeps the pre-fallback refusal when the opt-out is set', () => {
+    // Organisations that forbid a plaintext token on disk keep exactly the old
+    // behaviour, including the pre-approval refusal.
+    const { runner } = linuxWithoutSecretTool();
+    const store = storeIn({ runner, platform: 'linux', env: { [FILE_CREDENTIALS_DISABLED_ENV]: '1' } });
+
+    expect(store.save(ACCOUNT, SECRET)).toMatchObject({ persisted: false, reason: 'NO_BACKEND' });
+    expect(store.status()).toMatchObject({ backend: 'libsecret', persisted: false });
+    expect(credentialFiles()).toHaveLength(0);
+  });
+
+  posixIt('still lets logout revoke and delete a file copy written before the opt-out', () => {
+    // The opt-out forbids new plaintext copies; it must not make an existing one
+    // invisible. Blind here, `revoke()` finds no token, reports NOT_LOGGED_IN,
+    // and leaves a live refresh token on disk that no CLI command can reach —
+    // the user believes they are logged out and they are not.
+    const { runner } = linuxWithoutSecretTool();
+    storeIn({ runner, platform: 'linux' }).save(ACCOUNT, SECRET);
+    expect(credentialFiles()).toEqual([credentialFileName(ACCOUNT)]);
+
+    const optedOut = storeIn({
+      runner: linuxWithoutSecretTool().runner,
+      platform: 'linux',
+      env: { [FILE_CREDENTIALS_DISABLED_ENV]: '1' },
+    });
+
+    // What `revoke()` asks for, in the order it asks.
+    expect(optedOut.read(ACCOUNT, { fresh: true })).toBe(SECRET);
+    expect(optedOut.status(ACCOUNT)).toMatchObject({ backend: 'protected-file' });
+
+    optedOut.remove(ACCOUNT);
+
+    expect(credentialFiles()).toHaveLength(0);
+    // And nothing new may be written under the opt-out, which is the whole point.
+    expect(optedOut.save(ACCOUNT, SECRET)).toMatchObject({ persisted: false, reason: 'NO_BACKEND' });
+    expect(credentialFiles()).toHaveLength(0);
+  });
+
+  it('names the fallback’s own reason when it is the half that failed', () => {
+    // A credential directory path that is occupied by a regular file: the OS
+    // reason alone would send the user after libsecret, and the reason the
+    // documented fallback did not stand in would appear nowhere at all.
+    mkdirSync(join(tempHome, '.agentteams'), { recursive: true });
+    writeFileSync(join(tempHome, '.agentteams', 'credentials'), 'not a directory', 'utf-8');
+
+    const { runner } = linuxWithoutSecretTool();
+    const store = storeIn({ runner, platform: 'linux' });
+
+    const outcome = store.save(ACCOUNT, SECRET);
+
+    expect(outcome).toMatchObject({ persisted: false, reason: 'NO_BACKEND' });
+    expect(outcome.detail).toMatch(/could not be started/i);
+    expect(outcome.detail).toMatch(/not a directory/i);
+    // The same pair reaches the login preflight, which reports `status()`.
+    expect(store.status().detail).toMatch(/not a directory/i);
+  });
+
+  it('answers status without leaving a credential directory behind', () => {
+    // `auth status` and the login preflight both call this on machines that have
+    // never stored a login; neither may write to the home directory.
+    const { runner } = linuxWithoutSecretTool();
+    const store = storeIn({ runner, platform: 'linux' });
+
+    expect(store.status()).toMatchObject({ backend: 'protected-file', persisted: true, reason: 'OK' });
+    expect(store.read(ACCOUNT)).toBeNull();
+
+    expect(existsSync(join(tempHome, '.agentteams', 'credentials'))).toBe(false);
+  });
+
+  it('refuses rather than storing unprotected when Windows ACL hardening fails', () => {
+    const runner: CommandRunner = (command) => {
+      if (command.command === 'icacls') return fail(null, 'icacls is not recognized');
+      const script = command.args.join(' ');
+      if (script.includes('exit 0')) return ok();
+      return fail(1, 'PasswordVault.Add failed');
+    };
+    const store = storeIn({ runner, platform: 'win32', env: windowsEnv });
+
+    expect(store.save(ACCOUNT, SECRET)).toMatchObject({ persisted: false });
+    expect(credentialFiles()).toHaveLength(0);
   });
 });
 
@@ -195,18 +554,18 @@ describe('credentialStore with a working backend', () => {
   it('round-trips save → read → remove', () => {
     const state: { stored?: string } = {};
     const { runner } = recordingRunner(workingRunner(state));
-    const store = createCredentialStore({ runner, platform: 'darwin' });
+    const store = osOnlyStore({ runner, platform: 'darwin' });
 
     expect(store.save(ACCOUNT, SECRET)).toEqual({ persisted: true, reason: 'OK' });
     expect(state.stored).toBe(SECRET);
 
     // A fresh store proves the value came back from the backend, not the cache.
-    const reader = createCredentialStore({ runner: recordingRunner(workingRunner(state)).runner, platform: 'darwin' });
+    const reader = osOnlyStore({ runner: recordingRunner(workingRunner(state)).runner, platform: 'darwin' });
     expect(reader.read(ACCOUNT)).toBe(SECRET);
 
     store.remove(ACCOUNT);
     expect(state.stored).toBeUndefined();
-    const afterRemoval = createCredentialStore({
+    const afterRemoval = osOnlyStore({
       runner: recordingRunner(workingRunner(state)).runner,
       platform: 'darwin',
     });
@@ -216,7 +575,7 @@ describe('credentialStore with a working backend', () => {
   it('serves repeat reads from the cache but goes back to the backend when asked for a fresh one', () => {
     const state: { stored?: string } = { stored: SECRET };
     const { runner, calls } = recordingRunner(workingRunner(state));
-    const store = createCredentialStore({ runner, platform: 'darwin' });
+    const store = osOnlyStore({ runner, platform: 'darwin' });
 
     expect(store.read(ACCOUNT)).toBe(SECRET);
     expect(store.read(ACCOUNT)).toBe(SECRET);
@@ -237,7 +596,7 @@ describe('credentialStore with a working backend', () => {
   it('drops the cached credential when a fresh read finds the backend empty', () => {
     const state: { stored?: string } = { stored: SECRET };
     const { runner } = recordingRunner(workingRunner(state));
-    const store = createCredentialStore({ runner, platform: 'darwin' });
+    const store = osOnlyStore({ runner, platform: 'darwin' });
 
     expect(store.read(ACCOUNT)).toBe(SECRET);
 
@@ -257,7 +616,7 @@ describe('credentialStore with a working backend', () => {
       if (command.args.includes('find-generic-password')) return fail(44, 'could not be found');
       return fail(1, 'User interaction is not allowed.');
     });
-    const store = createCredentialStore({ runner, platform: 'darwin' });
+    const store = osOnlyStore({ runner, platform: 'darwin' });
 
     expect(store.save(ACCOUNT, SECRET)).toMatchObject({ persisted: false, reason: 'WRITE_FAILED' });
     expect(store.read(ACCOUNT, { fresh: true })).toBe(SECRET);
@@ -265,7 +624,7 @@ describe('credentialStore with a working backend', () => {
 
   it('returns null rather than throwing when the item is absent', () => {
     const { runner } = recordingRunner(workingRunner({}));
-    const store = createCredentialStore({ runner, platform: 'darwin' });
+    const store = osOnlyStore({ runner, platform: 'darwin' });
 
     expect(store.read(ACCOUNT)).toBeNull();
   });
@@ -277,7 +636,7 @@ describe('credentialStore with a working backend', () => {
       if (command.args.includes('list-keychains')) return ok();
       return fail(1, 'User interaction is not allowed.');
     });
-    const store = createCredentialStore({ runner, platform: 'darwin' });
+    const store = osOnlyStore({ runner, platform: 'darwin' });
 
     expect(store.save(ACCOUNT, SECRET)).toMatchObject({ persisted: false, reason: 'WRITE_FAILED' });
     expect(store.read(ACCOUNT)).toBe(SECRET);
@@ -296,7 +655,7 @@ describe('credentialStore with a working backend', () => {
       if (command.args.includes('find-generic-password')) return ok('73117424\n');
       return fail(1);
     });
-    const store = createCredentialStore({ runner, platform: 'darwin' });
+    const store = osOnlyStore({ runner, platform: 'darwin' });
 
     const outcome = store.save(ACCOUNT, SECRET);
 
@@ -316,7 +675,7 @@ describe('credentialStore with a working backend', () => {
       if (command.args.includes('find-generic-password')) return fail(44, 'could not be found');
       return fail(1);
     });
-    const store = createCredentialStore({ runner, platform: 'darwin' });
+    const store = osOnlyStore({ runner, platform: 'darwin' });
 
     expect(store.save(ACCOUNT, SECRET)).toMatchObject({ persisted: false, reason: 'WRITE_FAILED' });
   });
@@ -335,7 +694,7 @@ describe('credentialStore with a working backend', () => {
       }
       return fail(1);
     });
-    const store = createCredentialStore({ runner, platform: 'darwin' });
+    const store = osOnlyStore({ runner, platform: 'darwin' });
 
     expect(store.read(ACCOUNT)).toBe(SECRET);
     denyReads = true;
@@ -357,7 +716,7 @@ describe('credentialStore with a working backend', () => {
       if (command.args.includes('find-generic-password')) return fail(51, 'User interaction is not allowed.');
       return fail(1);
     });
-    const store = createCredentialStore({ runner, platform: 'darwin' });
+    const store = osOnlyStore({ runner, platform: 'darwin' });
 
     const outcome = store.save(ACCOUNT, SECRET);
 
@@ -381,7 +740,7 @@ describe('credentialStore with a working backend', () => {
       }
       return fail(1);
     });
-    const store = createCredentialStore({ runner, platform: 'darwin' });
+    const store = osOnlyStore({ runner, platform: 'darwin' });
 
     expect(store.save(ACCOUNT, SECRET).persisted).toBe(false);
     // The failed account keeps serving memory: it is the only copy there is.
@@ -399,7 +758,7 @@ describe('credentialStore with a working backend', () => {
       // A backend that echoes the value back is exactly the case masking exists for.
       return fail(1, `SecKeychainItemCreateFromContent failed for ${SECRET}`);
     });
-    const store = createCredentialStore({ runner, platform: 'darwin' });
+    const store = osOnlyStore({ runner, platform: 'darwin' });
 
     const outcome = store.save(ACCOUNT, SECRET);
 

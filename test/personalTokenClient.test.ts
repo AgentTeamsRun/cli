@@ -1,11 +1,15 @@
 import { describe, expect, it, jest } from '@jest/globals';
+import { existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { PersonalTokenClient, PersonalTokenError } from '../src/auth/personalTokenClient.js';
 import type { PersonalTokenStore } from '../src/auth/personalTokenStore.js';
-import { createCredentialStore, type CredentialReadOptions } from '../src/auth/credentialStore.js';
+import { createCredentialStore, type CommandRunner, type CredentialReadOptions } from '../src/auth/credentialStore.js';
 import { createPersonalTokenStore } from '../src/auth/personalTokenStore.js';
 import { RefreshLockTimeoutError, type RefreshLock } from '../src/auth/refreshLock.js';
 
 const API_URL = 'https://api.agentteams.run';
+const posixIt = process.platform === 'win32' ? it.skip : it;
 const IDENTITY = { memberId: 'm-1', email: 'dev@example.com', nickname: 'dev' };
 
 type FakeStore = PersonalTokenStore & {
@@ -479,5 +483,110 @@ describe('personalTokenStore', () => {
       'personal-refresh:https://api.agentteams.run',
       'personal-refresh:https://dev-api.agentteams.run',
     ]);
+  });
+
+  posixIt('reports the backend that holds this slot, not the one the machine prefers', () => {
+    // After a fallback the two answers diverge: the keychain works again, but
+    // this server's token is in the file. Naming the keychain here would send a
+    // user to the wrong place to revoke it.
+    const home = mkdtempSync(join(tmpdir(), 'agentteams-slot-status-'));
+    try {
+      const lockedKeychain: CommandRunner = (command) => {
+        if (command.args.includes('list-keychains')) return { status: 0, stdout: '', stderr: '' };
+        if (command.args.includes('find-generic-password'))
+          return { status: 44, stdout: '', stderr: 'could not be found' };
+        return { status: 1, stdout: '', stderr: 'User interaction is not allowed.' };
+      };
+      const duringOutage = createCredentialStore({ homeDir: home, platform: 'darwin', runner: lockedKeychain });
+      expect(createPersonalTokenStore(API_URL, duringOutage).save('atr_stored_in_a_file')).toEqual({
+        persisted: true,
+        reason: 'OK',
+      });
+
+      // The keychain is healthy again in a later process, so the store-wide view
+      // is "macOS keychain, fine" — but this one slot's token is still in a file.
+      const healthyKeychain: CommandRunner = (command) => {
+        if (command.args.includes('list-keychains')) return { status: 0, stdout: '', stderr: '' };
+        return { status: 44, stdout: '', stderr: 'could not be found' };
+      };
+      const afterRecovery = createCredentialStore({ homeDir: home, platform: 'darwin', runner: healthyKeychain });
+
+      expect(createPersonalTokenStore(API_URL, afterRecovery).status()).toMatchObject({
+        backend: 'protected-file',
+        persisted: true,
+      });
+      // A server that never fell back reports the OS store, as it should.
+      expect(createPersonalTokenStore('https://other.invalid', afterRecovery).status().backend).toBe('macos-keychain');
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('rotation with a file-backed credential', () => {
+  /**
+   * Rotation is already serialized by `createFileRefreshLock(slot)`. The file
+   * backend has to live *inside* that lock rather than bring its own: a second
+   * lock would either be redundant or, worse, order the two differently in two
+   * processes and deadlock.
+   */
+  posixIt('rotates inside the existing slot lock and adds no lock of its own', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'agentteams-file-rotate-'));
+    try {
+      const lockedKeychain: CommandRunner = (command) => {
+        if (command.args.includes('list-keychains')) return { status: 0, stdout: '', stderr: '' };
+        if (command.args.includes('find-generic-password'))
+          return { status: 44, stdout: '', stderr: 'could not be found' };
+        return { status: 1, stdout: '', stderr: 'User interaction is not allowed.' };
+      };
+      const backing = createCredentialStore({ homeDir: home, platform: 'darwin', runner: lockedKeychain });
+      const store = createPersonalTokenStore(API_URL, backing);
+      store.save('atr_first');
+
+      const held: string[] = [];
+      const lock: RefreshLock = {
+        withLock: async (run) => {
+          held.push('enter');
+          try {
+            return await run();
+          } finally {
+            held.push('exit');
+          }
+        },
+      };
+
+      const client = new PersonalTokenClient({
+        apiUrl: API_URL,
+        store,
+        lock,
+        fetch: (async () =>
+          new Response(
+            JSON.stringify({
+              data: {
+                accessToken: 'atp_access',
+                refreshToken: 'atr_rotated',
+                expiresIn: 900,
+                identity: IDENTITY,
+              },
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          )) as unknown as typeof fetch,
+      });
+
+      expect(await client.getAccessToken()).toBe('atp_access');
+      expect(held).toEqual(['enter', 'exit']);
+
+      // The rotated token is what a later process finds, and the only file the
+      // fallback added is the credential itself.
+      const nextProcess = createPersonalTokenStore(
+        API_URL,
+        createCredentialStore({ homeDir: home, platform: 'darwin', runner: lockedKeychain }),
+      );
+      expect(nextProcess.read()).toBe('atr_rotated');
+      expect(existsSync(join(home, '.agentteams', 'locks'))).toBe(false);
+      expect(readdirSync(join(home, '.agentteams', 'credentials'))).toHaveLength(1);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 });

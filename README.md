@@ -74,21 +74,63 @@ export AGENTTEAMS_DEVICE_AUTH=1
 authorization. To turn it back off, remove `"deviceAuth"` from
 `~/.agentteams/config.json` and unset `AGENTTEAMS_DEVICE_AUTH`.
 
-Before starting, the CLI checks that this machine has a usable OS credential store
-(macOS Keychain, Windows Credential Manager, or libsecret on Linux). On a minimal
-Linux server install `libsecret` and unlock a keyring, e.g.
-`sudo apt install libsecret-tools` — otherwise use `AGENTTEAMS_API_KEY` instead.
+#### Where the login is stored
+
+The personal login is a refresh token, and it has to survive the command that
+created it — otherwise the next command is signed out again.
+
+The CLI always prefers the OS credential store: macOS Keychain, Windows Credential
+Manager, or libsecret (Secret Service) on Linux. When that store cannot keep the
+token, the CLI falls back to a **permission-protected file** under
+`~/.agentteams/credentials`, one file per API server:
+
+- POSIX: directory `0700`, file `0600`, and the CLI refuses to read or write the
+  file if it is a symlink, is owned by another user, or is reachable by group or
+  other.
+- Windows: `icacls` removes inheritance and grants only the current account. If
+  that cannot be applied or verified, the file backend is **not** used at all.
+
+The fallback is triggered by the OS store failing, not by which platform you are
+on, because the three platforms fail at different moments. On Linux the failure is
+visible up front; on macOS and Windows the availability check passes and only the
+write fails, which is why an SSH login there used to be revoked _after_ you had
+already approved it on another device.
+
+A protected file is weaker than an OS keyring: it is not encrypted, so anyone who
+can read your files or gain root on that machine can read the token.
+`agentteams auth status` always names the backend that actually holds the token and
+repeats that warning. To forbid the fallback — the login then fails before asking
+you to approve anything, exactly as it did before:
+
+```bash
+export AGENTTEAMS_DISABLE_FILE_CREDENTIALS=1
+```
+
+This applies to `init --device-auth` and `auth login --device-auth` on Linux, macOS
+and Windows alike, including machines you only ever reach over SSH.
+
+The variable stops the CLI **writing** a credential file. A file written before you
+set it stays readable and removable, so `agentteams auth logout` can still revoke
+that token and delete it — otherwise setting the variable would strand a live login
+on disk with no command left that could reach it.
+
+`auth status` names the reason the OS store was skipped when this process is the one
+that discovered it — always on Linux, where the failure shows up before the login.
+On macOS and Windows the failure is only visible at the moment of a write, so a
+later `auth status` reports the backend without repeating why; re-run the login (or
+`auth logout` and back in) to see the OS store's own error again.
 
 #### Troubleshooting
 
-| Message                                                             | Cause                                                                  | What to do                                                        |
-| ------------------------------------------------------------------- | ---------------------------------------------------------------------- | ----------------------------------------------------------------- |
-| `OAuth callback timed out after 60 seconds.`                        | The default flow was used from a shell the browser cannot call back to | Re-run with `--device-auth`                                       |
-| `does not support device authorization`                             | The server is an older AgentTeams API                                  | Re-run **without** `--device-auth`, or upgrade the server         |
-| `device authorization turned off because the server has no APP_URL` | Server configuration                                                   | Ask the operator to set `APP_URL`; use the default flow meanwhile |
-| `The device code expired before it was approved`                    | The code is valid for 15 minutes                                       | Run the command again for a new code                              |
-| `The sign-in request was denied in the browser`                     | Deny was clicked                                                       | Run the command again if that was a mistake                       |
-| `Cannot start device authorization: ... credential store`           | No usable OS credential store                                          | Install/unlock libsecret, or use `AGENTTEAMS_API_KEY`             |
+| Message                                                              | Cause                                                                   | What to do                                                                                                                                                                                                                       |
+| -------------------------------------------------------------------- | ----------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `OAuth callback timed out after 60 seconds.`                         | The default flow was used from a shell the browser cannot call back to  | Re-run with `--device-auth`                                                                                                                                                                                                      |
+| `does not support device authorization`                              | The server is an older AgentTeams API                                   | Re-run **without** `--device-auth`, or upgrade the server                                                                                                                                                                        |
+| `device authorization turned off because the server has no APP_URL`  | Server configuration                                                    | Ask the operator to set `APP_URL`; use the default flow meanwhile                                                                                                                                                                |
+| `The device code expired before it was approved`                     | The code is valid for 15 minutes                                        | Run the command again for a new code                                                                                                                                                                                             |
+| `The sign-in request was denied in the browser`                      | Deny was clicked                                                        | Run the command again if that was a mistake                                                                                                                                                                                      |
+| `Cannot start device authorization: ... credential store`            | Neither the OS credential store nor the file fallback can keep a login  | Read the reason in brackets — it names both halves. Unset `AGENTTEAMS_DISABLE_FILE_CREDENTIALS` if you set it, or fix the OS store (install/unlock libsecret, unlock the macOS login keychain, sign in interactively on Windows) |
+| `Store: protected file (~/.agentteams/credentials)` in `auth status` | The OS credential store was unavailable, so the file fallback is in use | Nothing is broken. Fix the OS store if you want the stronger backend; on Linux the message after it names the reason, on macOS and Windows only the run that first fell back can show it                                         |
 
 ### Service URLs (Defaults and Overrides)
 

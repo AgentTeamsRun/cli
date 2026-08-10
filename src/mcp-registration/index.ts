@@ -200,7 +200,7 @@ export function runMcpConfigCommand(
 
   const lines: string[] = [
     `AgentTeams MCP config (${scope} scope) — project ${credentials.projectId}, team ${credentials.teamId}`,
-    'No credentials or project binding are embedded. The MCP server resolves local configuration and the OS credential store at request time.',
+    'No credentials or project binding are embedded. The MCP server resolves local configuration and the stored login (OS credential store, or a permission-protected file when that store is unavailable) at request time.',
     `Tool profile: ${toolProfile}${toolProfile === 'full' ? ' (default; all tools)' : ' (explicit limited catalog)'}.`,
     describeRuntime(spec),
   ];
@@ -276,7 +276,7 @@ export function runMcpInstallCommand(
     const lines = [
       `AgentTeams MCP install — ${client.label} (${scope} scope)`,
       `Project ${credentials.projectId}, team ${credentials.teamId}`,
-      'The server entry contains no credentials or project binding; runtime resolution uses local configuration and the OS credential store.',
+      'The server entry contains no credentials or project binding; runtime resolution uses local configuration and the stored login.',
       `Tool profile: ${toolProfile}${toolProfile === 'full' ? ' (default; all tools)' : ' (explicit limited catalog)'}.`,
       describeRuntime(spec),
     ];
@@ -311,7 +311,7 @@ export function runMcpInstallCommand(
     const lines = [
       'AgentTeams MCP install — dry run (no files were changed)',
       `Plan: register "${MCP_SERVER_NAME}" at ${scope} scope for project ${plan.binding.projectId}, team ${plan.binding.teamId}`,
-      'The server entries contain no credentials or project binding; runtime resolution uses local configuration and the OS credential store.',
+      'The server entries contain no credentials or project binding; runtime resolution uses local configuration and the stored login.',
       `Tool profile: ${toolProfile}${toolProfile === 'full' ? ' (default; all tools)' : ' (explicit limited catalog)'}.`,
       describeRuntime(spec),
       '',

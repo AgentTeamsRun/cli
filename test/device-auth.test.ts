@@ -72,7 +72,11 @@ jest.unstable_mockModule('../src/auth/personalTokenClient.js', () => ({
   },
 }));
 
-const storeStatus = { backend: 'macos-keychain' as const, persisted: true, reason: 'OK' as string };
+const storeStatus: { backend: string; persisted: boolean; reason: string; detail?: string } = {
+  backend: 'macos-keychain',
+  persisted: true,
+  reason: 'OK',
+};
 
 jest.unstable_mockModule('../src/auth/credentialStore.js', () => ({
   __esModule: true,
@@ -133,7 +137,10 @@ beforeEach(() => {
   openBrowser.mockClear();
   exchangeAuthorizationCode.mockClear();
   pollDeviceToken.mockReset();
+  storeStatus.backend = 'macos-keychain';
+  storeStatus.persisted = true;
   storeStatus.reason = 'OK';
+  delete storeStatus.detail;
   jest.resetModules();
 });
 
@@ -249,9 +256,40 @@ describe('device login', () => {
     expect(output).not.toContain('atp_');
   }, 30_000);
 
-  test('자격증명 저장소가 없으면 start를 호출하기 전에 실패한다', async () => {
+  test('OS 저장소가 없어도 보호 파일 fallback이 있으면 승인 절차가 진행된다', async () => {
+    // Linux SSH의 원래 증상: probe 실패만으로 승인 시작 자체가 막혔다. 이제 저장
+    // 계층이 파일 fallback을 확보했다고 보고하면 start는 정상 호출되어야 한다.
     createProject();
+    storeStatus.backend = 'protected-file';
+    storeStatus.reason = 'OK';
+    storeStatus.detail = 'secret-tool could not be started on this machine';
+
+    const requestedUrls: string[] = [];
+    globalThis.fetch = jest.fn(async (url: unknown) => {
+      requestedUrls.push(String(url));
+      if (String(url).endsWith('/api/auth/desktop/device/start')) return jsonResponse(200, startPayload);
+      throw new Error(`unexpected fetch ${String(url)}`);
+    }) as unknown as typeof fetch;
+
+    pollDeviceToken.mockResolvedValueOnce({
+      kind: 'approved',
+      session: { accessToken: 'atp_a', expiresAt: Date.now(), identity: clientState.identity },
+      setup: null,
+    });
+
+    const { executeAuthCommand } = await loadAuthCommand();
+    const result = (await executeAuthCommand('login', { deviceAuth: true })) as Record<string, unknown>;
+
+    expect(requestedUrls.some((url) => url.endsWith('/api/auth/desktop/device/start'))).toBe(true);
+    expect(result.persisted).toBe(true);
+  }, 30_000);
+
+  test('fallback까지 불가능하면 start를 호출하기 전에 실패하고 플랫폼별 조치를 안내한다', async () => {
+    createProject();
+    storeStatus.backend = 'libsecret';
+    storeStatus.persisted = false;
     storeStatus.reason = 'NO_BACKEND';
+    storeStatus.detail = 'secret-tool could not be started on this machine';
 
     const requestedUrls: string[] = [];
     globalThis.fetch = jest.fn(async (url: unknown) => {
@@ -260,8 +298,41 @@ describe('device login', () => {
     }) as unknown as typeof fetch;
 
     const { executeAuthCommand } = await loadAuthCommand();
-    await expect(executeAuthCommand('login', { deviceAuth: true })).rejects.toThrow(/credential store/i);
+    const failure = await executeAuthCommand('login', { deviceAuth: true }).then(
+      () => null,
+      (error: unknown) => error as Error,
+    );
+
     expect(requestedUrls).toHaveLength(0);
+    expect(failure?.message).toMatch(/credential store/i);
+    // 세 플랫폼의 조치를 함께 안내한다.
+    expect(failure?.message).toMatch(/libsecret/);
+    expect(failure?.message).toMatch(/keychain/i);
+    expect(failure?.message).toMatch(/Credential Manager|vault/i);
+    // 진단 원문이 있으면 그대로 보여 준다 — "설치했는데 왜 안 되나"를 끊는 유일한 단서다.
+    expect(failure?.message).toContain('could not be started');
+    // opt-out을 켠 적이 없으므로 그 해제를 지시하면 안 된다. 설정한 적 없는 변수를
+    // 가리키는 순간 진짜 원인은 안내문 뒤로 밀린다.
+    expect(failure?.message).not.toContain('AGENTTEAMS_DISABLE_FILE_CREDENTIALS');
+  });
+
+  test('opt-out을 켠 사용자에게만 해당 환경변수 해제를 안내한다', async () => {
+    createProject();
+    process.env.AGENTTEAMS_DISABLE_FILE_CREDENTIALS = '1';
+    storeStatus.backend = 'libsecret';
+    storeStatus.persisted = false;
+    storeStatus.reason = 'NO_BACKEND';
+    storeStatus.detail = 'secret-tool could not be started on this machine';
+
+    globalThis.fetch = jest.fn(async () => jsonResponse(200, startPayload)) as unknown as typeof fetch;
+
+    const { executeAuthCommand } = await loadAuthCommand();
+    const failure = await executeAuthCommand('login', { deviceAuth: true }).then(
+      () => null,
+      (error: unknown) => error as Error,
+    );
+
+    expect(failure?.message).toContain('AGENTTEAMS_DISABLE_FILE_CREDENTIALS');
   });
 });
 

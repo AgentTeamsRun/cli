@@ -365,6 +365,29 @@ describe('printInitResult', () => {
       expect(output).not.toContain('revoked');
     });
 
+    it('파일 fallback으로 저장됐으면 "OS 저장소에 저장됨"이라고 단정하지 않는다', () => {
+      // 원격 세션에서 실제 저장 위치를 잘못 알려 주면, 사용자는 존재하지 않는
+      // 키체인 항목을 지우러 가고 실제 토큰은 파일에 남는다.
+      printInitResult(
+        {
+          ...MOCK_INIT_RESULT,
+          authMode: 'personal-token' as const,
+          personalLogin: {
+            email: 'dev@example.com',
+            nickname: 'dev',
+            persisted: true,
+            storeBackend: 'protected-file',
+          },
+        },
+        'human',
+      );
+
+      const output = captureOutput(logSpy);
+      expect(output).toContain('~/.agentteams/credentials');
+      expect(output).toContain('weaker than the OS keyring');
+      expect(output).not.toContain('Login stored in the OS credential store');
+    });
+
     it('경고는 기본 포맷에서 반드시 보인다', () => {
       // 기본 실행이 사람용 포맷이므로, --format json에서만 보이는 경고는 아무도 읽지 않는다.
       const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});

@@ -27,10 +27,11 @@
  * family revocation this module exists to prevent.
  */
 
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { linkSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { credentialSlotHash } from './slotHash.js';
 
 /** Same `.agentteams` directory the global config lives in. */
 const LOCK_DIR = ['.agentteams', 'locks'];
@@ -106,11 +107,14 @@ interface LockRecord {
 }
 
 /**
- * One lock file per credential slot, named by hash: a slot embeds an API URL,
- * whose `:` and `/` are not portable in a filename.
+ * One lock file per credential slot, named by {@link credentialSlotHash}.
+ *
+ * The name is a published on-disk contract: a running process holds this exact
+ * path, so renaming it would make an older CLI and a newer one lock different
+ * files and rotate the same refresh token concurrently.
  */
 export function refreshLockFileName(slot: string): string {
-  return `personal-token-${createHash('sha256').update(slot).digest('hex').slice(0, 16)}.lock`;
+  return `personal-token-${credentialSlotHash(slot)}.lock`;
 }
 
 function isAlreadyExists(error: unknown): boolean {

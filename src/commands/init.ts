@@ -161,7 +161,7 @@ type OAuthInitResult = {
   postCheckoutHook?: EnsurePostCheckoutHookResult;
   authMode: AuthMode;
   /** Set only on the personal-token path, where the credential lives outside the repository. */
-  personalLogin?: { email: string; nickname: string; persisted: boolean };
+  personalLogin?: { email: string; nickname: string; persisted: boolean; storeBackend?: string };
   warning?: string;
   readiness: InitReadinessStep[];
   /** Per-adapter detail behind the `local-adapters` readiness step. Additive. */
@@ -814,6 +814,7 @@ async function runUnifiedSetup(context: SetupContext): Promise<SetupOutcome> {
         email: session.identity.email,
         nickname: session.identity.nickname,
         persisted: client.state().persisted,
+        storeBackend: client.state().storeBackend,
       },
     };
   } catch (error) {
@@ -885,6 +886,7 @@ async function runDeviceAuthSetup(context: SetupContext): Promise<SetupOutcome> 
       email: outcome.identity.email,
       nickname: outcome.identity.nickname,
       persisted: outcome.persisted,
+      storeBackend: outcome.storeBackend,
     },
   };
 }
