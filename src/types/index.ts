@@ -15,7 +15,9 @@
  * Which credential family this project is configured to authenticate with.
  *
  * `personal-token` is the default: project config stays secret-free while a
- * rotating refresh token lives in the OS credential store. `api-key` is the
+ * rotating refresh token lives outside the repository, in the OS credential
+ * store or in a permission-protected file when that store is unavailable.
+ * `api-key` is the
  * explicit compatibility path for existing automation and legacy projects.
  */
 export type AuthMode = 'api-key' | 'personal-token';

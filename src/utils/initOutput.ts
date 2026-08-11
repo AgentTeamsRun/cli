@@ -20,7 +20,7 @@ interface InitResultShape {
   seedPlanWebUrl?: string | null;
   postCheckoutHook?: EnsurePostCheckoutHookResult;
   authMode?: 'api-key' | 'personal-token';
-  personalLogin?: { email: string; nickname: string; persisted: boolean };
+  personalLogin?: { email: string; nickname: string; persisted: boolean; storeBackend?: string };
   warning?: string;
   readiness?: InitReadinessStep[];
 }
@@ -198,11 +198,22 @@ export function printInitResult(result: unknown, format: InitOutputFormat): void
   if (result.authMode === 'personal-token') {
     if (result.personalLogin) {
       console.log(`✓ Signed in as ${result.personalLogin.email} (${result.personalLogin.nickname})`);
-      console.log(
-        result.personalLogin.persisted
-          ? '✓ Login stored in the OS credential store; no long-lived key was written to this repository.'
-          : '⚠ Login kept in memory for this process only.',
-      );
+      // Naming the backend rather than asserting "the OS credential store" is the
+      // point: on a remote box the login may well be in a permission-protected
+      // file, and telling the user it is in the keyring would be false in exactly
+      // the case where the difference matters.
+      if (!result.personalLogin.persisted) {
+        console.log('⚠ Login kept in memory for this process only.');
+      } else if (result.personalLogin.storeBackend === 'protected-file') {
+        console.log(
+          '✓ Login stored in a file only your account can read (~/.agentteams/credentials); no long-lived key was written to this repository.',
+        );
+        console.log(
+          "  This machine's OS credential store was unavailable. File permissions are weaker than the OS keyring — run 'agentteams auth status' for details.",
+        );
+      } else {
+        console.log('✓ Login stored in the OS credential store; no long-lived key was written to this repository.');
+      }
     }
     // 이 경로는 setup용 agent key를 애초에 발급하지 않는다. "발급했다가 폐기했다"는
     // 이전 안내 줄은 그래서 사라졌다.

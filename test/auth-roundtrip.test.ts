@@ -185,8 +185,12 @@ function createStandInStoreFactory(service: string): () => CredentialStore {
  * round trip, so the stand-in takes over.
  */
 function createRoundTripStoreFactory(service: string): () => CredentialStore {
-  if (createCredentialStore({ service }).status().persisted) {
-    return () => createCredentialStore({ service });
+  // The file fallback would persist anywhere, which would make this pick the real
+  // store on a headless runner and quietly stop exercising the OS backend at all.
+  // This probe is specifically "does this machine have a working *OS* store".
+  const osOnly = { service, env: { AGENTTEAMS_DISABLE_FILE_CREDENTIALS: '1' } };
+  if (createCredentialStore(osOnly).status().persisted) {
+    return () => createCredentialStore(osOnly);
   }
   return createStandInStoreFactory(service);
 }

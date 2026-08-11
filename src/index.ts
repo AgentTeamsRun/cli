@@ -144,7 +144,7 @@ program
   .addOption(
     new Option(
       '--auth <mode>',
-      'Credential to configure. `personal-token` (default) stores a rotating login in the OS credential store and refreshes itself; `api-key` writes a legacy agent key into .agentteams/config.json, which expires 30 days after issue and must be reissued by hand.',
+      'Credential to configure. `personal-token` (default) stores a rotating personal login outside the repository — in the OS credential store, or in a permission-protected file when that store is unavailable — and refreshes itself; `api-key` writes a legacy agent key into .agentteams/config.json, which expires 30 days after issue and must be reissued by hand.',
     ).choices(['api-key', 'personal-token']),
   )
   // Entry point files are no longer written for every AI client on every run.

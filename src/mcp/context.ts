@@ -43,7 +43,7 @@ export interface McpToolContext {
    * minutes, so resolving once at startup would make every later tool call 401.
    * Tool handlers must call this instead of reading {@link headers} directly.
    * It is cheap: the access token is cached in memory and only re-fetched inside
-   * the refresh window, so the OS credential store is not touched per call.
+   * the refresh window, so the credential store is not touched per call.
    */
   resolveHeaders?: () => Promise<Record<string, string>>;
 }

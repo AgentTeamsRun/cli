@@ -16,7 +16,7 @@ export const MCP_GLOBAL_EXECUTABLE = 'agentteams';
  * Project identity for command context and human-readable output only.
  *
  * There is no credential field on purpose: the generated server spec embeds nothing,
- * and `agentteams mcp` resolves project config plus the OS credential store at request
+ * and `agentteams mcp` resolves project config plus the stored login at request
  * time. Re-adding one here would put a secret back into a client config file.
  */
 export interface McpCredentials {

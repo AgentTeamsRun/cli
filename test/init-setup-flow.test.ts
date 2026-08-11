@@ -73,10 +73,17 @@ const fakePersonalTokenClient = {
   invalidateAccessToken: () => {},
 };
 
+/** 저장 계층이 어떤 backend로 지속하는지를 테스트별로 갈아끼우기 위해 가변으로 둔다. */
+const mockStoreStatus: { backend: string; persisted: boolean; reason: string; detail?: string } = {
+  backend: 'macos-keychain',
+  persisted: true,
+  reason: 'OK',
+};
+
 jest.unstable_mockModule('../src/auth/credentialStore.js', () => ({
   __esModule: true,
   getCredentialStore: () => ({
-    status: () => ({ backend: 'macos-keychain', persisted: true, reason: 'OK' }),
+    status: () => mockStoreStatus,
     read: () => null,
     save: () => ({ persisted: true, reason: 'OK' }),
     remove: () => {},
@@ -1024,7 +1031,57 @@ describe('init --device-auth', () => {
 
   afterEach(() => {
     globalThis.fetch = originalFetch;
+    mockStoreStatus.backend = 'macos-keychain';
+    mockStoreStatus.persisted = true;
+    mockStoreStatus.reason = 'OK';
+    delete mockStoreStatus.detail;
+    fakeClientState.storeBackend = 'keychain';
+    fakeClientState.persisted = true;
   });
+
+  test('OS 저장소를 못 써도 파일 fallback으로 설정이 끝까지 완료된다', async () => {
+    // Linux·macOS·Windows SSH가 공통으로 부딪히던 지점: 여기서 멈추면 사용자는
+    // 다른 기기에서 승인까지 마친 뒤 취소를 통보받았다.
+    mockStoreStatus.backend = 'protected-file';
+    mockStoreStatus.reason = 'OK';
+    mockStoreStatus.detail = 'secret-tool could not be started on this machine';
+    fakeClientState.storeBackend = 'protected-file';
+
+    const { axios, executeInitCommand } = await loadInitModules();
+    const cwd = createTempProject();
+    mockConventionEndpoints(axios);
+    const { urls, restore } = captureAuthorizeUrls();
+
+    globalThis.fetch = jest.fn(async (url: unknown) => {
+      if (String(url).endsWith('/api/auth/desktop/device/start')) {
+        return new Response(JSON.stringify(DEVICE_START_PAYLOAD), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      throw new Error(`unexpected fetch ${String(url)}`);
+    }) as unknown as typeof fetch;
+
+    try {
+      const result = (await executeInitCommand({ cwd, deviceAuth: true })) as Record<string, unknown>;
+
+      expect(result).toMatchObject({ success: true, authMode: 'personal-token' });
+      // 실제 저장 위치를 결과에 그대로 싣는다 — 사람용 출력이 "OS 저장소"라고
+      // 단정하지 않을 수 있는 유일한 근거다.
+      expect(result.personalLogin).toMatchObject({ persisted: true, storeBackend: 'protected-file' });
+      expect(urls).toHaveLength(0);
+
+      const config = JSON.parse(readFileSync(join(cwd, '.agentteams', 'config.json'), 'utf-8')) as Record<
+        string,
+        unknown
+      >;
+      expect(config).toMatchObject({ teamId: 'team-1', projectId: 'project-1', authMode: 'personal-token' });
+      // 개인 로그인 경로는 API 키를 발급하지 않는다.
+      expect(config.apiKey).toBeUndefined();
+    } finally {
+      restore();
+    }
+  }, 20_000);
 
   test('로컬 콜백 서버 없이 승인 결과로 config와 컨벤션을 완성한다', async () => {
     const { axios, executeInitCommand } = await loadInitModules();
