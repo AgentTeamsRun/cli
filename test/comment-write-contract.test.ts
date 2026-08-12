@@ -253,7 +253,7 @@ describe('plan comment type producer contract', () => {
   });
 
   it('CLI --type 도움말도 같은 세 값만 안내한다', () => {
-    const source = readFileSync(new URL('../src/index.ts', import.meta.url), 'utf8');
+    const source = readFileSync(new URL('../src/program/comment.ts', import.meta.url), 'utf8');
     const help = source.match(/'--type <type>', 'Comment type \(([^)]+)\)'/);
     expect(help?.[1]).toBe('RISK, MODIFICATION, GENERAL');
   });

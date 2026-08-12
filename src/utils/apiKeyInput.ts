@@ -1,7 +1,6 @@
 import { readFileSync } from 'node:fs';
 
 export interface ApiKeyInputOptions {
-  apiKey?: string;
   apiKeyFile?: string;
 }
 
@@ -30,24 +29,12 @@ const normalizeApiKey = (value: string, source: string): string => {
 
 /**
  * Resolve explicit credential input without ever writing the credential to
- * output. The legacy argv path remains compatible, but every use explains the
- * safer environment, file and stdin alternatives on stderr.
+ * output.
  */
 export function resolveApiKeyInput(
   options: ApiKeyInputOptions,
   dependencies: ApiKeyInputDependencies = defaultDependencies,
 ): string | undefined {
-  if (options.apiKey !== undefined && options.apiKeyFile !== undefined) {
-    throw new Error('--api-key and --api-key-file cannot be used together.');
-  }
-
-  if (options.apiKey !== undefined) {
-    dependencies.warn(
-      '[warn] --api-key exposes credentials in shell history and process listings. Prefer AGENTTEAMS_API_KEY, --api-key-file <path>, or --api-key-file - for stdin.\n',
-    );
-    return normalizeApiKey(options.apiKey, '--api-key');
-  }
-
   if (options.apiKeyFile === undefined) {
     return undefined;
   }

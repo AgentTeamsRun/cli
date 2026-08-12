@@ -1,7 +1,7 @@
 import type { Config } from '../types/index.js';
 import { registerApiOrigin } from './apiOrigin.js';
 
-const CONFIG_OVERRIDE_KEYS = ['apiKey', 'apiUrl', 'teamId', 'projectId'] as const;
+const CONFIG_OVERRIDE_KEYS = ['apiKey', 'apiUrl', 'projectId'] as const;
 
 /**
  * Collect config overrides passed as CLI options.

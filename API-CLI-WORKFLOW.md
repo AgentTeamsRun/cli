@@ -181,13 +181,11 @@ Many list endpoints accept `page` and `pageSize`.
 
 요약 출력은 기본 영어 메시지로 출력됩니다(자동화/로그 파싱 관점에서 고정된 문구를 선호).
 
-`plan/report/postmortem/coaction/document`의 `create`/`update`는 기본적으로 메타 중심 요약만 stdout에 출력하고, 레코드 본문(예: 문서 content)은 echo하지 않습니다. 전체 구조화 결과가 필요하면 `--format json`(명시) 또는 `--verbose`를 사용하세요.
+리소스 커맨드의 기본 출력은 전체 구조화 결과(JSON)입니다. `--output-file`을 지정한 경우에만 stdout이 저장 경로와 메타 중심 요약으로 대체되며, 이때도 `--verbose`를 함께 주면 전체 결과가 이어서 출력됩니다. `--format`은 `init`/`auth`/`sync`/`doctor`에만 존재합니다.
 
 ### Prefixed entity ID 정규화
 
 웹 UI 엔티티 레퍼런스의 prefixed id(`agentteams_pln_<uuid>` 등)는 `--id`/`--plan-id`/`--completion-report-id` 등에 그대로 전달해도 내부에서 bare id로 정규화됩니다(`agentteams_pln_f627…` → `f627…`).
-
-text 출력에서 객체 필드는 핵심 식별 필드(`id/title/status/priority/updatedAt/createdAt`)를 우선 표시한 뒤 나머지를 정렬해 출력합니다.
 
 ---
 
@@ -201,11 +199,9 @@ text 출력에서 객체 필드는 핵심 식별 필드(`id/title/status/priorit
   - `--template refactor-minimal`로 최소 리팩터링 체크리스트 본문을 자동 채울 수 있습니다(내용이 비어 있을 때).
   - `--template quick-minimal`로 약식 작업 계획서(최소 템플릿)를 자동 채울 수 있습니다(내용이 비어 있을 때).
   - 멀티라인을 `--content`로 전달해야 하는 경우, `--interpret-escapes`를 사용하면 `\\n` 시퀀스를 실제 줄바꿈으로 변환합니다(기본 OFF).
-- Get alias: `plan show --id <id>`는 `plan get --id <id>`와 동일 동작입니다.
-- Include dependencies: `plan get|show --id <id> --include-deps`
+- Include dependencies: `plan get --id <id> --include-deps`
   - 내부적으로 `GET /plans/:id` + `GET /plans/:id/dependencies`를 호출해 응답을 합성합니다.
-  - `--format json`: `data.dependencies = { blocking: [...], dependents: [...] }`
-  - `--format text`: Plan 필드 출력 뒤 `## Dependencies` 섹션을 추가합니다.
+  - 결과에 `data.dependencies = { blocking: [...], dependents: [...] }`가 추가됩니다.
 - Download snapshot: `GET /api/projects/:projectId/plans/:id`
   - Saved to `.agentteams/cli/active-plan/{safe-title}.md` with frontmatter.
 - (추가) 단축 커맨드
@@ -241,7 +237,7 @@ Convention commands are tightly coupled to `.agentteams/`.
 - Completion reports: `.../completion-reports`
 - Postmortems: `.../post-mortems`
 
-CLI supports `--api-url`, `--api-key`, `--team-id`, and `--project-id` overrides for environments without local config.
+CLI supports `--api-url`, `--api-key-file`, and `--project-id` overrides for environments without local config. The API key can also come from `AGENTTEAMS_API_KEY`; there is no `--api-key` or `--team-id` flag (use `AGENTTEAMS_TEAM_ID` or the config file for the team).
 
 #### `report create` 입력 규칙
 

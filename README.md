@@ -161,6 +161,24 @@ agentteams convention delete --file .agentteams/rules/context.md
 agentteams convention delete --file .agentteams/rules/context.md --apply
 ```
 
+## Breaking Changes
+
+Every resource command is now `<resource> <action>` with its own subcommand, so each action's `--help` lists only the
+options it actually reads. The following public arguments were removed in that move. Passing one fails at argument
+parsing with `unknown option` / `unknown command`, and the CLI prints a `hint:` line with the replacement.
+
+| Removed                                              | Replacement                                                                         |
+| ---------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `--format`                                           | Nothing — output is already JSON. Still available on `init`/`auth`/`sync`/`doctor`. |
+| `--api-key`                                          | `--api-key-file <path>` or `AGENTTEAMS_API_KEY`                                     |
+| `--team-id`                                          | `AGENTTEAMS_TEAM_ID` or the `teamId` config field                                   |
+| `--limit` (report/postmortem/coaction/document list) | `--page-size` (`search --limit` is unchanged)                                       |
+| `plan show`, `code-review show`, `task show`         | `get`                                                                               |
+| `plan issue`                                         | `plan link-issue` (`issue` stays as an alias for one release)                       |
+
+If an agent in your project still passes `--format json`, its convention copy is stale — run
+`agentteams convention download` to refresh it.
+
 ## Core Commands
 
 ### `init`
@@ -248,8 +266,7 @@ Note: Plans are always created as `BACKLOG`. Even if you pass `--status` to `pla
 ```bash
 agentteams plan list
 agentteams plan get --id <plan-id>
-agentteams plan get --id <plan-id> --include-deps --format text
-agentteams plan show --id <plan-id>  # alias of get
+agentteams plan get --id <plan-id> --include-deps
 agentteams plan status --id <plan-id>
 agentteams plan set-status --id <plan-id> --status <status>
 
@@ -419,8 +436,8 @@ agentteams search --query "auth" --types PLAN,CO_ACTION
 # Limit results and token budget (useful for agents)
 agentteams search --query "deployment" --limit 5 --max-tokens 4000
 
-# JSON output for automation
-agentteams search --query "refactor" --format json
+# Output is JSON by default, so it pipes straight into jq
+agentteams search --query "refactor"
 ```
 
 Searchable entity types: `PLAN`, `CO_ACTION`, `COMPLETION_REPORT`, `POST_MORTEM`, `CONVENTION`
@@ -465,7 +482,6 @@ Agents connected over MCP get the same dispatch as the `agentteams_resolve` tool
 
 ```bash
 agentteams config whoami
-agentteams config whoami --format text
 ```
 
 `config whoami` prints current environment variable values for `AGENTTEAMS_API_KEY` and `AGENTTEAMS_API_URL`.
@@ -511,9 +527,9 @@ export AGENTTEAMS_PROJECT_ID="proj_xxx"
 출력 계약은 다음과 같습니다.
 
 - 기본: 리소스·자동화 명령의 전체 JSON 결과를 stdout에 출력합니다.
-- 사람용 예외: `init`, `sync`, `doctor`는 사람이 읽기 쉬운 기본 출력을 유지합니다. 기계가 읽을 수 있는
-  결과가 필요하면 이 명령에 `--format json`을 전달합니다.
-- `--format json`: 기본 자동화 경로와 동일한 전체 JSON 결과를 명시적으로 선택합니다.
+- 사람용 예외: `init`, `auth`, `sync`, `doctor`는 사람이 읽기 쉬운 기본 출력을 유지합니다. 기계가 읽을 수
+  있는 결과가 필요하면 **이 네 명령에 한해** `--format json`을 전달합니다. 다른 명령에는 `--format`이
+  없습니다(기본 출력이 이미 JSON입니다).
 - `--output-file <path>`: 전체 결과를 파일에 저장한 뒤, 저장 경로와 간결한 요약을 stdout에 출력합니다.
 - `--verbose`: 전체 raw 결과를 stdout에 출력합니다. `--output-file`과 함께 사용하면 저장 경로 요약 뒤에
   전체 결과도 이어서 출력합니다.
@@ -542,11 +558,11 @@ agentteams plan upload-html \
 ```
 
 ```bash
-agentteams plan list --format json
-agentteams plan update --id <plan-id> --status IN_PROGRESS --format json
+agentteams plan list
+agentteams plan update --id <plan-id> --status IN_PROGRESS
 ```
 
-Note: `convention` does not support `--format`.
+Note: `--format` exists only on `init`, `auth`, `sync`, and `doctor`. Every other command already prints JSON.
 
 ## Error Guide
 

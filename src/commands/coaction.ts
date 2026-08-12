@@ -95,14 +95,9 @@ export async function executeCoActionCommand(apiUrl: string, headers: any, actio
       if (source !== 'ALL') params.source = source;
 
       const page = toPositiveInteger(options.page);
-      const limitVal = toPositiveInteger(options.limit);
       const pageSizeVal = toPositiveInteger(options.pageSize);
-      if (limitVal !== undefined && pageSizeVal !== undefined) {
-        process.stderr.write('[warn] --limit and --page-size both specified; --limit takes precedence.\n');
-      }
-      const pageSize = limitVal ?? pageSizeVal;
       if (page !== undefined) params.page = page;
-      if (pageSize !== undefined) params.pageSize = pageSize;
+      if (pageSizeVal !== undefined) params.pageSize = pageSizeVal;
 
       return withSpinner(
         'Loading co-actions...',
@@ -125,14 +120,9 @@ export async function executeCoActionCommand(apiUrl: string, headers: any, actio
 
       const params: Record<string, string | number> = {};
       const page = toPositiveInteger(options.page);
-      const limitVal = toPositiveInteger(options.limit);
       const pageSizeVal = toPositiveInteger(options.pageSize);
-      if (limitVal !== undefined && pageSizeVal !== undefined) {
-        process.stderr.write('[warn] --limit and --page-size both specified; --limit takes precedence.\n');
-      }
-      const pageSize = limitVal ?? pageSizeVal;
       if (page !== undefined) params.page = page;
-      if (pageSize !== undefined) params.pageSize = pageSize;
+      if (pageSizeVal !== undefined) params.pageSize = pageSizeVal;
 
       return withSpinner(
         'Loading co-action takeaways...',
@@ -219,14 +209,9 @@ export async function executeCoActionCommand(apiUrl: string, headers: any, actio
 
       const params: Record<string, string | number> = {};
       const page = toPositiveInteger(options.page);
-      const limitVal = toPositiveInteger(options.limit);
       const pageSizeVal = toPositiveInteger(options.pageSize);
-      if (limitVal !== undefined && pageSizeVal !== undefined) {
-        process.stderr.write('[warn] --limit and --page-size both specified; --limit takes precedence.\n');
-      }
-      const pageSize = limitVal ?? pageSizeVal;
       if (page !== undefined) params.page = page;
-      if (pageSize !== undefined) params.pageSize = pageSize;
+      if (pageSizeVal !== undefined) params.pageSize = pageSizeVal;
 
       return withSpinner(
         'Loading co-action histories...',

@@ -1,12 +1,12 @@
 export type OutputFormat = 'json';
 
-export interface OutputPolicyContext {
+/**
+ * 요약 라인 문구는 resource/action에만 의존합니다. 요약을 출력할지 말지는
+ * printCommandResult가 --output-file 유무로 결정하므로 여기에는 그 축이 없습니다.
+ */
+export interface SummaryContext {
   resource?: string;
   action?: string;
-  format: OutputFormat;
-  formatExplicit?: boolean;
-  outputFile?: string;
-  verbose?: boolean;
 }
 
 const nextActionHints: Record<string, Record<string, string[]>> = {
@@ -16,16 +16,7 @@ const nextActionHints: Record<string, Record<string, string[]>> = {
   },
 };
 
-export function shouldPrintSummary(context: OutputPolicyContext): boolean {
-  if (context.verbose) return false;
-
-  return typeof context.outputFile === 'string' && context.outputFile.trim().length > 0;
-}
-
-export function createSummaryLines(
-  result: unknown,
-  context: Pick<OutputPolicyContext, 'resource' | 'action'>,
-): string[] {
+export function createSummaryLines(result: unknown, context: SummaryContext): string[] {
   const lines: string[] = [];
 
   // Commands attach a human-readable `message` at the top level (alongside the
@@ -71,11 +62,7 @@ export function createSummaryLines(
   return lines;
 }
 
-function resolveNextActionHints(
-  id: string | undefined,
-  result: unknown,
-  context: Pick<OutputPolicyContext, 'resource' | 'action'>,
-): string[] {
+function resolveNextActionHints(id: string | undefined, result: unknown, context: SummaryContext): string[] {
   if (!context.resource || !context.action) return [];
 
   if (context.resource === 'plan' && context.action === 'finish') {

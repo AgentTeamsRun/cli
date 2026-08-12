@@ -91,7 +91,7 @@ function assertNoUnresolvedPlaceholders(credentials: Record<string, string>): vo
   throw new Error(
     `Unresolved \${...} placeholder in credential(s): ${hints}. ` +
       'The MCP client did not substitute environment variables in its server config. ' +
-      'Set literal values for the AGENTTEAMS_* environment variables (or pass --api-key/--project-id/--team-id).',
+      'Set literal values for the AGENTTEAMS_* environment variables (or pass --api-key-file/--project-id).',
   );
 }
 

@@ -570,22 +570,6 @@ export async function executePlanCommand(
 
       return response;
     }
-    case 'show': {
-      if (!options.id) throw new Error('--id is required for plan show');
-      await runFreshnessCheckSilent(apiUrl, projectId, headers);
-
-      const response = await getPlan(apiUrl, projectId, headers, options.id);
-
-      if (options.includeDeps) {
-        const depsResponse = await getPlanDependencies(apiUrl, projectId, headers, options.id);
-        const dependencies = normalizeDependencies(depsResponse);
-        const mergedPlan = mergePlanWithDependencies(response, dependencies);
-
-        return mergedPlan;
-      }
-
-      return response;
-    }
     case 'status': {
       if (!options.id) throw new Error('--id is required for plan status');
       return getPlanStatus(apiUrl, projectId, headers, options.id);
@@ -1209,7 +1193,15 @@ export async function executePlanCommand(
         }
       }
 
-      return linkOriginIssue(apiUrl, projectId, headers, planId, body);
+      try {
+        return await linkOriginIssue(apiUrl, projectId, headers, planId, body);
+      } catch (err: any) {
+        // 409 CONFLICT = 이미 연결됨. 세이프가드가 재실행돼도 실패로 남지 않도록 멱등 처리합니다.
+        if (err?.response?.status === 409) {
+          return { message: 'Origin issue already linked (skipped)' };
+        }
+        throw err;
+      }
     }
     case 'unlink-issue': {
       const planId = toNonEmptyString(options.id);
@@ -1224,48 +1216,6 @@ export async function executePlanCommand(
       if (!planId) throw new Error('--id is required for plan list-issues');
 
       return listOriginIssues(apiUrl, projectId, headers, planId);
-    }
-    case 'issue': {
-      // Shorter alias for link-issue, designed for agent convenience
-      const planId = toNonEmptyString(options.id);
-      if (!planId) throw new Error('--id is required for plan issue');
-      const provider = toNonEmptyString(options.provider)?.toUpperCase();
-      if (!provider) throw new Error('--provider is required for plan issue');
-      const externalId = toNonEmptyString(options.externalId);
-      if (!externalId) throw new Error('--external-id is required for plan issue');
-      const externalUrl = toNonEmptyString(options.externalUrl);
-      if (!externalUrl) throw new Error('--external-url is required for plan issue');
-
-      if (!['GITHUB', 'GITLAB', 'LINEAR'].includes(provider)) {
-        throw new Error('--provider must be one of: GITHUB, GITLAB, LINEAR');
-      }
-
-      const body: {
-        provider: string;
-        externalId: string;
-        externalUrl: string;
-        externalTitle?: string;
-        metadata?: Record<string, unknown>;
-      } = { provider, externalId, externalUrl: ensureUrlProtocol(externalUrl) };
-
-      if (options.title) body.externalTitle = options.title;
-      if (options.metadata) {
-        try {
-          body.metadata = JSON.parse(options.metadata);
-        } catch {
-          throw new Error('--metadata must be valid JSON');
-        }
-      }
-
-      try {
-        return await linkOriginIssue(apiUrl, projectId, headers, planId, body);
-      } catch (err: any) {
-        // 409 CONFLICT = already linked, return success message
-        if (err?.response?.status === 409) {
-          return { message: 'Origin issue already linked (skipped)' };
-        }
-        throw err;
-      }
     }
     default:
       throw new Error(`Unknown action: ${action}`);

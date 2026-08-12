@@ -1,54 +1,71 @@
 import { describe, it, expect, jest } from '@jest/globals';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { resolveApiKeyInput } from '../src/utils/apiKeyInput.js';
-import { createSummaryLines, shouldPrintSummary } from '../src/utils/outputPolicy.js';
+import { createSummaryLines } from '../src/utils/outputPolicy.js';
+import { printCommandResult } from '../src/program/shared.js';
 
-describe('outputPolicy', () => {
+function capture(run: () => void): string[] {
+  const lines: string[] = [];
+  const spy = jest.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+    lines.push(args.map(String).join(' '));
+  });
+  try {
+    run();
+  } finally {
+    spy.mockRestore();
+  }
+  return lines;
+}
+
+const sample = { data: { id: 'plan-123', title: 'CLI output fix' } };
+
+describe('printCommandResult 출력 정책', () => {
   it.each([
     ['plan', 'create'],
     ['task', 'finish'],
     ['report', 'update'],
-    ['postmortem', 'create'],
-    ['coaction', 'update'],
     ['document', 'create'],
-    ['linear', 'comment-create'],
-  ])('keeps full JSON output by default for %s %s', (resource, action) => {
-    expect(
-      shouldPrintSummary({
-        resource,
-        action,
-        format: 'json',
-        formatExplicit: false,
-      }),
-    ).toBe(false);
+  ])('%s %s는 기본적으로 전체 JSON을 출력한다', (resource, action) => {
+    const lines = capture(() => printCommandResult({ result: sample, resource, action }));
+
+    expect(lines).toHaveLength(1);
+    expect(JSON.parse(lines[0])).toEqual(sample);
   });
 
-  it('forces full output when verbose is enabled', () => {
-    expect(
-      shouldPrintSummary({
-        resource: 'plan',
-        action: 'update',
-        format: 'json',
-        formatExplicit: false,
-        verbose: true,
-      }),
-    ).toBe(false);
+  it('--output-file이 있으면 저장 경로와 요약만 출력한다', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'agentteams-output-policy-'));
+    const outputFile = join(directory, 'out.json');
+    try {
+      const lines = capture(() =>
+        printCommandResult({ result: sample, outputFile, resource: 'plan', action: 'update' }),
+      );
+
+      expect(lines[0]).toContain(`Saved output to ${outputFile}`);
+      expect(lines.slice(1)).toEqual(['Success: plan update', 'id: plan-123, title: CLI output fix']);
+      expect(JSON.parse(readFileSync(outputFile, 'utf-8'))).toEqual(sample);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 
-  it('prints summary when output-file is used', () => {
-    expect(
-      shouldPrintSummary({
-        resource: 'plan',
-        action: 'update',
-        format: 'json',
-        formatExplicit: true,
-        outputFile: './tmp/out.json',
-      }),
-    ).toBe(true);
-  });
+  it('--output-file과 --verbose를 함께 주면 요약 뒤에 전체 결과도 출력한다', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'agentteams-output-policy-'));
+    const outputFile = join(directory, 'out.json');
+    try {
+      const lines = capture(() =>
+        printCommandResult({ result: sample, outputFile, verbose: true, resource: 'plan', action: 'update' }),
+      );
 
+      expect(JSON.parse(lines[lines.length - 1])).toEqual(sample);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('outputPolicy', () => {
   it('creates summary lines with message and id/title', () => {
     const lines = createSummaryLines(
       {
@@ -193,50 +210,9 @@ describe('outputPolicy', () => {
     ]);
     expect(lines.some((line) => line.includes('AAAA'))).toBe(false);
   });
-
-  it('keeps full output for document update when json is explicitly requested', () => {
-    expect(
-      shouldPrintSummary({
-        resource: 'document',
-        action: 'update',
-        format: 'json',
-        formatExplicit: true,
-      }),
-    ).toBe(false);
-  });
-
-  it('keeps full output for document list by default', () => {
-    expect(
-      shouldPrintSummary({
-        resource: 'document',
-        action: 'list',
-        format: 'json',
-        formatExplicit: false,
-      }),
-    ).toBe(false);
-  });
 });
 
 describe('API key input policy', () => {
-  it('keeps --api-key compatible while warning on stderr without touching stdout', () => {
-    const stdoutSpy = jest.spyOn(process.stdout, 'write').mockReturnValue(true);
-    const stderrSpy = jest.spyOn(process.stderr, 'write').mockReturnValue(true);
-
-    try {
-      expect(resolveApiKeyInput({ apiKey: 'ats_ci_legacy' })).toBe('ats_ci_legacy');
-      expect(stdoutSpy).not.toHaveBeenCalled();
-      expect(stderrSpy).toHaveBeenCalledWith(
-        expect.stringContaining('--api-key exposes credentials in shell history and process listings'),
-      );
-      expect(stderrSpy).toHaveBeenCalledWith(expect.stringContaining('AGENTTEAMS_API_KEY'));
-      expect(stderrSpy).toHaveBeenCalledWith(expect.stringContaining('--api-key-file'));
-      expect(stderrSpy).not.toHaveBeenCalledWith(expect.stringContaining('ats_ci_legacy'));
-    } finally {
-      stdoutSpy.mockRestore();
-      stderrSpy.mockRestore();
-    }
-  });
-
   it('reads and trims an API key from --api-key-file', () => {
     const directory = mkdtempSync(join(tmpdir(), 'agentteams-api-key-file-'));
     const filePath = join(directory, 'token');
@@ -264,8 +240,7 @@ describe('API key input policy', () => {
     ).toBe('ats_ci_from_stdin');
   });
 
-  it('rejects ambiguous or empty API key input', () => {
-    expect(() => resolveApiKeyInput({ apiKey: 'ats_one', apiKeyFile: './token' })).toThrow(/cannot be used together/);
+  it('rejects empty API key input', () => {
     expect(() =>
       resolveApiKeyInput({ apiKeyFile: '-' }, { readFile: () => '', readStdin: () => '\n', warn: () => undefined }),
     ).toThrow(/empty/);
