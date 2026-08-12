@@ -11,11 +11,13 @@ import open from 'open';
 import { getCredentialStore, type CredentialBackendId, type CredentialStoreReason } from '../auth/credentialStore.js';
 import { FILE_CREDENTIALS_DISABLED_ENV, isFileCredentialFallbackDisabled } from '../auth/fileCredentialStore.js';
 import { pollDeviceAuthorization, startDeviceAuthorization } from '../auth/deviceAuthClient.js';
-import { getPersonalTokenClient, PersonalTokenError } from '../auth/personalTokenClient.js';
+import { getPersonalTokenClient, PersonalTokenError, type PersonalTokenState } from '../auth/personalTokenClient.js';
 import type { Config } from '../types/index.js';
 import { startAuthorizationCodeServer, createAuthState, createPkcePair } from '../utils/authServer.js';
 import {
   DEFAULT_API_URL,
+  CredentialResolutionError,
+  describeUnusableCredential,
   findProjectConfig,
   globalConfigPath,
   isDeviceAuthDefaultEnabled,
@@ -432,6 +434,7 @@ async function login(options: Record<string, unknown>): Promise<AuthLoginResult>
 async function status(options: Record<string, unknown> = {}): Promise<AuthStatusResult> {
   const apiUrl = resolveAuthApiUrl({ apiUrl: typeof options.apiUrl === 'string' ? options.apiUrl : undefined });
   const projectConfig = loadProjectConfig();
+  const configPath = findProjectConfig(process.cwd());
   const client = getPersonalTokenClient(apiUrl);
 
   // Reading the state must not require a working network: a token that cannot
@@ -439,20 +442,21 @@ async function status(options: Record<string, unknown> = {}): Promise<AuthStatus
   const tokenState = client.state();
 
   let credentialSource: CredentialSource | null = null;
-  let problem: string | undefined;
+  let resolutionError: unknown;
   try {
     // The same apiUrl this command reports, so `apiUrl` and `credentialSource`
     // can never describe two different servers.
     credentialSource = (await resolveCredential({ apiUrl }))?.source ?? null;
   } catch (error) {
-    problem = error instanceof Error ? error.message : String(error);
+    resolutionError = error;
   }
 
   const refreshedState = client.state();
+  const problem = describeAuthStatusProblem(resolutionError, refreshedState, configPath !== null);
 
   const result: AuthStatusResult = {
     apiUrl,
-    configPath: findProjectConfig(process.cwd()),
+    configPath,
     credentialSource,
     authMode: projectConfig?.authMode ?? null,
     hasProjectApiKey: typeof projectConfig?.apiKey === 'string' && projectConfig.apiKey.length > 0,
@@ -475,6 +479,20 @@ async function status(options: Record<string, unknown> = {}): Promise<AuthStatus
 
   if (problem) result.problem = problem;
   return result;
+}
+
+export function describeAuthStatusProblem(
+  resolutionError: unknown,
+  state: PersonalTokenState,
+  projectConnected: boolean,
+): string | undefined {
+  if (resolutionError instanceof CredentialResolutionError) {
+    return describeUnusableCredential(state, { projectConnected });
+  }
+  if (resolutionError !== undefined) {
+    return resolutionError instanceof Error ? resolutionError.message : String(resolutionError);
+  }
+  return projectConnected ? undefined : describeUnusableCredential(state, { projectConnected: false });
 }
 
 /**
