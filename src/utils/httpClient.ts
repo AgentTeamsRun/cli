@@ -2,7 +2,10 @@ import { createRequire } from 'node:module';
 import axios from 'axios';
 import type { AxiosError, AxiosResponse, InternalAxiosRequestConfig } from 'axios';
 import { getActiveCredential } from '../auth/activeCredential.js';
+import { isApiOriginRequest } from './apiOrigin.js';
 import { getCommandContext } from './commandContext.js';
+import { readOrCreateMachineId } from './machineId.js';
+import { resolveProjectRootHash } from './projectRootHash.js';
 import { writeCache } from './updateCheck.js';
 
 const require = createRequire(import.meta.url);
@@ -66,10 +69,63 @@ const setRequestHeader = (config: InternalAxiosRequestConfig, name: string, valu
   (headers as unknown as Record<string, string>)[name] = value;
 };
 
+/**
+ * Session identity headers, resolved once per process.
+ *
+ * A personal access token proves *who* is calling but carries no agent identity, so a plan written
+ * through the CLI used to lose the tool axis that the same work keeps when a runner writes it.
+ * These two headers give the server enough to look the agent back up
+ * (`api/src/utils/resolveWriteAttribution.ts`): the machine the agent was registered on, and the
+ * project root it was registered at — hashed, never the plaintext path.
+ *
+ * Both are omitted rather than sent empty when they cannot be resolved: an absent header means
+ * "cannot narrow", while an empty one would match nothing and read like a real value. Resolution
+ * touches the filesystem, so it is memoized — a single command issues many requests.
+ *
+ * They are also scoped to AgentTeams API origins (`utils/apiOrigin.ts`). This interceptor sits on
+ * the global axios instance, which also carries the presigned attachment upload to object storage —
+ * a host that has no use for a device UUID or a hash of the user's working directory.
+ */
+let sessionIdentityHeaders: { machineId: string | null; projectRootHash: string | null } | null = null;
+
+const getSessionIdentityHeaders = (): { machineId: string | null; projectRootHash: string | null } => {
+  if (!sessionIdentityHeaders) {
+    let machineId: string | null = null;
+    let projectRootHash: string | null = null;
+
+    try {
+      machineId = readOrCreateMachineId();
+    } catch {
+      machineId = null;
+    }
+
+    try {
+      projectRootHash = resolveProjectRootHash();
+    } catch {
+      projectRootHash = null;
+    }
+
+    sessionIdentityHeaders = { machineId, projectRootHash };
+  }
+
+  return sessionIdentityHeaders;
+};
+
 axios.interceptors.request.use((config: InternalAxiosRequestConfig) => {
   setRequestHeader(config, 'X-AgentTeams-Client', 'cli');
   setRequestHeader(config, 'X-AgentTeams-Command', getCommandContext());
   setRequestHeader(config, 'X-AgentTeams-Version', pkg.version);
+
+  if (isApiOriginRequest(config)) {
+    const { machineId, projectRootHash } = getSessionIdentityHeaders();
+    if (machineId) {
+      setRequestHeader(config, 'X-AgentTeams-Machine-Id', machineId);
+    }
+    if (projectRootHash) {
+      setRequestHeader(config, 'X-AgentTeams-Project-Root-Hash', projectRootHash);
+    }
+  }
+
   return config;
 });
 

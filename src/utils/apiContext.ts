@@ -1,6 +1,7 @@
 import type { Config } from '../types/index.js';
+import { registerApiOrigin } from './apiOrigin.js';
 
-const CONFIG_OVERRIDE_KEYS = ['apiKey', 'apiUrl', 'teamId', 'projectId'] as const;
+const CONFIG_OVERRIDE_KEYS = ['apiKey', 'apiUrl', 'projectId'] as const;
 
 /**
  * Collect config overrides passed as CLI options.
@@ -36,6 +37,10 @@ export function buildAuthHeaders(apiKey: string): Record<string, string> {
 
 export function resolveApiContext(config: Config): { apiUrl: string; headers: Record<string, string> } {
   const apiUrl = config.apiUrl.endsWith('/') ? config.apiUrl.slice(0, -1) : config.apiUrl;
+  // This is where the CLI settles on "the API" for this invocation — env, config file, or an
+  // --api-url override alike. The HTTP layer scopes session identity headers to what lands here,
+  // so a custom deployment keeps the tool axis without leaking it to presigned upload hosts.
+  registerApiOrigin(apiUrl);
   const headers = {
     ...buildAuthHeaders(config.apiKey),
     'Content-Type': 'application/json',

@@ -41,12 +41,8 @@ export async function executePostMortemCommand(
       if (options.search) params.search = options.search;
 
       const page = toPositiveInteger(options.page);
-      const limitVal = toPositiveInteger(options.limit);
       const pageSizeVal = toPositiveInteger(options.pageSize);
-      if (limitVal !== undefined && pageSizeVal !== undefined) {
-        process.stderr.write('[warn] --limit and --page-size both specified; --limit takes precedence.\n');
-      }
-      const pageSize = limitVal ?? pageSizeVal;
+      const pageSize = pageSizeVal;
       if (page !== undefined) params.page = page;
       if (pageSize !== undefined) params.pageSize = pageSize;
 

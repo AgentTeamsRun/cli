@@ -171,7 +171,6 @@ describe('mcp credential resolution', () => {
   it.each([
     ['apiKey', { apiKey: '${AGENTTEAMS_API_KEY}' }, 'AGENTTEAMS_API_KEY'],
     ['projectId', { projectId: '${AGENTTEAMS_PROJECT_ID}' }, 'AGENTTEAMS_PROJECT_ID'],
-    ['teamId', { teamId: '${AGENTTEAMS_TEAM_ID}' }, 'AGENTTEAMS_TEAM_ID'],
   ])('rejects an unresolved ${...} placeholder in %s before serving', async (field, override, envHint) => {
     jest.resetModules();
     jest.unstable_mockModule('../src/utils/config.js', () => ({

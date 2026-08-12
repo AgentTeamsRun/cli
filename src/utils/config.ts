@@ -317,10 +317,17 @@ export function planCredential(options?: Partial<Config>): CredentialPlan {
  *
  * The distinction is worth carrying: telling someone to check a network that is
  * fine, or to re-login with a credential that is valid, costs them the time it
- * takes to rule those out. Lock contention and an unusable lock both clear on a
- * retry, so neither should read as "your login is broken".
+ * takes to rule those out. The same applies when the current directory has no
+ * project binding: point at the missing binding only when the login itself is
+ * usable. A concrete refresh failure still has to win because binding a project
+ * cannot repair a revoked login, a lock failure, or an unreachable server.
+ * Lock contention and an unusable lock both clear on a retry, so neither should
+ * read as "your login is broken".
  */
-export function describeUnusableCredential(state: PersonalTokenState): string {
+export function describeUnusableCredential(
+  state: PersonalTokenState,
+  context: { projectConnected?: boolean } = {},
+): string {
   if (state.reconnectRequired) {
     return "Your AgentTeams login was revoked or expired. Run 'agentteams auth login' to sign in again.";
   }
@@ -330,8 +337,12 @@ export function describeUnusableCredential(state: PersonalTokenState): string {
       return 'Another agentteams process is refreshing this login and did not finish in time. Your credential is intact — retry the command.';
     case 'LOCK_UNAVAILABLE':
       return 'Could not maintain the lock that keeps concurrent logins from clashing (check free space and permissions on ~/.agentteams/locks). Your credential is intact — retry the command.';
-    default:
+    case 'NETWORK':
       return "Could not refresh your AgentTeams login. Check your network connection, then retry or run 'agentteams auth login'.";
+    default:
+      return context.projectConnected === false
+        ? "No AgentTeams project is connected to this directory. Run the command from a project directory, or run 'agentteams init' here to connect one."
+        : "Could not refresh your AgentTeams login. Check your network connection, then retry or run 'agentteams auth login'.";
   }
 }
 

@@ -20,9 +20,9 @@ export async function executeTaskCommand(
   const taskId = stripEntityIdPrefix(toNonEmptyString(options.taskId));
   if (!taskId) throw new Error('--task-id is required for task commands');
 
-  // get/show(단건 포커스)는 bare agentteams_tsk_<id> 핸드오프를 지원하므로 --plan-id가 선택이다.
+  // get(단건 포커스)는 bare agentteams_tsk_<id> 핸드오프를 지원하므로 --plan-id가 선택이다.
   // 있으면 부모 일치로 좁힌다. 실행 뮤테이션(start/finish)은 부모 planId가 필수다.
-  if (action === 'get' || action === 'show') {
+  if (action === 'get') {
     return getPlanTask(apiUrl, projectId, headers, taskId, planId);
   }
 

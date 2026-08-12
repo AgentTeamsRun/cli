@@ -4,12 +4,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   CredentialResolutionError,
+  describeUnusableCredential,
   loadConfigWithCredential,
   resetLegacyApiKeyWarningForTest,
   resolveCredential,
   type ResolveCredentialDeps,
 } from '../src/utils/config.js';
 import { PersonalTokenClient } from '../src/auth/personalTokenClient.js';
+import type { PersonalTokenState } from '../src/auth/personalTokenClient.js';
 import {
   getActiveCredential,
   getInjectedPersonalTokenRefreshBlockReason,
@@ -87,6 +89,18 @@ function clientDeps(
 }
 
 const workingFetch = (async () => jsonResponse(200, tokenPayload)) as unknown as typeof fetch;
+
+const unusableCredentialState = (overrides: Partial<PersonalTokenState> = {}): PersonalTokenState => ({
+  connected: true,
+  persisted: true,
+  storeBackend: 'macos-keychain',
+  storeReason: 'OK',
+  identity: null,
+  expiresAt: null,
+  reconnectRequired: false,
+  refreshFailure: 'NETWORK',
+  ...overrides,
+});
 
 beforeEach(() => {
   originalCwd = process.cwd();
@@ -288,6 +302,31 @@ describe('resolveCredential and the legacy key_ path', () => {
 });
 
 describe('resolveCredential failure reporting', () => {
+  it('points an unconnected directory at the project binding when the login is usable', () => {
+    const message = describeUnusableCredential(unusableCredentialState({ refreshFailure: null }), {
+      projectConnected: false,
+    });
+
+    expect(message.toLowerCase()).not.toContain('network');
+    expect(message).toContain('project directory');
+    expect(message).toContain('agentteams init');
+  });
+
+  it('preserves the existing revoked and lock failure messages byte-for-byte', () => {
+    expect(describeUnusableCredential(unusableCredentialState({ reconnectRequired: true }))).toBe(
+      "Your AgentTeams login was revoked or expired. Run 'agentteams auth login' to sign in again.",
+    );
+    expect(describeUnusableCredential(unusableCredentialState({ refreshFailure: 'LOCK_CONTENTION' }))).toBe(
+      'Another agentteams process is refreshing this login and did not finish in time. Your credential is intact — retry the command.',
+    );
+    expect(describeUnusableCredential(unusableCredentialState({ refreshFailure: 'LOCK_UNAVAILABLE' }))).toBe(
+      'Could not maintain the lock that keeps concurrent logins from clashing (check free space and permissions on ~/.agentteams/locks). Your credential is intact — retry the command.',
+    );
+    expect(describeUnusableCredential(unusableCredentialState())).toBe(
+      "Could not refresh your AgentTeams login. Check your network connection, then retry or run 'agentteams auth login'.",
+    );
+  });
+
   it('tells the user to log in again when the server revoked the refresh token', async () => {
     createProject({ teamId: 't', projectId: 'p', authMode: 'personal-token' });
     const deps = clientDeps(tokenStore('atr_stored'), (async () =>

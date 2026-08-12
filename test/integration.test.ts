@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, beforeAll, afterEach, afterAll, jest } from '@jest/globals';
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import axios, { AxiosError } from 'axios';
@@ -409,7 +409,6 @@ describe('CLI Integration Tests', () => {
       });
       await executeCommand('plan', 'list', {});
       await executeCommand('plan', 'get', { id: 'plan-1' });
-      await executeCommand('plan', 'show', { id: 'plan-1' });
       await executeCommand('plan', 'update', { id: 'plan-1', status: 'IN_PROGRESS' });
       await executeCommand('plan', 'delete', { id: 'plan-1' });
 
@@ -654,55 +653,8 @@ describe('CLI Integration Tests', () => {
       });
     });
 
-    it('plan show with include-deps: should return dependencies in JSON data', async () => {
-      axiosGetSpy.mockImplementation(async (url: string) => {
-        if (url === `${API_URL}/api/platform/guides/hash`) {
-          return { data: { data: { hash: 'platform-guides-hash-1' } } } as any;
-        }
-        if (url === `${API_URL}/api/projects/${PROJECT_ID}/conventions`) {
-          return { data: { data: [] } } as any;
-        }
-        if (url === `${API_URL}/api/projects/${PROJECT_ID}/plans/plan-1`) {
-          return {
-            data: {
-              data: {
-                id: 'plan-1',
-                title: 'Main Plan',
-                status: 'IN_PROGRESS',
-              },
-            },
-          } as any;
-        }
-        if (url === `${API_URL}/api/projects/${PROJECT_ID}/plans/plan-1/dependencies`) {
-          return { data: { data: { blocking: [], dependents: [] } } } as any;
-        }
-
-        throw new Error(`Unhandled axios.get URL in test: ${url}`);
-      });
-
-      const result = await executeCommand('plan', 'show', {
-        id: 'plan-1',
-        includeDeps: true,
-        format: 'json',
-      });
-
-      expect(axiosGetSpy).toHaveBeenCalledWith(`${API_URL}/api/projects/${PROJECT_ID}/plans/plan-1`, {
-        headers: authHeaders(),
-      });
-      expect(axiosGetSpy).toHaveBeenCalledWith(`${API_URL}/api/projects/${PROJECT_ID}/plans/plan-1/dependencies`, {
-        headers: authHeaders(),
-      });
-      expect(result).toEqual({
-        data: {
-          id: 'plan-1',
-          title: 'Main Plan',
-          status: 'IN_PROGRESS',
-          dependencies: {
-            blocking: [],
-            dependents: [],
-          },
-        },
-      });
+    it('plan show alias를 거부한다', async () => {
+      await expect(executeCommand('plan', 'show', { id: 'plan-1' })).rejects.toThrow('Unknown action: show');
     });
 
     it('plan status: should call GET /plans/:id/status', async () => {
@@ -2841,9 +2793,18 @@ describe('CLI Integration Tests', () => {
     });
 
     it('CLI definitions: should include new options and remove legacy options', () => {
-      const cliIndex = readFileSync(join(process.cwd(), 'src/index.ts'), 'utf-8');
-      const attachmentDefinition = cliIndex.match(/\.command\('attachment'\)[\s\S]*?\.action/)?.[0];
-      const feedbackDefinition = cliIndex.match(/\.command\('feedback'\)[\s\S]*?\.action/)?.[0];
+      const programDirectory = join(process.cwd(), 'src/program');
+      const cliIndex = readdirSync(programDirectory)
+        .filter((file) => file.endsWith('.ts'))
+        .map((file) => readFileSync(join(programDirectory, file), 'utf-8'))
+        .concat(
+          readdirSync(join(programDirectory, 'options'))
+            .filter((file) => file.endsWith('.ts'))
+            .map((file) => readFileSync(join(programDirectory, 'options', file), 'utf-8')),
+        )
+        .join('\n');
+      const attachmentDefinition = readFileSync(join(programDirectory, 'attachment.ts'), 'utf-8');
+      const feedbackDefinition = readFileSync(join(programDirectory, 'feedback.ts'), 'utf-8');
 
       expect(cliIndex).toContain('--task <text>');
       expect(cliIndex).toContain('--type <type>');
@@ -2865,8 +2826,9 @@ describe('CLI Integration Tests', () => {
       expect(cliIndex).toContain('--assigned-to <id>');
       expect(cliIndex).toContain('--page <number>');
       expect(cliIndex).toContain('--page-size <number>');
-      expect(cliIndex).toContain('Co-action visibility (PRIVATE, PROJECT; also filters list)');
-      expect(cliIndex).toContain('Action to perform (list, get, show, create');
+      expect(cliIndex).toContain('Co-action visibility (PRIVATE, PROJECT)');
+      expect(cliIndex).toContain(".command('code-review')");
+      expect(cliIndex).not.toContain("case 'show'");
       expect(cliIndex).toContain('--template <name>');
       expect(cliIndex).toContain('--include-deps');
       expect(cliIndex).not.toContain('Action to perform (download)');
@@ -2879,9 +2841,7 @@ describe('CLI Integration Tests', () => {
       expect(cliIndex).not.toContain('--depends-on <id>');
       // 에이전트 배정은 API key 인증 정보로 추론하므로 플랜 명령에서 --agent를 노출하지 않는다.
       expect(cliIndex).not.toContain('--agent <agent>');
-      expect(cliIndex).toContain(
-        'Plan status for list/update/set-status; ignored by create because new plans start as BACKLOG',
-      );
+      expect(cliIndex).toContain('Ignored because new plans start as BACKLOG');
       expect(attachmentDefinition).toBeDefined();
       expect(feedbackDefinition).toBeDefined();
       expect(attachmentDefinition).not.toContain(".option('--format <format>', 'Output format (json)', 'json')");
@@ -3033,7 +2993,7 @@ describe('CLI Integration Tests', () => {
 
       await executeCommand('document', 'archive', { id: 'doc-1' });
       await executeCommand('document', 'unarchive', { id: 'doc-1' });
-      const revisions = await executeCommand('document', 'revisions', { id: 'doc-1', limit: 5 });
+      const revisions = await executeCommand('document', 'revisions', { id: 'doc-1', pageSize: 5 });
       const revision = await executeCommand('document', 'revision-get', { id: 'doc-1', revisionId: 'rev-1' });
       await executeCommand('document', 'revision-restore', { id: 'doc-1', revisionId: 'rev-1' });
 

@@ -34,7 +34,6 @@ type DocumentCommandOptions = {
   commentId?: string;
   content?: string;
   order?: string;
-  limit?: string | number;
   page?: string | number;
   pageSize?: string | number;
   // 쓰기 계약 필드(전부 선택). 지정하지 않으면 요청에 실리지 않아 기존 호출과 동일하다.
@@ -174,7 +173,7 @@ const normalizeOrder = (value?: string) => normalizeEnumValue(value, ORDER_VALUE
 const paginationParams = (options: DocumentCommandOptions) => {
   const params: Record<string, string | number> = {};
   const page = toPositiveInteger(options.page);
-  const pageSize = toPositiveInteger(options.pageSize ?? options.limit);
+  const pageSize = toPositiveInteger(options.pageSize);
   if (page) params.page = page;
   if (pageSize) params.pageSize = pageSize;
   return params;

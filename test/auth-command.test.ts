@@ -3,12 +3,18 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { buildPersonalTokenAuthorizeUrl, executeAuthCommand, resolveAuthApiUrl } from '../src/commands/auth.js';
+import {
+  buildPersonalTokenAuthorizeUrl,
+  describeAuthStatusProblem,
+  executeAuthCommand,
+  resolveAuthApiUrl,
+} from '../src/commands/auth.js';
 import { resetCredentialStoreForTests } from '../src/auth/credentialStore.js';
 import { resetPersonalTokenClientsForTests } from '../src/auth/personalTokenClient.js';
 import { createPkcePair, startAuthorizationCodeServer } from '../src/utils/authServer.js';
-import { setProjectAuthMode } from '../src/utils/config.js';
+import { CredentialResolutionError, setProjectAuthMode } from '../src/utils/config.js';
 import { PersonalTokenClient, PersonalTokenError } from '../src/auth/personalTokenClient.js';
+import type { PersonalTokenState } from '../src/auth/personalTokenClient.js';
 import type { PersonalTokenStore } from '../src/auth/personalTokenStore.js';
 
 const tempDirs: string[] = [];
@@ -59,6 +65,18 @@ const tokenPayload = {
     identity: { memberId: 'm-1', email: 'dev@example.com', nickname: 'dev' },
   },
 };
+
+const authStatusState = (overrides: Partial<PersonalTokenState> = {}): PersonalTokenState => ({
+  connected: true,
+  persisted: true,
+  storeBackend: 'macos-keychain',
+  storeReason: 'OK',
+  identity: { memberId: 'm-1', email: 'dev@example.com', nickname: 'dev' },
+  expiresAt: Date.now() + 60_000,
+  reconnectRequired: false,
+  refreshFailure: null,
+  ...overrides,
+});
 
 beforeEach(() => {
   originalCwd = process.cwd();
@@ -418,5 +436,28 @@ describe('resolveAuthApiUrl', () => {
     delete process.env.AGENTTEAMS_API_URL;
 
     expect(resolveAuthApiUrl()).toBe('https://api.agentteams.run');
+  });
+});
+
+describe('auth status problem priority outside a project', () => {
+  const resolutionError = new CredentialResolutionError('credential unavailable');
+
+  it.each([
+    ['revoked login', authStatusState({ reconnectRequired: true }), 'auth login'],
+    ['lock contention', authStatusState({ refreshFailure: 'LOCK_CONTENTION' }), 'Another agentteams process'],
+    ['lock unavailable', authStatusState({ refreshFailure: 'LOCK_UNAVAILABLE' }), 'free space and permissions'],
+    ['network failure', authStatusState({ refreshFailure: 'NETWORK' }), 'network connection'],
+  ])('keeps the concrete %s guidance', (_label, state, expected) => {
+    const problem = describeAuthStatusProblem(resolutionError, state, false);
+
+    expect(problem).toContain(expected);
+    expect(problem).not.toContain('agentteams init');
+  });
+
+  it('uses project binding guidance when the login is otherwise usable', () => {
+    const problem = describeAuthStatusProblem(undefined, authStatusState(), false);
+
+    expect(problem).toContain('project directory');
+    expect(problem).toContain('agentteams init');
   });
 });
