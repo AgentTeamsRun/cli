@@ -23,3 +23,69 @@ export const AGENT_NAME_ENV = 'AGENTTEAMS_AGENT_NAME';
 export function resolveSessionAgentConfigId(env: NodeJS.ProcessEnv = process.env): string | undefined {
   return toNonEmptyString(env[AGENT_NAME_ENV]);
 }
+
+/**
+ * Execution snapshot variables the daemon exports for every session it spawns
+ * (`daemon/src/runners/session-env.ts`). They describe how *this* run is executing —
+ * which engine, which model, whether fast mode is on — as opposed to who it runs as.
+ *
+ * The daemon omits a variable entirely when it has no value, so an absent variable
+ * means "unknown", never "empty" or "false-by-default".
+ */
+export const RUNNER_TYPE_ENV = 'AGENTTEAMS_RUNNER_TYPE';
+export const MODEL_ENV = 'AGENTTEAMS_MODEL';
+export const FAST_MODE_ENV = 'AGENTTEAMS_FAST_MODE';
+
+export function resolveSessionRunnerType(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  return toNonEmptyString(env[RUNNER_TYPE_ENV]);
+}
+
+export function resolveSessionModel(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  return toNonEmptyString(env[MODEL_ENV]);
+}
+
+/**
+ * Fast mode is a two-state boolean flag on the CLI (`--fast`), not a tri-state, so an
+ * absent variable simply reads as off. The daemon only exports it when fast mode is on.
+ */
+export function resolveSessionFastMode(env: NodeJS.ProcessEnv = process.env): boolean {
+  return toNonEmptyString(env[FAST_MODE_ENV]) === 'true';
+}
+
+export interface ExecutionSnapshotOptions {
+  runnerType?: unknown;
+  model?: unknown;
+  fast?: unknown;
+}
+
+export interface ExecutionSnapshot {
+  runnerType: string | undefined;
+  model: string | undefined;
+  fastMode: boolean;
+}
+
+/**
+ * The execution snapshot for this run: an explicit argument always wins, and the session
+ * environment fills the gap when the daemon spawned us.
+ *
+ * A resolved value can still be `undefined` — outside a daemon session nothing can tell us
+ * the model. Callers that require the snapshot must keep failing in that case; this resolver
+ * narrows *when* they fail, it does not relax the requirement.
+ */
+export function resolveExecutionSnapshot(
+  options: ExecutionSnapshotOptions,
+  env: NodeJS.ProcessEnv = process.env,
+): ExecutionSnapshot {
+  return {
+    runnerType: toNonEmptyString(options.runnerType) ?? resolveSessionRunnerType(env),
+    model: toNonEmptyString(options.model) ?? resolveSessionModel(env),
+    fastMode: options.fast === true || resolveSessionFastMode(env),
+  };
+}
+
+/**
+ * Appended to the existing "required" errors so the message names the other way out. The
+ * previous wording implied passing the flags was the only path, which is wrong inside a
+ * runner session and sends agents looking for values the session already has.
+ */
+export const EXECUTION_SNAPSHOT_HINT = ' In a runner session these are filled in automatically from the environment.';

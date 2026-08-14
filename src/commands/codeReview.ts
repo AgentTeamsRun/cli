@@ -16,6 +16,7 @@ import {
 } from '../api/codeReview.js';
 import { getGitRemoteOriginUrl } from '../utils/git.js';
 import { toNonEmptyString, toPositiveInteger } from '../utils/parsers.js';
+import { EXECUTION_SNAPSHOT_HINT, resolveExecutionSnapshot } from '../utils/agentIdentity.js';
 import { withSpinner } from '../utils/spinner.js';
 
 const parseCsv = (value: unknown): string[] => {
@@ -123,10 +124,9 @@ export async function executeCodeReviewCommand(
     case 'create': {
       const title = toNonEmptyString(options.title);
       if (!title) throw new Error('--title is required for code-review create');
-      const runnerType = toNonEmptyString(options.runnerType);
-      const model = toNonEmptyString(options.model);
+      const { runnerType, model } = resolveExecutionSnapshot(options);
       if (!runnerType || !model) {
-        throw new Error('--runner-type and --model are required for code-review create');
+        throw new Error('--runner-type and --model are required for code-review create' + EXECUTION_SNAPSHOT_HINT);
       }
 
       const targetType = toNonEmptyString(options.targetType) ?? 'LOCAL_DIFF';

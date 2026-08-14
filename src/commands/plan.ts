@@ -18,7 +18,11 @@ import {
   pruneStaleCacheFiles,
 } from '../utils/parsers.js';
 import { validatePlanPreviewHtmlSafety } from '../utils/planPreviewHtmlSafety.js';
-import { resolveSessionAgentConfigId } from '../utils/agentIdentity.js';
+import {
+  EXECUTION_SNAPSHOT_HINT,
+  resolveExecutionSnapshot,
+  resolveSessionAgentConfigId,
+} from '../utils/agentIdentity.js';
 import {
   createPlan,
   deletePlan,
@@ -646,10 +650,14 @@ export async function executePlanCommand(
 
       const includeCompletionReport = typeof options.reportFile === 'string' && options.reportFile.trim().length > 0;
 
+      const finishSnapshot = resolveExecutionSnapshot(options);
+
       // 완료보고서를 첨부하면 runnerType/model 스냅샷이 보고서에 저장되므로,
       // null로 남지 않도록 보고서 첨부 시점에 강제한다. (보고서 없는 finish는 제외)
-      if (includeCompletionReport && (!options.runnerType || !options.model)) {
-        throw new Error('--runner-type and --model are required when attaching a completion report.');
+      if (includeCompletionReport && (!finishSnapshot.runnerType || !finishSnapshot.model)) {
+        throw new Error(
+          '--runner-type and --model are required when attaching a completion report.' + EXECUTION_SNAPSHOT_HINT,
+        );
       }
 
       const body: {
@@ -663,13 +671,13 @@ export async function executePlanCommand(
       if (options.task) {
         body.task = options.task;
       }
-      if (options.runnerType) {
-        body.runnerType = options.runnerType;
+      if (finishSnapshot.runnerType) {
+        body.runnerType = finishSnapshot.runnerType;
       }
-      if (options.model) {
-        body.model = options.model;
+      if (finishSnapshot.model) {
+        body.model = finishSnapshot.model;
       }
-      if (options.fast === true) {
+      if (finishSnapshot.fastMode) {
         body.fastMode = true;
       }
 
@@ -707,8 +715,9 @@ export async function executePlanCommand(
     }
     case 'create': {
       if (!options.title) throw new Error('--title is required for plan create');
-      if (!options.runnerType || !options.model) {
-        throw new Error('--runner-type and --model are required for plan create.');
+      const createSnapshot = resolveExecutionSnapshot(options);
+      if (!createSnapshot.runnerType || !createSnapshot.model) {
+        throw new Error('--runner-type and --model are required for plan create.' + EXECUTION_SNAPSHOT_HINT);
       }
       if (!options.complexity) {
         throw new Error('--complexity is required for plan create. Choose one of MINIMAL, STANDARD, FULL.');
@@ -776,9 +785,9 @@ export async function executePlanCommand(
             priority: options.priority ?? 'MEDIUM',
             ...(repositoryRemoteUrl ? { repositoryRemoteUrl } : {}),
             status: 'BACKLOG',
-            runnerType: options.runnerType,
-            model: options.model,
-            fastMode: options.fast === true,
+            runnerType: createSnapshot.runnerType,
+            model: createSnapshot.model,
+            fastMode: createSnapshot.fastMode,
             kind: 'NORMAL',
           }),
         'Plan created',
@@ -1060,11 +1069,12 @@ export async function executePlanCommand(
     }
     case 'quick': {
       if (!options.title) throw new Error('--title is required for plan quick');
-      if (!options.runnerType || !options.model) {
-        throw new Error('--runner-type and --model are required for plan quick.');
+      const quickSnapshot = resolveExecutionSnapshot(options);
+      if (!quickSnapshot.runnerType || !quickSnapshot.model) {
+        throw new Error('--runner-type and --model are required for plan quick.' + EXECUTION_SNAPSHOT_HINT);
       }
-      const runnerType = String(options.runnerType);
-      const model = String(options.model);
+      const runnerType = quickSnapshot.runnerType;
+      const model = quickSnapshot.model;
 
       // Resolve plan content: --content > --file > template fallback
       let planContent: string | undefined = undefined;
@@ -1129,7 +1139,7 @@ export async function executePlanCommand(
         ...(quickAssignee ? { assignedTo: quickAssignee } : {}),
         runnerType,
         model,
-        fastMode: options.fast === true,
+        fastMode: quickSnapshot.fastMode,
       };
 
       if (includeCompletionReport) {

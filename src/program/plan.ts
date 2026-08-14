@@ -2,6 +2,7 @@ import { Command, CONVENTION_HINT, executeCommand, handleError, printCommandResu
 import { addCompletionReportMetricsOptions, addGitToggleOption } from './options/completionReport.js';
 import { addOutputOptions } from './options/output.js';
 import { addPaginationOptions } from './options/pagination.js';
+import { RUNNER_TYPE_OPTION_DESCRIPTION } from '../utils/runnerTypes.js';
 
 /**
  * 액션 인벤토리: list/get/create/update/delete/download/cleanup/start/finish/quick/status/set-status/upload-html/link-issue/unlink-issue/list-issues.
@@ -73,7 +74,7 @@ export function registerPlanCommand(program: Command): void {
       .option('--id <id>', 'Plan ID')
       .option('--assigned-to <id>', 'Agent config ID or name')
       .option('--task <text>', 'Task summary')
-      .option('--runner-type <type>', 'Runner type snapshot: CLAUDE_CODE, CODEX, ANTIGRAVITY, AMP, OPENCODE')
+      .option('--runner-type <type>', RUNNER_TYPE_OPTION_DESCRIPTION)
       .option('--model <model>', 'Model ID snapshot')
       .option('--fast', 'Request fast mode for the selected model when supported', false),
   );
@@ -94,7 +95,7 @@ export function registerPlanCommand(program: Command): void {
       .option('--review-recommendation <value>', 'Code review recommendation: REQUIRED or NOT_NEEDED')
       .option('--review-reason <text>', 'One-line reason for the review recommendation')
       .option('--repository-remote-url <url>', 'Repository remote origin URL (defaults to git origin)')
-      .option('--runner-type <type>', 'Runner type snapshot: CLAUDE_CODE, CODEX, ANTIGRAVITY, AMP, OPENCODE')
+      .option('--runner-type <type>', RUNNER_TYPE_OPTION_DESCRIPTION)
       .option('--model <model>', 'Model ID snapshot')
       .option('--fast', 'Request fast mode for the selected model when supported', false),
   );
@@ -119,7 +120,7 @@ export function registerPlanCommand(program: Command): void {
       .option('--complexity <level>', 'Plan complexity (MINIMAL, STANDARD, FULL; required)')
       .option('--priority <priority>', 'Plan priority (LOW, MEDIUM, HIGH)')
       .option('--repository-remote-url <url>', 'Repository remote origin URL (defaults to git origin)')
-      .option('--runner-type <type>', 'Runner type snapshot: CLAUDE_CODE, CODEX, ANTIGRAVITY, AMP, OPENCODE')
+      .option('--runner-type <type>', RUNNER_TYPE_OPTION_DESCRIPTION)
       .option('--model <model>', 'Model ID snapshot')
       .option('--fast', 'Request fast mode for the selected model when supported', false),
   );
@@ -174,7 +175,7 @@ export function registerPlanCommand(program: Command): void {
       .option('--quality-score <n>', 'Quality score 0-100')
       .option('--review-recommendation <value>', 'Code review recommendation: REQUIRED or NOT_NEEDED')
       .option('--review-reason <text>', 'One-line reason for the review recommendation')
-      .option('--runner-type <type>', 'Runner type snapshot: CLAUDE_CODE, CODEX, ANTIGRAVITY, AMP, OPENCODE')
+      .option('--runner-type <type>', RUNNER_TYPE_OPTION_DESCRIPTION)
       .option('--model <model>', 'Model ID snapshot')
       .option('--fast', 'Request fast mode for the selected model when supported', false),
   );

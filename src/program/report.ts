@@ -5,6 +5,7 @@ import {
 } from './options/completionReport.js';
 import { addPaginationOptions } from './options/pagination.js';
 import { addJsonResourceLeaf } from './options/resource.js';
+import { RUNNER_TYPE_OPTION_DESCRIPTION } from '../utils/runnerTypes.js';
 
 /** 액션 인벤토리: list/get/create/update/dismiss-review/delete/download. */
 export function registerReportCommand(program: Command): void {
@@ -32,7 +33,7 @@ export function registerReportCommand(program: Command): void {
       .option('--review-recommendation <value>', 'Code review recommendation: REQUIRED or NOT_NEEDED')
       .option('--review-reason <text>', 'One-line reason for the review recommendation')
       .option('--repository-remote-url <url>', 'Repository remote origin URL (defaults to git origin)')
-      .option('--runner-type <type>', 'Runner type snapshot')
+      .option('--runner-type <type>', RUNNER_TYPE_OPTION_DESCRIPTION)
       .option('--model <model>', 'Model ID snapshot'),
   );
   addLeaf('update', 'Update a completion report', (command) =>
