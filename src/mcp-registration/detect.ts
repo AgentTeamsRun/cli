@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { delimiter, join } from 'node:path';
 import { MCP_CLIENTS } from './clients.js';
@@ -17,6 +18,19 @@ export interface DetectionDependencies {
   fileExists?: (path: string) => boolean;
   /** Windows resolves executables through PATHEXT; the default mirrors that. */
   executableSuffixes?: string[];
+  probeExecutable?: (executablePath: string, args: string[]) => string | null;
+}
+
+function probeExecutable(executablePath: string, args: string[]): string | null {
+  const result = spawnSync(executablePath, args, {
+    encoding: 'utf8',
+    shell: false,
+    windowsHide: true,
+    input: '',
+    timeout: 5_000,
+  });
+  if (result.error) return null;
+  return `${result.stdout ?? ''}\n${result.stderr ?? ''}`;
 }
 
 function defaultSuffixes(platform: string): string[] {
@@ -31,12 +45,20 @@ function resolveExecutable(
   const suffixes = dependencies.executableSuffixes ?? defaultSuffixes(process.platform);
   const pathDirs = (context.env.PATH ?? '').split(delimiter).filter((entry) => entry.length > 0);
   const extraDirs = client.extraBinDirs ? client.extraBinDirs(context) : [];
+  const directories = client.executableIdentity?.preferExtraBinDirs
+    ? [...extraDirs, ...pathDirs]
+    : [...pathDirs, ...extraDirs];
+  const runProbe = dependencies.probeExecutable ?? probeExecutable;
 
-  for (const directory of [...pathDirs, ...extraDirs]) {
+  for (const directory of directories) {
     for (const executable of client.executables) {
       for (const suffix of suffixes) {
         const candidate = join(directory, `${executable}${suffix}`);
-        if (fileExists(candidate)) return candidate;
+        if (!fileExists(candidate)) continue;
+        const identity = client.executableIdentity;
+        if (!identity) return candidate;
+        const output = runProbe(candidate, identity.args);
+        if (output?.includes(identity.marker)) return candidate;
       }
     }
   }

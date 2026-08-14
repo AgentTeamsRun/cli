@@ -19,6 +19,7 @@ export const RUNNER_TYPE_VALUES = [
   'CURSOR_CLI',
   'KIMI_CLI',
   'KIRO_CLI',
+  'GROK_BUILD',
 ] as const;
 
 /**

@@ -3,7 +3,7 @@ import { getConfigurationNotFoundMessage, loadConfigIdentity } from '../utils/co
 import { buildConfigOverrides } from '../utils/apiContext.js';
 import { parseToolProfile } from '../mcp/toolProfile.js';
 import { findClient, listClientIds } from './clients.js';
-import type { DetectionDependencies } from './detect.js';
+import { detectClients, type DetectionDependencies } from './detect.js';
 import { buildBatchPlan, installClient, resolveInstallExitCode, runBatchInstall, type BatchPlan } from './install.js';
 import { renderConfigSnippet, renderVendorCommandLine } from './render.js';
 import { buildServerSpec, MCP_SERVER_NAME, type McpCredentials } from './serverSpec.js';
@@ -262,6 +262,8 @@ export function runMcpInstallCommand(
     const client = findClient(parseClientId(options.client));
     if (!client) throw new Error(`Unknown client: ${options.client}`);
 
+    const detection = detectClients({ context, ...(dependencies?.detectionDependencies ?? {}) });
+    const executablePath = detection.find((signal) => signal.clientId === client.id)?.executablePath ?? null;
     const result = installClient({
       client,
       scope,
@@ -271,6 +273,7 @@ export function runMcpInstallCommand(
       toolProfile,
       explicitToolProfile,
       vendorRunner: dependencies?.vendorRunner,
+      executablePath,
     });
 
     const lines = [

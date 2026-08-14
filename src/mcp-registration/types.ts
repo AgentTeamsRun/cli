@@ -11,6 +11,7 @@ export const MCP_CLIENT_IDS = [
   'kimi-cli',
   'antigravity',
   'kiro-cli',
+  'grok-build',
 ] as const;
 
 export type McpClientId = (typeof MCP_CLIENT_IDS)[number];
@@ -111,6 +112,13 @@ export interface McpClientDefinition {
   executables: string[];
   /** Extra directories to probe when the client installs outside PATH (e.g. Kimi). */
   extraBinDirs?: (context: McpPathContext) => string[];
+  /** Optional executable identity contract for command names shared with unrelated tools. */
+  executableIdentity?: {
+    args: string[];
+    marker: string;
+    /** Search managed install directories before PATH, while still checking every candidate. */
+    preferExtraBinDirs?: boolean;
+  };
   /** Files/directories whose presence proves the client has been configured on this machine. */
   configSignals: (context: McpPathContext) => string[];
   /** Official documentation for the config contract encoded above. */

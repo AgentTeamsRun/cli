@@ -37,6 +37,15 @@ function kiroHome(context: McpPathContext): string {
   return override && override.length > 0 ? override : join(context.homeDir, '.kiro');
 }
 
+function grokHome(context: McpPathContext): string {
+  // Verified 1.0.3: `GROK_HOME=<dir> grok mcp add --scope user` reports
+  // `File modified: $GROK_HOME/config.toml` and writes there, and `grok mcp list --json`
+  // under the same override reads it back — so writing to `~/.grok` under an override
+  // would register into a file Grok never reads.
+  const override = context.env.GROK_HOME;
+  return override && override.length > 0 ? override : join(context.homeDir, '.grok');
+}
+
 function codexHome(context: McpPathContext): string {
   const override = context.env.CODEX_HOME;
   return override && override.length > 0 ? override : join(context.homeDir, '.codex');
@@ -423,6 +432,90 @@ export const MCP_CLIENTS: McpClientDefinition[] = [
         containerKey: 'mcpServers',
         entryShape: 'plain',
         strategy: 'jsonMerge',
+      },
+    },
+  },
+  {
+    id: 'grok-build',
+    runnerType: 'GROK_BUILD',
+    label: 'Grok Build',
+    executables: ['grok'],
+    // Verified 1.0.3 on macOS: the installer puts the binary under
+    // `$GROK_HOME/bin` (default `~/.grok/bin`) and links it into `~/.local/bin`.
+    // Only home-relative paths belong here so detection follows the caller's context.
+    //
+    // An unrelated npm package (`@vibe-kit/grok-cli`) installs the same binary name.
+    // Detection therefore checks every candidate's official help marker, and installation
+    // repeats the check immediately before applying the vendor command.
+    extraBinDirs: (context) => [join(grokHome(context), 'bin'), join(context.homeDir, '.local', 'bin')],
+    executableIdentity: { args: ['--help'], marker: 'Grok Build TUI', preferExtraBinDirs: true },
+    configSignals: (context) => [
+      join(grokHome(context), 'config.toml'),
+      join(grokHome(context), 'auth.json'),
+      grokHome(context),
+    ],
+    docsUrl: 'https://docs.x.ai/build/cli/mcp-servers',
+    verifiedAt: '2026-08-14',
+    nativeDiscovery: {
+      status: 'unknown',
+      verifiedAt: '2026-08-14',
+      evidenceUrl: 'https://docs.x.ai/build/cli/mcp-servers',
+      version: '1.0.3',
+      reason: 'The official Grok Build MCP guide does not document host-side progressive tool definition loading.',
+    },
+    scopes: {
+      // Verified 1.0.3: the config is TOML (`[mcp_servers.<name>]` with `command`,
+      // `args`, `enabled`), so `jsonMerge` is impossible and hand-rewriting TOML would
+      // drop the user's comments and key order — the reason the Codex entry stays
+      // `configOnly`. Grok, unlike Codex, ships a documented non-interactive command
+      // that covers *both* scopes, so we shell out to it instead of printing a snippet.
+      //
+      // `grok mcp add --help` says "Add or update an MCP server", and a two-run
+      // idempotency check confirmed it: the second run exits successfully with the same
+      // `Added stdio MCP server '<name>' ... File modified: <path>` output rather than
+      // refusing. That is why `rerunBehavior` is `update` and no
+      // `alreadyRegisteredPatterns` are declared — there is no refusal to classify.
+      //
+      // Grok also reads `.mcp.json` plus Claude and Cursor configs as compat sources, so
+      // a workspace already registered through one of those clients can surface the same
+      // server twice. That is Grok's own merge behavior, not something this entry writes.
+      user: {
+        configPath: (context) => join(grokHome(context), 'config.toml'),
+        format: 'toml',
+        strategy: 'vendorCommand',
+        vendor: {
+          buildArgs: (spec, name) => [
+            'mcp',
+            'add',
+            name,
+            '--scope',
+            'user',
+            ...envFlags(spec, '-e'),
+            '--',
+            spec.command,
+            ...spec.args,
+          ],
+          rerunBehavior: 'update',
+        },
+      },
+      project: {
+        configPath: (context) => join(context.cwd, '.grok', 'config.toml'),
+        format: 'toml',
+        strategy: 'vendorCommand',
+        vendor: {
+          buildArgs: (spec, name) => [
+            'mcp',
+            'add',
+            name,
+            '--scope',
+            'project',
+            ...envFlags(spec, '-e'),
+            '--',
+            spec.command,
+            ...spec.args,
+          ],
+          rerunBehavior: 'update',
+        },
       },
     },
   },

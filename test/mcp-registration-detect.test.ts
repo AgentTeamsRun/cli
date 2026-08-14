@@ -99,6 +99,23 @@ describe('mcp client detection', () => {
     expect(signals['kiro-cli'].executablePath).toBe(join(localBin, 'kiro-cli'));
   });
 
+  it('skips a PATH name collision and detects the official Grok Build path', () => {
+    fakeExecutable('grok');
+    const grokBin = join(home, '.grok', 'bin');
+    mkdirSync(grokBin, { recursive: true });
+    writeFileSync(join(grokBin, 'grok'), '#!/bin/sh\n', { mode: 0o755 });
+
+    const signals = byId(
+      detectClients({
+        context,
+        probeExecutable: (executablePath) =>
+          executablePath === join(grokBin, 'grok') ? 'Grok Build TUI' : 'Grok CLI - AI assistant',
+      }),
+    );
+
+    expect(signals['grok-build'].executablePath).toBe(join(grokBin, 'grok'));
+  });
+
   it('detects Kiro CLI from its settings directory alone', () => {
     mkdirSync(join(home, '.kiro', 'settings'), { recursive: true });
     writeFileSync(join(home, '.kiro', 'settings', 'mcp.json'), '{}\n');
@@ -168,7 +185,35 @@ describe('mcp client detection', () => {
       expect(result.text).toContain('claude-code [INSTALLED]');
       expect(result.text).toContain('cursor-cli [INSTALLED]');
       expect(result.text).toContain('amp [SKIPPED_NOT_DETECTED]');
-      expect(result.text).toContain('Summary: 2 registered, 7 skipped, 0 failed.');
+      expect(result.text).toContain('Summary: 2 registered, 8 skipped, 0 failed.');
+    });
+
+    it('runs Grok registration through the verified absolute path in batch mode', () => {
+      const grokBin = join(home, '.grok', 'bin');
+      const officialGrok = join(grokBin, 'grok');
+      mkdirSync(grokBin, { recursive: true });
+      writeFileSync(officialGrok, '#!/bin/sh\n', { mode: 0o755 });
+      const calls: { executable: string; args: string[] }[] = [];
+      const runner: VendorRunner = (executable, args) => {
+        calls.push({ executable, args });
+        return args[0] === '--help'
+          ? { status: 0, stdout: 'Grok Build TUI', stderr: '' }
+          : { status: 0, stdout: 'added', stderr: '' };
+      };
+
+      const result = runMcpInstallCommand(
+        { yes: true, scope: 'user' },
+        {
+          credentials,
+          context,
+          vendorRunner: runner,
+          detectionDependencies: { probeExecutable: () => 'Grok Build TUI' },
+        },
+      );
+
+      expect(result.exitCode).toBe(0);
+      expect(calls.filter((call) => call.executable === officialGrok)).toHaveLength(2);
+      expect(calls.some((call) => call.executable === 'grok')).toBe(false);
     });
 
     /**
@@ -190,7 +235,7 @@ describe('mcp client detection', () => {
       expect(result.text).toContain('claude-code [FAILED]');
       expect(result.text).toContain('codex [SKIPPED_CONFIG_ONLY]');
       expect(result.text).toContain('cursor-cli [INSTALLED]');
-      expect(result.text).toContain('Summary: 1 registered, 7 skipped, 1 failed.');
+      expect(result.text).toContain('Summary: 1 registered, 8 skipped, 1 failed.');
     });
 
     it('plans --scope project in batch mode without touching anything and refuses --yes', () => {

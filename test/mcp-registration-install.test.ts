@@ -272,6 +272,39 @@ describe('mcp install', () => {
       expect(JSON.stringify(result.json)).not.toContain(CANARY_API_KEY);
     });
 
+    it('uses and re-verifies the detected official Grok path for a single-client install', () => {
+      const officialBin = join(home, '.grok', 'bin');
+      const officialGrok = join(officialBin, 'grok');
+      mkdirSync(officialBin, { recursive: true });
+      writeFileSync(officialGrok, '#!/bin/sh\n', { mode: 0o755 });
+      writeFileSync(join(bin, 'grok'), '#!/bin/sh\n', { mode: 0o755 });
+      const calls: { executable: string; args: string[] }[] = [];
+      const runner: VendorRunner = (executable, args) => {
+        calls.push({ executable, args });
+        return args[0] === '--help'
+          ? { status: 0, stdout: 'Grok Build TUI', stderr: '' }
+          : { status: 0, stdout: 'added', stderr: '' };
+      };
+
+      const result = runMcpInstallCommand(
+        { client: 'grok-build', scope: 'user' },
+        {
+          credentials,
+          context,
+          vendorRunner: runner,
+          detectionDependencies: {
+            probeExecutable: (executablePath) =>
+              executablePath === officialGrok ? 'Grok Build TUI' : 'Grok CLI - AI assistant',
+          },
+        },
+      );
+
+      expect(result.exitCode).toBe(0);
+      expect(calls).toHaveLength(2);
+      expect(calls.every((call) => call.executable === officialGrok)).toBe(true);
+      expect(calls[1]?.args.slice(0, 3)).toEqual(['mcp', 'add', 'agentteams']);
+    });
+
     it('classifies a vendor refusal as ALREADY_REGISTERED rather than a failure', () => {
       const result = install(
         { client: 'amp', scope: 'project' },
