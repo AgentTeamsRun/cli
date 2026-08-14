@@ -166,6 +166,7 @@ describe('shared context-tools contract', () => {
 
     expect(VALID_TYPES).toBe(CONTEXT_TOOL_SEARCH_TYPES);
     expect(schema.properties?.types?.items?.enum).toEqual(CONTEXT_TOOL_SEARCH_TYPES);
+    expect(CONTEXT_TOOL_SEARCH_TYPES).toContain('SENTRY_ISSUE');
   });
 
   it('uses the shared entity id prefix normalizer', () => {

@@ -21,6 +21,8 @@ export interface InstallClientOptions {
   toolProfile?: ToolProfile;
   /** True when `--tool-profile` was named; an implicit `full` may be narrowed by a schema constraint. */
   explicitToolProfile?: boolean;
+  /** Absolute path selected by detection; vendor commands must not re-resolve a bare name. */
+  executablePath?: string | null;
 }
 
 function firstLines(text: string, limit = 4): string {
@@ -49,8 +51,24 @@ function installViaVendorCommand(
     toolProfile: options.toolProfile,
   });
 
-  const executable = client.executables[0];
+  const executable = options.executablePath ?? client.executables[0];
   const runner = options.vendorRunner ?? runVendorCommand;
+  const identity = client.executableIdentity;
+  if (identity) {
+    const identityOutcome = runner(executable, identity.args, { cwd: context.cwd, env: context.env });
+    const identityOutput = `${identityOutcome.stdout}\n${identityOutcome.stderr}`;
+    if (identityOutcome.spawnError || identityOutcome.status !== 0 || !identityOutput.includes(identity.marker)) {
+      return {
+        clientId: client.id,
+        scope,
+        strategy: definition.strategy,
+        configPath,
+        outcome: 'FAILED',
+        detail: `Refused to run \`${executable}\`: it did not identify itself as ${client.label}.`,
+        manualSnippet,
+      };
+    }
+  }
   const outcome = runner(executable, vendor.buildArgs(spec, serverName), { cwd: context.cwd, env: context.env });
 
   const base = { clientId: client.id, scope, strategy: definition.strategy, configPath } as const;
@@ -270,10 +288,12 @@ export function buildBatchPlan(options: BuildBatchPlanOptions): BatchPlan {
     const signal = detection.find((candidate) => candidate.clientId === client.id);
     const definition = client.scopes[scope];
     const detected = signal?.detected ?? false;
-    const applicable = detected && definition.strategy !== 'configOnly';
+    const identityVerified = !client.executableIdentity || signal?.executablePath != null;
+    const applicable = detected && identityVerified && definition.strategy !== 'configOnly';
 
     let reason: string | undefined;
     if (!detected) reason = 'Not detected on this machine.';
+    else if (!identityVerified) reason = `No executable verified as ${client.label} was found.`;
     else if (definition.strategy === 'configOnly') reason = definition.configOnlyReason;
 
     return {
@@ -342,6 +362,7 @@ export function runBatchInstall(options: RunBatchInstallOptions): { plan: BatchP
         vendorRunner: options.vendorRunner,
         toolProfile: options.toolProfile,
         explicitToolProfile: options.explicitToolProfile,
+        executablePath: entry.executablePath,
       }),
     );
   }

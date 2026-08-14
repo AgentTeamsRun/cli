@@ -12,6 +12,7 @@ import {
 import { findProjectConfig } from '../utils/config.js';
 import { getGitRemoteOriginUrl } from '../utils/git.js';
 import { parseReportOptions } from '../utils/report.js';
+import { EXECUTION_SNAPSHOT_HINT, resolveExecutionSnapshot } from '../utils/agentIdentity.js';
 
 import {
   deleteIfTempFile,
@@ -58,8 +59,9 @@ export async function executeReportCommand(apiUrl: string, headers: any, action:
             'To record work without a pre-existing plan, use `agentteams plan quick` (quick log) instead.',
         );
       }
-      if (!options.runnerType || !options.model) {
-        throw new Error('--runner-type and --model are required for report create.');
+      const snapshot = resolveExecutionSnapshot(options);
+      if (!snapshot.runnerType || !snapshot.model) {
+        throw new Error('--runner-type and --model are required for report create.' + EXECUTION_SNAPSHOT_HINT);
       }
 
       const payload = parseReportOptions(options, { defaultStatus: 'COMPLETED' });
@@ -72,8 +74,8 @@ export async function executeReportCommand(apiUrl: string, headers: any, action:
       const body: Record<string, unknown> = {
         planId: options.planId,
         ...(repositoryRemoteUrl ? { repositoryRemoteUrl } : {}),
-        runnerType: options.runnerType,
-        model: options.model,
+        runnerType: snapshot.runnerType,
+        model: snapshot.model,
         ...payload,
       };
 

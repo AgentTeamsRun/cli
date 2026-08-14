@@ -3,6 +3,7 @@ import { addGitToggleOption } from './options/completionReport.js';
 import { addConnectionOptions } from './options/connection.js';
 import { addOutputOptions } from './options/output.js';
 import { addPaginationOptions } from './options/pagination.js';
+import { RUNNER_TYPE_OPTION_DESCRIPTION } from '../utils/runnerTypes.js';
 
 /** 액션 인벤토리: list/get/create/update/create-plan/submit-result/cancel/delete/dismiss/resolve/undismiss. */
 export function registerCodeReviewCommand(program: Command): void {
@@ -68,7 +69,7 @@ export function registerCodeReviewCommand(program: Command): void {
       .option('--reviewer-context <text>', 'Reviewer context or instructions')
       .option('--recommendation-reason <text>', 'Why this review is recommended')
       .option('--findings-file <path>', 'Read findings JSON array from a local file')
-      .option('--runner-type <type>', 'Runner type snapshot')
+      .option('--runner-type <type>', RUNNER_TYPE_OPTION_DESCRIPTION)
       .option('--model <model>', 'Model ID snapshot'),
   );
   addLeaf('update', 'Update a code review', (command) =>
@@ -87,7 +88,7 @@ export function registerCodeReviewCommand(program: Command): void {
       .option('--test-file <path>', 'Read verification summary from a local file')
       .option('--reviewer-context <text>', 'Reviewer context or instructions')
       .option('--recommendation-reason <text>', 'Why this review is recommended')
-      .option('--runner-type <type>', 'Runner type snapshot')
+      .option('--runner-type <type>', RUNNER_TYPE_OPTION_DESCRIPTION)
       .option('--model <model>', 'Model ID snapshot'),
   );
   addLeaf('create-plan', 'Create a plan from findings', (command) =>
@@ -97,7 +98,7 @@ export function registerCodeReviewCommand(program: Command): void {
       .option('--finding-ids <ids>', 'Comma-separated finding IDs')
       .option('--priority <priority>', 'Generated plan priority')
       .option('--type <type>', 'Generated plan type')
-      .option('--runner-type <type>', 'Runner type snapshot')
+      .option('--runner-type <type>', RUNNER_TYPE_OPTION_DESCRIPTION)
       .option('--model <model>', 'Model ID snapshot'),
   );
   addLeaf('submit-result', 'Submit a code review result', (command) =>

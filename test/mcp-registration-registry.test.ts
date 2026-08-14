@@ -37,9 +37,9 @@ function snapshotTree(root: string): Record<string, string> {
 }
 
 describe('mcp client registry', () => {
-  it('exposes exactly the nine supported clients and excludes Orca and GEMINI', () => {
+  it('exposes exactly the ten supported clients and excludes Orca and GEMINI', () => {
     expect(MCP_CLIENTS.map((client) => client.id)).toEqual([...MCP_CLIENT_IDS]);
-    expect(MCP_CLIENTS).toHaveLength(9);
+    expect(MCP_CLIENTS).toHaveLength(10);
     expect(MCP_CLIENT_IDS).not.toContain('orca');
     expect(MCP_CLIENTS.map((client) => client.runnerType)).not.toContain('GEMINI');
   });
@@ -71,6 +71,7 @@ describe('mcp client registry', () => {
       'kimi-cli': 'unknown',
       antigravity: 'unknown',
       'kiro-cli': 'unknown',
+      'grok-build': 'unknown',
     });
 
     for (const client of MCP_CLIENTS) {
@@ -134,7 +135,7 @@ describe('mcp config output', () => {
     (scope) => {
       const output = run({ scope }) as { json: { clients: { clientId: string; snippet: string }[] } };
 
-      expect(output.json.clients).toHaveLength(9);
+      expect(output.json.clients).toHaveLength(10);
       for (const rendered of output.json.clients) {
         expect(rendered.snippet).toContain('agentteams');
         expect(rendered.snippet).toContain('mcp');
@@ -143,15 +144,19 @@ describe('mcp config output', () => {
         expect(rendered.snippet).not.toContain('project-fixture');
         expect(rendered.snippet).not.toContain('team-fixture');
 
-        if (rendered.clientId === 'codex') {
+        const client = MCP_CLIENTS.find((candidate) => candidate.id === rendered.clientId);
+        expect(client).toBeDefined();
+        const definition = client!.scopes[scope];
+
+        // TOML snippets are not JSON, so "no secrets leaked" is asserted on the TOML
+        // env table instead. Keyed on the declared format rather than a client id so a
+        // new TOML client (Grok Build, after Codex) is covered without editing this.
+        if (definition.format === 'toml') {
           expect(rendered.snippet).not.toContain('.env]');
           expect(rendered.snippet).not.toContain('env_vars');
           continue;
         }
 
-        const client = MCP_CLIENTS.find((candidate) => candidate.id === rendered.clientId);
-        expect(client).toBeDefined();
-        const definition = client!.scopes[scope];
         const document = JSON.parse(rendered.snippet) as Record<string, Record<string, Record<string, unknown>>>;
         const entry = definition.containerKey
           ? document[definition.containerKey].agentteams
@@ -178,7 +183,7 @@ describe('mcp config output', () => {
       };
     };
 
-    expect(output.json.clients).toHaveLength(9);
+    expect(output.json.clients).toHaveLength(10);
     for (const client of output.json.clients) {
       expect(client.profileGuidance).toContain(`Native tool discovery: ${client.nativeDiscovery.status}`);
       expect(client.profileGuidance).toContain(client.nativeDiscovery.evidenceUrl);
