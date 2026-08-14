@@ -16,6 +16,7 @@ import { executeChangeSetCommand } from './changeSetCommand.js';
 import { executeFeedbackCommand } from './feedback.js';
 import { executeSearchCommand } from './search.js';
 import { executeLinearCommand } from './linear.js';
+import { executeSentryCommand } from './sentry.js';
 import { executeAttachmentCommand } from './attachment.js';
 import { executeTaskCommand } from './task.js';
 import { executeResolveCommand } from './resolve.js';
@@ -199,6 +200,13 @@ async function executeCommandWithContext(
       const { apiUrl, headers } = resolveApiContext(config);
       return withApiErrorContext(apiUrl, () =>
         executeLinearCommand(apiUrl, config.projectId, headers, action, options),
+      );
+    }
+    case 'sentry': {
+      const config = await loadRequiredConfig(buildConfigOverrides(options));
+      const { apiUrl, headers } = resolveApiContext(config);
+      return withApiErrorContext(apiUrl, () =>
+        executeSentryCommand(apiUrl, config.projectId, headers, action, options),
       );
     }
     case 'attachment': {

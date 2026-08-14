@@ -1170,10 +1170,13 @@ export async function executePlanCommand(
       const externalId = toNonEmptyString(options.externalId);
       if (!externalId) throw new Error('--external-id is required for plan link-issue');
       const externalUrl = toNonEmptyString(options.externalUrl);
-      if (!externalUrl) throw new Error('--external-url is required for plan link-issue');
+      if (!externalUrl && provider !== 'SENTRY') throw new Error('--external-url is required for plan link-issue');
 
-      if (!['GITHUB', 'GITLAB', 'LINEAR'].includes(provider)) {
-        throw new Error('--provider must be one of: GITHUB, GITLAB, LINEAR');
+      if (!['GITHUB', 'GITLAB', 'LINEAR', 'SENTRY'].includes(provider)) {
+        throw new Error('--provider must be one of: GITHUB, GITLAB, LINEAR, SENTRY');
+      }
+      if (provider === 'SENTRY' && !/^\d+$/.test(externalId)) {
+        throw new Error('--external-id must be a numeric Sentry issue ID');
       }
 
       const body: {
@@ -1182,7 +1185,11 @@ export async function executePlanCommand(
         externalUrl: string;
         externalTitle?: string;
         metadata?: Record<string, unknown>;
-      } = { provider, externalId, externalUrl: ensureUrlProtocol(externalUrl) };
+      } = {
+        provider,
+        externalId,
+        externalUrl: provider === 'SENTRY' ? `SENTRY_ISSUE:${externalId}` : ensureUrlProtocol(externalUrl!),
+      };
 
       if (options.title) body.externalTitle = options.title;
       if (options.metadata) {

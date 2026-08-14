@@ -186,9 +186,9 @@ export function registerPlanCommand(program: Command): void {
     command
       .alias('issue')
       .option('--id <id>', 'Plan ID')
-      .option('--provider <provider>', 'External issue provider (GITHUB, GITLAB, LINEAR)')
+      .option('--provider <provider>', 'External issue provider (GITHUB, GITLAB, LINEAR, SENTRY)')
       .option('--external-id <id>', 'External issue ID')
-      .option('--external-url <url>', 'External issue URL')
+      .option('--external-url <url>', 'External issue URL (optional for SENTRY; verified by the server)')
       .option('--title <title>', 'External issue title')
       .option('--metadata <json>', 'Provider metadata as JSON (e.g. {"owner":"org","repo":"name"})'),
   );

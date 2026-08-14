@@ -461,6 +461,22 @@ describe('CLI Integration Tests', () => {
       );
     });
 
+    it('plan link-issue accepts canonical Sentry IDs and delegates permalink verification to the server', async () => {
+      axiosPostSpy.mockResolvedValue({ data: { data: { id: 'origin-1', provider: 'SENTRY' } } } as any);
+
+      await executeCommand('plan', 'link-issue', {
+        id: 'plan-1',
+        provider: 'sentry',
+        externalId: '12345',
+      });
+
+      expect(axiosPostSpy).toHaveBeenCalledWith(
+        `${API_URL}/api/projects/${PROJECT_ID}/plans/plan-1/origin-issues`,
+        { provider: 'SENTRY', externalId: '12345', externalUrl: 'SENTRY_ISSUE:12345' },
+        { headers: authHeaders() },
+      );
+    });
+
     it('linear issue get: should call the linear issue endpoint', async () => {
       axiosGetSpy.mockResolvedValue({
         data: {
@@ -599,6 +615,47 @@ describe('CLI Integration Tests', () => {
         `${API_URL}/api/linear/issues/${encoded}/comments`,
         { body: 'hi' },
         { headers: authHeaders(), params: { projectId: PROJECT_ID } },
+      );
+    });
+
+    it('sentry issue list forwards the project, filter, cursor, and bounded limit', async () => {
+      axiosGetSpy.mockResolvedValue({ data: { data: [], pagination: { nextCursor: 'next' } } } as any);
+
+      const result = await executeCommand('sentry', 'issue-list', {
+        projectId: 'project_override',
+        query: 'is:unresolved',
+        cursor: 'cursor-in',
+        limit: '50',
+      });
+
+      expect(result).toEqual({ data: [], pagination: { nextCursor: 'next' } });
+      expect(axiosGetSpy).toHaveBeenCalledWith(`${API_URL}/api/projects/project_override/sentry/issues`, {
+        headers: authHeaders(),
+        params: { query: 'is:unresolved', cursor: 'cursor-in', limit: 50 },
+      });
+    });
+
+    it('sentry issue get uses the project-bound canonical issue endpoint', async () => {
+      axiosGetSpy.mockResolvedValue({ data: { data: { id: '12345', shortId: 'WEB-1' } } } as any);
+
+      const result = await executeCommand('sentry', 'issue-get', { issueId: '12345' });
+
+      expect(result).toEqual({ data: { id: '12345', shortId: 'WEB-1' } });
+      expect(axiosGetSpy).toHaveBeenCalledWith(`${API_URL}/api/projects/${PROJECT_ID}/sentry/issues/12345`, {
+        headers: authHeaders(),
+      });
+    });
+
+    it('sentry rejects missing IDs, invalid limits, and unknown actions before an issue request', async () => {
+      await expect(executeCommand('sentry', 'issue-get', {})).rejects.toThrow(
+        '--issue-id is required for sentry issue get',
+      );
+      await expect(executeCommand('sentry', 'issue-list', { limit: '101' })).rejects.toThrow(
+        '--limit must be an integer between 1 and 100',
+      );
+      await expect(executeCommand('sentry', 'issue-delete', {})).rejects.toThrow('Unknown action: issue-delete');
+      expect(axiosGetSpy.mock.calls.some(([url]) => typeof url === 'string' && url.includes('/sentry/issues'))).toBe(
+        false,
       );
     });
 
