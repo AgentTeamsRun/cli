@@ -21,6 +21,7 @@ import { registerReportCommand } from './report.js';
 import { registerResolveCommand } from './resolve.js';
 import { registerSearchCommand } from './search.js';
 import { registerSentryCommand } from './sentry.js';
+import { registerSkillCommand } from './skill.js';
 import { registerSyncCommand } from './sync.js';
 import { registerTaskCommand } from './task.js';
 import { registerWorktreeCommand } from './worktree.js';
@@ -66,6 +67,7 @@ export function createProgram(version: string): Command {
   registerMcpCommand(program);
   registerLinearCommand(program);
   registerSentryCommand(program);
+  registerSkillCommand(program);
 
   return program;
 }

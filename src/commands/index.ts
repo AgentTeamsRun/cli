@@ -27,6 +27,7 @@ import { normalizeEntityIdOptions } from '../utils/entityId.js';
 import { attachErrorContext } from '../utils/errors.js';
 import { buildConfigOverrides, resolveApiContext } from '../utils/apiContext.js';
 import type { Config } from '../types/index.js';
+import { executeSkillCommand } from './skill.js';
 
 async function loadRequiredConfig(overrides?: Partial<Config>): Promise<Config> {
   const config = await loadConfigWithCredential(overrides);
@@ -104,6 +105,16 @@ async function executeCommandWithContext(
       }
 
       throw new Error(`Unknown resource: ${resource}`);
+    }
+    case 'skill': {
+      const config = await loadRequiredConfig(buildConfigOverrides(options));
+      const { apiUrl, headers } = resolveApiContext(config);
+      return withApiErrorContext(apiUrl, () =>
+        executeSkillCommand(apiUrl, config.projectId, headers, action, {
+          ...options,
+          cwd: options.cwd ?? process.cwd(),
+        }),
+      );
     }
     case 'document': {
       const config = await loadRequiredConfig(buildConfigOverrides(options));

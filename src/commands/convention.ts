@@ -13,6 +13,7 @@ import { withoutJsonContentType } from '../utils/httpHeaders.js';
 import { compareVersions, getLatestCliVersion } from '../utils/updateCheck.js';
 import type { Config } from '../types/index.js';
 import { buildAuthHeaders } from '../utils/apiContext.js';
+import { SKILL_PACKAGE_DIR } from '../utils/skillPackage.js';
 
 const require = createRequire(import.meta.url);
 const pkg = require('../../package.json') as { version: string };
@@ -918,7 +919,14 @@ export async function conventionDownload(options?: ConventionCommandOptions): Pr
     const categoryDirs = new Set<string>();
     for (const convention of conventionList) {
       const categoryName = typeof convention.category === 'string' ? convention.category : '';
-      categoryDirs.add(toSafeDirectoryName(categoryName));
+      const categoryDir = toSafeDirectoryName(categoryName);
+      // `.agentteams/skills/`의 소유자는 `skill download`뿐이다. 이 sweep은 카테고리 디렉터리를
+      // 통째로 rmSync한 뒤 재생성하므로, 서버에 레거시 `category='skills'` 행이 하나라도 남아
+      // 있으면 `convention download` 한 번으로 로컬 스킬 패키지가 전부 사라진다. 영구 제외한다.
+      if (categoryDir === SKILL_PACKAGE_DIR) {
+        continue;
+      }
+      categoryDirs.add(categoryDir);
     }
 
     for (const categoryDir of categoryDirs) {
