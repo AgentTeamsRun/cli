@@ -1,7 +1,4 @@
 import { describe, it, expect } from '@jest/globals';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import {
   addTaskIdCommentsToPlanRunbook,
   buildPlanRunbookMarkdown,
@@ -9,7 +6,6 @@ import {
   buildFreshnessNoticeLines,
   buildPlanRunbookFrontmatter,
   buildUniquePlanRunbookFileName,
-  readPlanHtmlUploadInput,
 } from '../src/commands/plan.js';
 
 describe('buildPlanRunbookFrontmatter', () => {
@@ -196,44 +192,5 @@ describe('plan v2 task metadata', () => {
         },
       ],
     });
-  });
-});
-
-describe('readPlanHtmlUploadInput', () => {
-  it('reads non-empty HTML from --file', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'agentteams-plan-html-'));
-    const file = join(dir, 'summary.html');
-    const html = [
-      '<!doctype html><html><head><style>',
-      ':root { --text: #111827; --surface: #ffffff; --code-bg: #f3f4f6; }',
-      '[data-theme="night"] { --text: #f9fafb; --surface: #111827; --code-bg: #1f2937; }',
-      'body { margin: 0; color: var(--text); background: transparent; }',
-      '.card { background: var(--surface); } code { background: var(--code-bg); }',
-      '</style></head><body><main class="card">Summary<code>ok</code></main></body></html>',
-    ].join('');
-    try {
-      writeFileSync(file, html, 'utf-8');
-
-      expect(readPlanHtmlUploadInput({ file })).toBe(html);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  it('rejects ambiguous or empty upload input', () => {
-    expect(() => readPlanHtmlUploadInput({})).toThrow('--file or --stdin is required');
-    expect(() => readPlanHtmlUploadInput({ file: 'summary.html', stdin: true })).toThrow(
-      'Use either --file or --stdin',
-    );
-
-    const dir = mkdtempSync(join(tmpdir(), 'agentteams-plan-html-'));
-    const file = join(dir, 'empty.html');
-    try {
-      writeFileSync(file, '   ', 'utf-8');
-
-      expect(() => readPlanHtmlUploadInput({ file })).toThrow('HTML content is empty');
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
   });
 });
