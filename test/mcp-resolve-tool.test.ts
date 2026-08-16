@@ -473,12 +473,13 @@ describe('agentteams_resolve MCP tool', () => {
     );
     const delta = withResolve.totalChars - withoutResolve.totalChars;
 
-    // Measured 2026-08-16, after agentteams_codereview_finding_list joined the
-    // catalog. This is the number that decided the profile membership above: 1.7k
-    // chars is cheap in `full` and a 50% jump in `minimal` (3.4k), which
-    // is why `minimal` does not carry it.
+    // Measured 2026-08-16, after the co-action create contract gained optional
+    // traceability ids and post-mortem create gained standalone incident support.
+    // This is the number that decided the profile membership above: 1.7k chars is
+    // cheap in `full` and a 50% jump in `minimal` (3.4k), which is why `minimal`
+    // does not carry it.
     expect(delta).toBe(1_688);
-    expect(withResolve.totalChars).toBe(49_328);
+    expect(withResolve.totalChars).toBe(57_721);
     process.stderr.write(`[agentteams_resolve budget] ${JSON.stringify({ delta, full: withResolve.totalChars })}\n`);
   });
 });

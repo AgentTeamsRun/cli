@@ -43,10 +43,20 @@ export async function updateCoAction(
   return response.data;
 }
 
-export async function deleteCoAction(apiUrl: string, projectId: string, headers: any, id: string): Promise<any> {
+export async function deleteCoAction(
+  apiUrl: string,
+  projectId: string,
+  headers: any,
+  id: string,
+  params?: Record<string, string>,
+): Promise<any> {
   const baseUrl = `${apiUrl}/api/projects/${projectId}/co-actions`;
+  const definedParams = Object.fromEntries(
+    Object.entries(params ?? {}).filter(([, value]) => value !== undefined && value !== ''),
+  );
   const response = await httpClient.delete(`${baseUrl}/${id}`, {
     headers: withoutJsonContentType(headers),
+    ...(Object.keys(definedParams).length > 0 ? { params: definedParams } : {}),
   });
   return response.data;
 }
