@@ -6,10 +6,9 @@ import { join } from 'node:path';
 import { conventionDownload } from '../src/commands/convention.js';
 
 /**
- * `convention download`는 서버 목록에 등장한 카테고리 디렉터리를 통째로 rmSync한 뒤 재생성한다.
- * 서버에 레거시 `category='skills'` 행이 하나라도 남아 있으면, 그 한 번의 실행으로 로컬 스킬
- * 패키지가 전부 사라진다. `.agentteams/skills/`의 소유자는 `skill download`뿐이라는 계약이
- * 코드에서 실제로 지켜지는지 여기서 고정한다.
+ * `convention download`는 manifest에 기록한 파일만 소유한다. 서버나 구형 manifest에 레거시
+ * `category='skills'` 행이 남아 있어도 `.agentteams/skills/`는 `skill download`만 관리한다는
+ * 계약이 코드에서 실제로 지켜지는지 여기서 고정한다.
  */
 
 const PROJECT_ID = 'project-skill-ownership';
@@ -84,13 +83,14 @@ describe('convention download vs skill packages', () => {
       },
     ]);
 
-    await download(root);
+    const result = await download(root);
 
     expect(existsSync(join(packageDir, 'SKILL.md'))).toBe(true);
     expect(readFileSync(join(packageDir, 'references', 'notes.md'), 'utf-8')).toBe('keep me');
+    expect(result.unmanagedFiles).toBeUndefined();
   });
 
-  it('still sweeps and rewrites the other category directories', async () => {
+  it('keeps unmanaged files while writing conventions in the same category', async () => {
     const root = createTempProject();
     tempRoots.push(root);
     const staleFile = join(root, '.agentteams', 'rules', 'removed-on-server.md');
@@ -109,7 +109,7 @@ describe('convention download vs skill packages', () => {
 
     await download(root);
 
-    expect(existsSync(staleFile)).toBe(false);
+    expect(readFileSync(staleFile, 'utf-8')).toBe('stale');
     expect(existsSync(join(root, '.agentteams', 'rules', 'conventions.md'))).toBe(true);
   });
 });

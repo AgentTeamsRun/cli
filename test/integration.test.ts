@@ -1861,8 +1861,7 @@ describe('CLI Integration Tests', () => {
         const reporting = readFileSync(join(agentteamsDir, 'convention.md'), 'utf-8');
         const planGuide = readFileSync(join(agentteamsDir, 'platform', 'plan-guide.md'), 'utf-8');
 
-        expect(typeof result).toBe('string');
-        expect(result).toContain('No project conventions found');
+        expect(result).toMatchObject({ message: expect.stringContaining('No project conventions found') });
         expect(reporting).toBe('# reporting template only\n');
         expect(planGuide).toBe('# plan guide\n');
       } finally {
@@ -2214,7 +2213,7 @@ describe('CLI Integration Tests', () => {
       }
     });
 
-    it('convention download: should cleanup existing conventions directory before writing', async () => {
+    it('convention download: should preserve unmanaged files while writing', async () => {
       axiosGetSpy
         .mockResolvedValueOnce({ data: { data: [{ id: 'ag-1' }] } } as any)
         .mockResolvedValueOnce({ data: { data: { content: '# reporting template\n' } } } as any)
@@ -2255,7 +2254,7 @@ describe('CLI Integration Tests', () => {
         process.chdir(tempCwd);
         await executeCommand('convention', 'download', {});
 
-        expect(existsSync(join(conventionDir, 'stale.md'))).toBe(false);
+        expect(readFileSync(join(conventionDir, 'stale.md'), 'utf-8')).toBe('# stale');
         const downloaded = readFileSync(join(conventionDir, 'rules.md'), 'utf-8');
         expect(downloaded).toBe('# latest rules');
       } finally {

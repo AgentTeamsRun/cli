@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, unlinkSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, unlinkSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { atomicWriteFileSync } from '../utils/atomicWrite.js';
 import { basename, join, relative, resolve, sep } from 'node:path';
@@ -86,6 +86,12 @@ type ConventionDownloadItem = ConventionListItem & {
 };
 
 type ConventionManifestEntry = ConventionDownloadManifestV1['entries'][number];
+
+export type ConventionDownloadResult = {
+  message: string;
+  unmanagedFiles?: string[];
+  warning?: string;
+};
 
 export type ConventionFreshnessChange = {
   id: string;
@@ -210,6 +216,64 @@ function loadManifestOrCreate(projectRoot: string): ConventionDownloadManifestV1
 function writeManifest(projectRoot: string, manifest: ConventionDownloadManifestV1) {
   const manifestPath = buildManifestPath(projectRoot);
   atomicWriteFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n', 'utf-8');
+}
+
+function removeStaleManifestFiles(
+  projectRoot: string,
+  previous: ConventionDownloadManifestV1,
+  next: ConventionDownloadManifestV1,
+): void {
+  const livePaths = new Set(next.entries.map((entry) => normalizeRelativePath(entry.fileRelativePath)));
+  const conventionRoot = resolve(projectRoot, CONVENTION_DIR);
+  const skillRoot = resolve(conventionRoot, SKILL_PACKAGE_DIR);
+
+  for (const entry of previous.entries) {
+    const relativePath = normalizeRelativePath(entry.fileRelativePath);
+    if (livePaths.has(relativePath)) {
+      continue;
+    }
+
+    const absolutePath = resolve(projectRoot, relativePath);
+    // manifest가 손상됐더라도 프로젝트 밖이나 skill download 소유 경로는 절대 건드리지 않는다.
+    if (
+      !absolutePath.startsWith(`${conventionRoot}${sep}`) ||
+      absolutePath === skillRoot ||
+      absolutePath.startsWith(`${skillRoot}${sep}`)
+    ) {
+      continue;
+    }
+
+    if (existsSync(absolutePath)) {
+      unlinkSync(absolutePath);
+    }
+  }
+}
+
+function findUnmanagedConventionFiles(projectRoot: string, manifest: ConventionDownloadManifestV1): string[] {
+  const conventionRoot = join(projectRoot, CONVENTION_DIR);
+  const managedPaths = new Set(manifest.entries.map((entry) => normalizeRelativePath(entry.fileRelativePath)));
+  const excludedDirectories = new Set(['platform', SKILL_PACKAGE_DIR, LEGACY_CONVENTION_DOWNLOAD_DIR]);
+  const unmanagedFiles: string[] = [];
+
+  for (const category of readdirSync(conventionRoot, { withFileTypes: true })) {
+    if (!category.isDirectory() || excludedDirectories.has(category.name)) {
+      continue;
+    }
+
+    const categoryPath = join(conventionRoot, category.name);
+    for (const file of readdirSync(categoryPath, { withFileTypes: true })) {
+      if (!file.isFile() || !file.name.toLowerCase().endsWith('.md')) {
+        continue;
+      }
+
+      const relativePath = normalizeRelativePath(relative(projectRoot, join(categoryPath, file.name)));
+      if (!managedPaths.has(relativePath)) {
+        unmanagedFiles.push(relativePath);
+      }
+    }
+  }
+
+  return unmanagedFiles.sort();
 }
 
 function toFileList(input: string | string[]): string[] {
@@ -874,7 +938,7 @@ async function downloadReportingTemplate(
   return true;
 }
 
-export async function conventionDownload(options?: ConventionCommandOptions): Promise<string> {
+export async function conventionDownload(options?: ConventionCommandOptions): Promise<ConventionDownloadResult> {
   const { config, apiUrl, headers } = await getApiConfigOrThrow(options);
 
   const projectRoot = findProjectRoot(options?.cwd);
@@ -909,30 +973,10 @@ export async function conventionDownload(options?: ConventionCommandOptions): Pr
 
   const conventions = await withSpinner('Downloading conventions...', async () => {
     const conventionList = await fetchConventionsWithContent(apiUrl, config.projectId, headers);
-    if (!conventionList || conventionList.length === 0) {
-      return conventionList;
-    }
+    const previousManifest = loadManifestOrCreate(projectRoot);
 
     const legacyDir = join(projectRoot, CONVENTION_DIR, LEGACY_CONVENTION_DOWNLOAD_DIR);
     rmSync(legacyDir, { recursive: true, force: true });
-
-    const categoryDirs = new Set<string>();
-    for (const convention of conventionList) {
-      const categoryName = typeof convention.category === 'string' ? convention.category : '';
-      const categoryDir = toSafeDirectoryName(categoryName);
-      // `.agentteams/skills/`의 소유자는 `skill download`뿐이다. 이 sweep은 카테고리 디렉터리를
-      // 통째로 rmSync한 뒤 재생성하므로, 서버에 레거시 `category='skills'` 행이 하나라도 남아
-      // 있으면 `convention download` 한 번으로 로컬 스킬 패키지가 전부 사라진다. 영구 제외한다.
-      if (categoryDir === SKILL_PACKAGE_DIR) {
-        continue;
-      }
-      categoryDirs.add(categoryDir);
-    }
-
-    for (const categoryDir of categoryDirs) {
-      rmSync(join(projectRoot, CONVENTION_DIR, categoryDir), { recursive: true, force: true });
-      mkdirSync(join(projectRoot, CONVENTION_DIR, categoryDir), { recursive: true });
-    }
 
     const fileNameCount = new Map<string, number>();
     const manifest: ConventionDownloadManifestV1 = {
@@ -956,6 +1000,7 @@ export async function conventionDownload(options?: ConventionCommandOptions): Pr
 
       const fileName = seenCount === 0 ? baseFileName : baseFileName.replace(/\.md$/, `-${seenCount + 1}.md`);
       const filePath = join(projectRoot, CONVENTION_DIR, categoryDir, fileName);
+      mkdirSync(join(projectRoot, CONVENTION_DIR, categoryDir), { recursive: true });
       atomicWriteFileSync(filePath, contentMarkdown, 'utf-8');
 
       manifest.entries.push({
@@ -971,12 +1016,21 @@ export async function conventionDownload(options?: ConventionCommandOptions): Pr
       });
     }
 
+    // 새 목록에 없는 파일만 이전 manifest의 소유권 기록으로 지운다. 디렉터리를 스윕하면
+    // 사용자가 같은 카테고리에 둔 파일까지 지워지고, 빈 서버 응답에서는 정리 자체가 빠진다.
+    removeStaleManifestFiles(projectRoot, previousManifest, manifest);
     writeManifest(projectRoot, manifest);
     return conventionList;
   });
 
-  // 컨벤션이 없어 위 블록이 manifest를 쓰지 않고 빠져나간 경우에도 가이드 해시는 남겨야 한다.
+  // 컨벤션 유무와 무관하게 이번 다운로드의 플랫폼 가이드 해시를 manifest에 반영한다.
   persistPlatformGuideHashes(projectRoot, platformGuides.hashes, platformGuidesHash);
+  const unmanagedFiles = findUnmanagedConventionFiles(projectRoot, loadManifestOrCreate(projectRoot));
+  const warning =
+    unmanagedFiles.length > 0
+      ? `Unmanaged convention files are still present: ${unmanagedFiles.join(', ')}. ` +
+        `They were not deleted because they are not recorded in ${CONVENTION_MANIFEST_FILE}. Remove them manually if they are stale.`
+      : undefined;
 
   if (!conventions || conventions.length === 0) {
     if (hasReportingTemplate) {
@@ -984,7 +1038,10 @@ export async function conventionDownload(options?: ConventionCommandOptions): Pr
         platformGuideCount > 0
           ? `\nDownloaded ${platformGuideCount} platform guide file(s) into ${CONVENTION_DIR}/platform`
           : '';
-      return `Convention sync completed.\nUpdated ${CONVENTION_DIR}/${CONVENTION_INDEX_FILE}\nNo project conventions found.${platformLine}`;
+      return {
+        message: `Convention sync completed.\nUpdated ${CONVENTION_DIR}/${CONVENTION_INDEX_FILE}\nNo project conventions found.${platformLine}`,
+        ...(warning ? { unmanagedFiles, warning } : {}),
+      };
     }
 
     throw new Error('No conventions found for this project. Create one via the web dashboard first.');
@@ -997,7 +1054,10 @@ export async function conventionDownload(options?: ConventionCommandOptions): Pr
       ? `Downloaded ${platformGuideCount} platform guide file(s) into ${CONVENTION_DIR}/platform\n`
       : '';
 
-  return `Convention sync completed.\n${reportingLine}${platformLine}Downloaded ${conventions.length} file(s) into category directories under ${CONVENTION_DIR}`;
+  return {
+    message: `Convention sync completed.\n${reportingLine}${platformLine}Downloaded ${conventions.length} file(s) into category directories under ${CONVENTION_DIR}`,
+    ...(warning ? { unmanagedFiles, warning } : {}),
+  };
 }
 
 function parseConventionMarkdown(fileRelativePath: string, markdown: string): ReturnType<typeof matter> {
