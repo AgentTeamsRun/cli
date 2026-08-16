@@ -21,6 +21,7 @@ import { getPlanRunbook, listPlans } from '../api/plan.js';
 import { getPostMortem, listPostMortems } from '../api/postmortem.js';
 import { getReport, listReports } from '../api/report.js';
 import { searchEntities } from '../api/search.js';
+import { getSkill, listSkills } from '../api/skill.js';
 import type { McpToolContext } from './context.js';
 
 export { SEARCH_TOOL_NAME };
@@ -62,6 +63,8 @@ export function createCliContextToolsClient(context: McpToolContext): ContextToo
     getDocument: async (id) => getDocument(apiUrl, projectId, await auth(), id),
     listConventions: async (params) => listConventions(apiUrl, projectId, await auth(), scalarListParams(params)),
     getConvention: async (id) => getConvention(apiUrl, projectId, await auth(), id),
+    listSkills: async (params) => listSkills(apiUrl, projectId, await auth(), scalarListParams(params)),
+    getSkill: async (id) => getSkill(apiUrl, projectId, await auth(), id),
     listCodeReviews: async (params) => listCodeReviews(apiUrl, projectId, await auth(), scalarListParams(params)),
     getCodeReview: async (id) => getCodeReview(apiUrl, projectId, await auth(), id),
     listCodeReviewFindings: async (codeReviewId, params) =>
