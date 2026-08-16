@@ -473,12 +473,12 @@ describe('agentteams_resolve MCP tool', () => {
     );
     const delta = withResolve.totalChars - withoutResolve.totalChars;
 
-    // Measured 2026-08-08, after the two comment tools lost their top-level
-    // union. This is the number that decided the profile membership above: 1.7k
-    // chars is cheap in `full` (45.3k) and a 50% jump in `minimal` (3.4k), which
+    // Measured 2026-08-16, after agentteams_codereview_finding_list joined the
+    // catalog. This is the number that decided the profile membership above: 1.7k
+    // chars is cheap in `full` (47.0k) and a 50% jump in `minimal` (3.4k), which
     // is why `minimal` does not carry it.
     expect(delta).toBe(1_688);
-    expect(withResolve.totalChars).toBe(45_345);
+    expect(withResolve.totalChars).toBe(46_965);
     process.stderr.write(`[agentteams_resolve budget] ${JSON.stringify({ delta, full: withResolve.totalChars })}\n`);
   });
 });

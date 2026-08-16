@@ -5,7 +5,7 @@ import { addOutputOptions } from './options/output.js';
 import { addPaginationOptions } from './options/pagination.js';
 import { RUNNER_TYPE_OPTION_DESCRIPTION } from '../utils/runnerTypes.js';
 
-/** 액션 인벤토리: list/get/create/update/create-plan/submit-result/cancel/delete/dismiss/resolve/undismiss. */
+/** 액션 인벤토리: list/get/finding-list/create/update/create-plan/submit-result/cancel/delete/dismiss/resolve/undismiss. */
 export function registerCodeReviewCommand(program: Command): void {
   const root = program
     .command('code-review')
@@ -49,6 +49,9 @@ export function registerCodeReviewCommand(program: Command): void {
   );
   addLeaf('get', 'Get a code review or finding', (command) =>
     command.option('--id <id>', 'Code review ID').option('--finding-id <id>', 'Finding ID for single-finding focus'),
+  );
+  addLeaf('finding-list', 'List findings for a code review', (command) =>
+    addPaginationOptions(command).option('--id <id>', 'Code review ID'),
   );
   addLeaf('create', 'Create a code review', (command) =>
     addGitToggleOption(command)

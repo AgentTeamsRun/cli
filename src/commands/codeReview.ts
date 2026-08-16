@@ -8,6 +8,7 @@ import {
   dismissCodeReviewFinding,
   getCodeReview,
   getCodeReviewFinding,
+  listCodeReviewFindings,
   listCodeReviews,
   resolveCodeReviewFinding,
   submitCodeReviewResult,
@@ -110,6 +111,16 @@ export async function executeCodeReviewCommand(
       if (pageSize !== undefined) params.pageSize = pageSize;
 
       return listCodeReviews(apiUrl, projectId, headers, params);
+    }
+    case 'finding-list': {
+      const id = toNonEmptyString(options.id);
+      if (!id) throw new Error('--id is required for code-review finding-list');
+      const params: Record<string, string | number> = {};
+      const page = toPositiveInteger(options.page);
+      const pageSize = toPositiveInteger(options.pageSize);
+      if (page !== undefined) params.page = page;
+      if (pageSize !== undefined) params.pageSize = pageSize;
+      return listCodeReviewFindings(apiUrl, projectId, headers, id, params);
     }
     case 'get': {
       // --finding-id가 있으면 리뷰 전체 대신 단일 finding(+부모 리뷰 헤더)만 포커스 조회한다.

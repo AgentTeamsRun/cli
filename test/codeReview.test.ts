@@ -288,6 +288,45 @@ describe('code-review update', () => {
   });
 });
 
+describe('code-review finding-list', () => {
+  const apiUrl = 'http://localhost:3001';
+  const projectId = 'project_1';
+  const headers = { 'X-API-Key': 'key_test123', 'Content-Type': 'application/json' };
+
+  let axiosGetSpy: jest.SpiedFunction<typeof axios.get>;
+
+  beforeEach(() => {
+    jest.restoreAllMocks();
+    axiosGetSpy = jest.spyOn(axios, 'get');
+  });
+
+  it('lists findings for a review with optional pagination', async () => {
+    axiosGetSpy.mockResolvedValueOnce({
+      data: { data: [{ id: 'finding-1' }], meta: { total: 1, page: 2, pageSize: 20, totalPages: 1 } },
+    } as any);
+
+    const result = await executeCodeReviewCommand(apiUrl, projectId, headers, 'finding-list', {
+      id: 'review-1',
+      page: '2',
+      pageSize: '20',
+    });
+
+    expect(axiosGetSpy).toHaveBeenCalledTimes(1);
+    expect(axiosGetSpy).toHaveBeenCalledWith(
+      'http://localhost:3001/api/projects/project_1/code-reviews/review-1/findings',
+      { headers, params: { page: 2, pageSize: 20 } },
+    );
+    expect(result.data).toEqual([{ id: 'finding-1' }]);
+  });
+
+  it('throws when --id is missing', async () => {
+    await expect(executeCodeReviewCommand(apiUrl, projectId, headers, 'finding-list', {})).rejects.toThrow(
+      /--id is required/,
+    );
+    expect(axiosGetSpy).not.toHaveBeenCalled();
+  });
+});
+
 describe('code-review get', () => {
   const apiUrl = 'http://localhost:3001';
   const projectId = 'project_1';

@@ -177,6 +177,19 @@ const LIST_CASES = [
       pageSize: 20,
     },
   },
+  {
+    tool: 'agentteams_codereview_finding_list',
+    url: `${projectUrl}/code-reviews/review-1/findings`,
+    arguments: {
+      codeReviewId: 'agentteams_rev_review-1',
+      page: 2,
+      pageSize: 20,
+    },
+    expectedParams: {
+      page: 2,
+      pageSize: 20,
+    },
+  },
 ] as const;
 
 const READ_ERROR_CASES = [
@@ -286,7 +299,7 @@ describe('mcp exact list and missing detail tools', () => {
     jest.restoreAllMocks();
   });
 
-  it('exposes exactly nine list, eleven get, and one search tool without duplicates', async () => {
+  it('exposes exactly ten list, eleven get, and one search tool without duplicates', async () => {
     const { client, handle } = connect();
     openHandle = handle;
 
@@ -294,11 +307,11 @@ describe('mcp exact list and missing detail tools', () => {
     const response = await client.request('tools/list', { _meta: MODERN_META });
     const names = (response.result?.tools ?? []).map((tool: { name: string }) => tool.name);
 
-    // 20 shared read tools + 2 CLI-local tools + 9 write tools; agentteams_guide_get
+    // 21 shared read tools + 2 CLI-local tools + 9 write tools; agentteams_guide_get
     // also ends in `_get`, while agentteams_resolve matches none of the suffixes.
-    expect(names).toHaveLength(31);
-    expect(new Set(names).size).toBe(31);
-    expect(names.filter((name: string) => name.endsWith('_list'))).toHaveLength(9);
+    expect(names).toHaveLength(32);
+    expect(new Set(names).size).toBe(32);
+    expect(names.filter((name: string) => name.endsWith('_list'))).toHaveLength(10);
     expect(names.filter((name: string) => name.endsWith('_get'))).toHaveLength(11);
     expect(names.filter((name: string) => name === 'agentteams_search')).toHaveLength(1);
     expect(names.filter((name: string) => name === 'agentteams_codereview_get')).toHaveLength(1);
@@ -311,8 +324,8 @@ describe('mcp exact list and missing detail tools', () => {
     const definitions = [...getContextToolDefinitions(), ...cliLocalDefinitions()];
     const budget = measureToolDefinitionBudget(definitions);
 
-    expect(catalog).toHaveLength(31);
-    expect(new Set(catalog.map(({ name }) => name)).size).toBe(31);
+    expect(catalog).toHaveLength(32);
+    expect(new Set(catalog.map(({ name }) => name)).size).toBe(32);
     expect(getToolNamesForProfile(catalog, 'full')).toEqual(catalog.map(({ name }) => name));
     expect(getToolNamesForProfile(catalog, 'read')).toEqual(readSpecs.map(({ name }) => name));
     expect(getToolNamesForProfile(catalog, 'documents')).toEqual([
@@ -350,7 +363,7 @@ describe('mcp exact list and missing detail tools', () => {
     for (const profile of ['read', 'documents', 'comments', 'minimal'] as const) {
       expect(getToolNamesForProfile(catalog, profile)).not.toContain('agentteams_resolve');
     }
-    expect(budget).toMatchObject({ toolCount: 31 });
+    expect(budget).toMatchObject({ toolCount: 32 });
     expect(budget.descriptionChars).toBeGreaterThan(15_000);
     // 코멘트 두 툴의 최상위 union 을 평탄화하면서 중복 분기가 사라져 스키마가 줄었다(2026-08-08).
     expect(budget.schemaChars).toBeGreaterThan(24_000);

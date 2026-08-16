@@ -6,7 +6,7 @@ import {
   type ContextToolSpec,
 } from '@agentteams/context-tools';
 import { getCoAction, listCoActions } from '../api/coaction.js';
-import { getCodeReview, getCodeReviewFinding, listCodeReviews } from '../api/codeReview.js';
+import { getCodeReview, getCodeReviewFinding, listCodeReviewFindings, listCodeReviews } from '../api/codeReview.js';
 import {
   getComment,
   getReply,
@@ -64,6 +64,8 @@ export function createCliContextToolsClient(context: McpToolContext): ContextToo
     getConvention: async (id) => getConvention(apiUrl, projectId, await auth(), id),
     listCodeReviews: async (params) => listCodeReviews(apiUrl, projectId, await auth(), scalarListParams(params)),
     getCodeReview: async (id) => getCodeReview(apiUrl, projectId, await auth(), id),
+    listCodeReviewFindings: async (codeReviewId, params) =>
+      listCodeReviewFindings(apiUrl, projectId, await auth(), codeReviewId, scalarListParams(params)),
     listComments: async (planId, params) =>
       listComments(apiUrl, projectId, await auth(), planId, scalarListParams(params)),
     listFindingComments: async (findingId, params) =>
