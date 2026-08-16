@@ -15,6 +15,8 @@ import {
   updateReply,
 } from '../api/comment.js';
 import { createDocumentComment, createDocument, deleteDocument, updateDocument } from '../api/document.js';
+import { createCoAction, deleteCoAction, updateCoAction } from '../api/coaction.js';
+import { createPostMortem, updatePostMortem } from '../api/postmortem.js';
 import { resolveToolHeaders, type McpLocalToolSpec } from './localTools.js';
 
 /**
@@ -34,6 +36,8 @@ export type McpWriteToolSpec = McpLocalToolSpec;
 
 const GUIDE_FIRST = 'Call agentteams_guide_get("document") first and follow that guide.';
 const COMMENT_GUIDE_FIRST = 'Call agentteams_guide_get("comment") first and follow that guide.';
+const CO_ACTION_GUIDE_FIRST = 'Call agentteams_guide_get("co-action") first and follow that guide.';
+const POST_MORTEM_GUIDE_FIRST = 'Call agentteams_guide_get("post-mortem") first and follow that guide.';
 const TAG_POLICY =
   'You cannot set confirmed tags. Anything you pass in suggestedTags is a suggestion for a human to confirm.';
 const PROJECT_SCOPE =
@@ -79,6 +83,14 @@ const commentWriteDiscovery = defineToolDiscoveryMetadata({
   domain: 'comments',
   profiles: ['full', 'comments'],
 });
+const coActionWriteDiscovery = defineToolDiscoveryMetadata({
+  domain: 'coActions',
+  profiles: ['full'],
+});
+const postMortemWriteDiscovery = defineToolDiscoveryMetadata({
+  domain: 'postMortems',
+  profiles: ['full'],
+});
 
 /** Credentials can expire mid-session, so headers are resolved per call, never captured. */
 const auth = resolveToolHeaders;
@@ -86,6 +98,12 @@ const auth = resolveToolHeaders;
 /** Drop keys the caller omitted so an absent optional never reaches the server as `undefined`. */
 const definedFields = <T extends Record<string, unknown>>(fields: T): Record<string, unknown> =>
   Object.fromEntries(Object.entries(fields).filter(([, value]) => value !== undefined));
+
+const requireOneOf = (toolName: string, args: Record<string, unknown>, fieldNames: readonly string[]) => {
+  if (!fieldNames.some((fieldName) => args[fieldName] !== undefined)) {
+    throw new Error(`${toolName} requires at least one of: ${fieldNames.join(', ')}.`);
+  }
+};
 
 const documentCreateSpec: McpWriteToolSpec = {
   name: 'agentteams_document_create',
@@ -207,6 +225,13 @@ const commentExpectedUpdatedAtField = z
   .min(1)
   .optional()
   .describe("The comment's updatedAt as you last read it. The write is rejected if someone else changed it since.");
+
+const expectedUpdatedAtFieldFor = (entity: string) =>
+  z
+    .string()
+    .min(1)
+    .optional()
+    .describe(`The ${entity}'s updatedAt as you last read it. The write is rejected if someone else changed it since.`);
 
 const COMMENT_PARENT_KEYS = ['planId', 'taskId', 'documentId', 'findingId'] as const;
 type CommentParentKey = (typeof COMMENT_PARENT_KEYS)[number];
@@ -540,6 +565,221 @@ const commentReplyDeleteSpec: McpWriteToolSpec = {
   },
 };
 
+const coActionCreateSpec: McpWriteToolSpec = {
+  name: 'agentteams_coaction_create',
+  title: 'Create AgentTeams Co-Action',
+  description: [
+    'Create a co-action (handoff record) in this project.',
+    CO_ACTION_GUIDE_FIRST,
+    PROJECT_SCOPE,
+    'Returns the created co-action id and webUrl.',
+  ].join(' '),
+  discovery: coActionWriteDiscovery,
+  inputSchema: z.strictObject({
+    title: z.string().min(1).max(255).describe('Co-action title.'),
+    content: z.string().min(1).describe('Co-action body in Markdown.'),
+    planId: z.string().min(1).optional().describe('Related plan id (bare uuid or agentteams_pln_-prefixed).'),
+    completionReportId: z
+      .string()
+      .min(1)
+      .optional()
+      .describe('Related completion report id (bare uuid or agentteams_rpt_-prefixed).'),
+    postMortemId: z
+      .string()
+      .min(1)
+      .optional()
+      .describe('Related post-mortem id (bare uuid or agentteams_pmt_-prefixed).'),
+    status: z.enum(['OPEN', 'CLOSED']).optional().describe('OPEN (default) or CLOSED.'),
+    visibility: visibilityField,
+    guideHash: guideHashField,
+    idempotencyKey: idempotencyKeyField,
+  }),
+  handler: async (args, context) => {
+    requireOneOf('agentteams_coaction_create', args, ['planId', 'completionReportId', 'postMortemId']);
+    return createCoAction(
+      context.apiUrl,
+      context.projectId,
+      await auth(context),
+      definedFields({
+        title: args.title,
+        content: args.content,
+        planId: typeof args.planId === 'string' ? stripContextEntityIdPrefix(args.planId as string) : undefined,
+        completionReportId:
+          typeof args.completionReportId === 'string'
+            ? stripContextEntityIdPrefix(args.completionReportId as string)
+            : undefined,
+        postMortemId:
+          typeof args.postMortemId === 'string' ? stripContextEntityIdPrefix(args.postMortemId as string) : undefined,
+        status: args.status,
+        visibility: args.visibility,
+        guideHash: args.guideHash,
+        idempotencyKey: args.idempotencyKey,
+      }),
+    );
+  },
+};
+
+const coActionUpdateSpec: McpWriteToolSpec = {
+  name: 'agentteams_coaction_update',
+  title: 'Update AgentTeams Co-Action',
+  description: [
+    'Update an existing co-action, including status transitions such as OPEN → CLOSED.',
+    CO_ACTION_GUIDE_FIRST,
+    'Pass expectedUpdatedAt (from agentteams_coaction_get) so a concurrent edit is rejected rather than silently overwritten.',
+    PROJECT_SCOPE,
+    'Returns the updated co-action id, status, and webUrl.',
+  ].join(' '),
+  discovery: coActionWriteDiscovery,
+  inputSchema: z.strictObject({
+    id: z.string().min(1).describe('Co-action id (bare uuid or agentteams_act_-prefixed).'),
+    title: z.string().min(1).max(255).optional().describe('New title.'),
+    content: z.string().min(1).optional().describe('New body in Markdown. Replaces the whole body.'),
+    status: z.enum(['OPEN', 'CLOSED']).optional().describe('Status transition. OPEN or CLOSED.'),
+    visibility: visibilityField,
+    expectedUpdatedAt: expectedUpdatedAtFieldFor('co-action'),
+    guideHash: guideHashField,
+    idempotencyKey: idempotencyKeyField,
+  }),
+  handler: async (args, context) => {
+    requireOneOf('agentteams_coaction_update', args, ['title', 'content', 'status', 'visibility']);
+    return updateCoAction(
+      context.apiUrl,
+      context.projectId,
+      await auth(context),
+      stripContextEntityIdPrefix(args.id as string),
+      definedFields({
+        title: args.title,
+        content: args.content,
+        status: args.status,
+        visibility: args.visibility,
+        expectedUpdatedAt: args.expectedUpdatedAt,
+        guideHash: args.guideHash,
+        idempotencyKey: args.idempotencyKey,
+      }),
+    );
+  },
+};
+
+const coActionDeleteSpec: McpWriteToolSpec = {
+  name: 'agentteams_coaction_delete',
+  title: 'Delete AgentTeams Co-Action',
+  description: [
+    'Delete a co-action from this project. This is destructive and cannot be undone.',
+    CO_ACTION_GUIDE_FIRST,
+    'Without expectedUpdatedAt this is an unconditional delete: it removes the co-action even if someone edited it after you last read it.',
+    'Pass expectedUpdatedAt (from agentteams_coaction_get) unless you intend that.',
+    'Confirm with the user before deleting anything you did not just create.',
+    PROJECT_SCOPE,
+  ].join(' '),
+  discovery: coActionWriteDiscovery,
+  inputSchema: z.strictObject({
+    id: z.string().min(1).describe('Co-action id (bare uuid or agentteams_act_-prefixed).'),
+    expectedUpdatedAt: expectedUpdatedAtFieldFor('co-action'),
+    guideHash: guideHashField,
+    idempotencyKey: idempotencyKeyField,
+  }),
+  handler: async (args, context) => {
+    const coActionId = stripContextEntityIdPrefix(args.id as string);
+    await deleteCoAction(
+      context.apiUrl,
+      context.projectId,
+      await auth(context),
+      coActionId,
+      definedFields({
+        expectedUpdatedAt: args.expectedUpdatedAt,
+        guideHash: args.guideHash,
+        idempotencyKey: args.idempotencyKey,
+      }) as Record<string, string>,
+    );
+    return { deleted: true, id: coActionId };
+  },
+};
+
+const postMortemCreateSpec: McpWriteToolSpec = {
+  name: 'agentteams_postmortem_create',
+  title: 'Create AgentTeams Post-Mortem',
+  description: [
+    'Create a plan-linked post-mortem or a standalone service-incident post-mortem. Create one only when a reproducible or systematic failure delayed or blocked the work and there is a preventable cause.',
+    POST_MORTEM_GUIDE_FIRST,
+    PROJECT_SCOPE,
+    'Returns the created post-mortem id and webUrl.',
+  ].join(' '),
+  discovery: postMortemWriteDiscovery,
+  inputSchema: z.strictObject({
+    planId: z
+      .string()
+      .min(1)
+      .optional()
+      .describe('Optional related plan id (bare uuid or agentteams_pln_-prefixed). Omit for a service incident.'),
+    title: z.string().min(1).max(255).describe('Post-mortem title.'),
+    content: z.string().min(50).describe('Post-mortem body in Markdown. Must be at least 50 characters.'),
+    actionItems: z.array(z.string().min(1)).min(1).describe('Follow-up action items. At least one is required.'),
+    status: z
+      .enum(['OPEN', 'IN_PROGRESS', 'RESOLVED'])
+      .optional()
+      .describe('OPEN (default), IN_PROGRESS, or RESOLVED.'),
+    guideHash: guideHashField,
+    idempotencyKey: idempotencyKeyField,
+  }),
+  handler: async (args, context) => {
+    return createPostMortem(
+      context.apiUrl,
+      context.projectId,
+      await auth(context),
+      definedFields({
+        planId: typeof args.planId === 'string' ? stripContextEntityIdPrefix(args.planId as string) : undefined,
+        title: args.title,
+        content: args.content,
+        actionItems: args.actionItems,
+        status: args.status,
+        guideHash: args.guideHash,
+        idempotencyKey: args.idempotencyKey,
+      }),
+    );
+  },
+};
+
+const postMortemUpdateSpec: McpWriteToolSpec = {
+  name: 'agentteams_postmortem_update',
+  title: 'Update AgentTeams Post-Mortem',
+  description: [
+    'Update an existing post-mortem. Only the fields you pass are changed.',
+    POST_MORTEM_GUIDE_FIRST,
+    'Pass expectedUpdatedAt (from agentteams_postmortem_get) so a concurrent edit is rejected rather than silently overwritten.',
+    PROJECT_SCOPE,
+    'Returns the updated post-mortem id and webUrl.',
+  ].join(' '),
+  discovery: postMortemWriteDiscovery,
+  inputSchema: z.strictObject({
+    id: z.string().min(1).describe('Post-mortem id (bare uuid or agentteams_pmt_-prefixed).'),
+    title: z.string().min(1).max(255).optional().describe('New title.'),
+    content: z.string().min(50).optional().describe('New body in Markdown. Replaces the whole body.'),
+    actionItems: z.array(z.string().min(1)).min(1).optional().describe('Replacement follow-up action items.'),
+    status: z.enum(['OPEN', 'IN_PROGRESS', 'RESOLVED']).optional().describe('New status.'),
+    expectedUpdatedAt: expectedUpdatedAtFieldFor('post-mortem'),
+    guideHash: guideHashField,
+    idempotencyKey: idempotencyKeyField,
+  }),
+  handler: async (args, context) => {
+    requireOneOf('agentteams_postmortem_update', args, ['title', 'content', 'actionItems', 'status']);
+    return updatePostMortem(
+      context.apiUrl,
+      context.projectId,
+      await auth(context),
+      stripContextEntityIdPrefix(args.id as string),
+      definedFields({
+        title: args.title,
+        content: args.content,
+        actionItems: args.actionItems,
+        status: args.status,
+        expectedUpdatedAt: args.expectedUpdatedAt,
+        guideHash: args.guideHash,
+        idempotencyKey: args.idempotencyKey,
+      }),
+    );
+  },
+};
+
 /** Every write tool the CLI MCP server exposes, in registration order. */
 export function getWriteToolSpecs(): McpWriteToolSpec[] {
   return [
@@ -552,5 +792,10 @@ export function getWriteToolSpecs(): McpWriteToolSpec[] {
     commentReplyCreateSpec,
     commentReplyUpdateSpec,
     commentReplyDeleteSpec,
+    coActionCreateSpec,
+    coActionUpdateSpec,
+    coActionDeleteSpec,
+    postMortemCreateSpec,
+    postMortemUpdateSpec,
   ];
 }

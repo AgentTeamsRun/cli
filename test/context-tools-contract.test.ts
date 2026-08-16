@@ -92,6 +92,12 @@ const expectedContract = [
   },
   { name: 'agentteams_convention_get', required: ['id'], properties: ['id'] },
   {
+    name: 'agentteams_skill_list',
+    required: [],
+    properties: ['legacyConventionId', 'page', 'pageSize', 'repositoryId', 'scope', 'search'],
+  },
+  { name: 'agentteams_skill_get', required: ['id'], properties: ['id'] },
+  {
     name: 'agentteams_codereview_list',
     required: [],
     properties: [
@@ -121,6 +127,11 @@ const expectedContract = [
     properties: ['commentId', 'order', 'page', 'pageSize'],
   },
   { name: 'agentteams_comment_reply_get', required: ['replyId'], properties: ['replyId'] },
+  {
+    name: 'agentteams_codereview_finding_list',
+    required: ['codeReviewId'],
+    properties: ['codeReviewId', 'page', 'pageSize'],
+  },
   {
     name: 'agentteams_codereview_finding_get',
     required: ['id'],
@@ -166,7 +177,9 @@ describe('shared context-tools contract', () => {
 
     expect(VALID_TYPES).toBe(CONTEXT_TOOL_SEARCH_TYPES);
     expect(schema.properties?.types?.items?.enum).toEqual(CONTEXT_TOOL_SEARCH_TYPES);
+    expect(CONTEXT_TOOL_SEARCH_TYPES).toContain('SKILL');
     expect(CONTEXT_TOOL_SEARCH_TYPES).toContain('SENTRY_ISSUE');
+    expect(search.description).toContain('skills');
   });
 
   it('uses the shared entity id prefix normalizer', () => {
@@ -188,17 +201,33 @@ describe('shared context-tools contract', () => {
     const specs = getContextToolSpecs();
     const listSpecs = specs.filter(({ name }) => name.endsWith('_list'));
 
-    expect(listSpecs).toHaveLength(9);
+    expect(listSpecs).toHaveLength(11);
     for (const spec of listSpecs) {
       expect(spec.description).toContain('one page');
       expect(spec.description).toContain('meta.total');
       expect(spec.description).toContain('meta.totalPages');
-      expect(spec.description).toContain('metadata-only');
       expect(spec.description).toContain('agentteams_search');
+      if (spec.name === 'agentteams_codereview_finding_list') {
+        expect(spec.description).toContain('finding body');
+        expect(spec.description).not.toContain('metadata-only');
+      } else {
+        expect(spec.description).toContain('metadata-only');
+      }
     }
 
     expect(specs.find(({ name }) => name === 'agentteams_search')?.description).toContain('topic and relevance');
     expect(specs.find(({ name }) => name === 'agentteams_search')?.description).toContain('exact filtered count');
+  });
+
+  it('describes skill metadata and file-content availability accurately', () => {
+    const specs = getContextToolSpecs();
+    const skillList = specs.find(({ name }) => name === 'agentteams_skill_list');
+    const skillGet = specs.find(({ name }) => name === 'agentteams_skill_get');
+
+    expect(skillList?.description).not.toContain('fetch full content with agentteams_skill_get');
+    expect(skillList?.description).toContain('file contents are not returned');
+    expect(skillGet?.description).toContain('file contents are not returned');
+    expect(skillGet?.description).not.toContain('nothing is summarized or omitted');
   });
 
   it('describes one shared project binding for every search, list, and get tool', () => {
@@ -206,7 +235,7 @@ describe('shared context-tools contract', () => {
       ({ name }) => name === 'agentteams_search' || name.endsWith('_list') || name.endsWith('_get'),
     );
 
-    expect(readSpecs).toHaveLength(20);
+    expect(readSpecs).toHaveLength(23);
     for (const spec of readSpecs) {
       expect(spec.description).toContain('project bound to the current MCP server or context client');
       expect(spec.description).toContain('cannot read another project');
@@ -403,10 +432,12 @@ describe('shared context-tools contract', () => {
 
   it('normalizes entity-bearing filters and finding ids but leaves raw comment ids unchanged', async () => {
     const listCodeReviews = jest.fn(async () => ({ data: [] }));
+    const listCodeReviewFindings = jest.fn(async () => ({ data: [] }));
     const getCodeReviewFinding = jest.fn(async () => ({ data: {} }));
     const getComment = jest.fn(async () => ({ data: {} }));
     const client = {
       listCodeReviews,
+      listCodeReviewFindings,
       getCodeReviewFinding,
       getComment,
     } as unknown as ContextToolsClient;
@@ -416,6 +447,15 @@ describe('shared context-tools contract', () => {
       {
         sourcePlanId: 'agentteams_pln_plan-1',
         sourceCompletionReportId: 'agentteams_rpt_report-1',
+      },
+      client,
+    );
+    await executeContextTool(
+      'agentteams_codereview_finding_list',
+      {
+        codeReviewId: 'agentteams_rev_review-1',
+        page: 2,
+        pageSize: 20,
       },
       client,
     );
@@ -433,6 +473,7 @@ describe('shared context-tools contract', () => {
       sourcePlanId: 'plan-1',
       sourceCompletionReportId: 'report-1',
     });
+    expect(listCodeReviewFindings).toHaveBeenCalledWith('review-1', { page: 2, pageSize: 20 });
     expect(getCodeReviewFinding).toHaveBeenCalledWith('finding-1', 'review-1');
     expect(getComment).toHaveBeenCalledWith('agentteams_pln_raw-comment-id');
   });

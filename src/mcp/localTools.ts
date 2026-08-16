@@ -79,7 +79,9 @@ const guideGetSpec: McpLocalToolSpec = {
   inputSchema: z.strictObject({
     recordKind: z
       .enum(GUIDE_RECORD_KINDS)
-      .describe('Record type whose guide you need. "document" and "comment" are write-enabled.'),
+      .describe(
+        'Record type whose guide you need. "document", "comment", "co-action", and "post-mortem" are write-enabled.',
+      ),
   }),
   handler: async (args, context) => {
     const guide = await resolvePlatformGuide(args.recordKind as GuideRecordKind, {

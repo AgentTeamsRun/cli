@@ -545,18 +545,6 @@ agentteams plan get --id agentteams_pln_f62762fc-730a-4201-8586-e2541505ed1b
 
 This normalization only removes the prefix — you still choose the command that matches the entity type. [`resolve`](#resolve) sits one level above it: give it the whole reference token and it works out the type as well, then dispatches to the right lookup.
 
-### Legacy V1 Plan HTML Preview
-
-V2 plans render structured sections and tasks directly in the web UI and do not display uploaded HTML previews. Do not pass `--html-file` or `--html-stdin` for V2 plan workflows.
-
-The optional HTML inputs and standalone `plan upload-html` action remain for legacy V1 plans that expose the visualization tab:
-
-```bash
-agentteams plan upload-html \
-  --id <plan-id> \
-  --file .agentteams/cli/temp/plan-summary.html
-```
-
 ```bash
 agentteams plan list
 agentteams plan update --id <plan-id> --status IN_PROGRESS

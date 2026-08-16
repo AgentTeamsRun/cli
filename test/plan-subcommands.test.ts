@@ -37,6 +37,31 @@ describe('plan 액션별 서브커맨드', () => {
     expect(result.stderr).toContain("unknown option '--html-file'");
   });
 
+  it.each([['create'], ['update'], ['quick']] as const)(
+    'plan %s --help에 HTML 프리뷰 플래그가 없다',
+    async (action) => {
+      const result = await parse(['plan', action, '--help']);
+      expect(result.stdout).not.toContain('--html-file');
+      expect(result.stdout).not.toContain('--html-stdin');
+      expect(result.stdout).not.toContain('--source-label');
+    },
+  );
+
+  it.each([['create'], ['update'], ['quick']] as const)(
+    'plan %s는 --html-file을 unknown option으로 거부한다',
+    async (action) => {
+      const result = await parse(['plan', action, '--html-file', 'x.html']);
+      expect(result.error?.exitCode).not.toBe(0);
+      expect(result.stderr).toContain("unknown option '--html-file'");
+    },
+  );
+
+  it('제거된 upload-html 커맨드를 거부한다', async () => {
+    const result = await parse(['plan', 'upload-html', '--id', 'plan-1', '--file', 'x.html']);
+    expect(result.error?.exitCode).not.toBe(0);
+    expect(result.stderr).toContain("unknown command 'upload-html'");
+  });
+
   it('제거된 show 별칭을 거부한다', async () => {
     const result = await parse(['plan', 'show', '--id', 'plan-1']);
     expect(result.error?.exitCode).not.toBe(0);

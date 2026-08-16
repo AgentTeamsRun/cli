@@ -14,8 +14,6 @@ const baseCreateOptions = {
   content: 'some plan body content',
   runnerType: 'CLAUDE_CODE',
   model: 'claude-opus-4-8',
-  // an HTML preview source so the preview gate passes when reached
-  htmlStdin: false,
 };
 
 describe('plan create complexity validation', () => {
@@ -31,10 +29,10 @@ describe('plan create complexity validation', () => {
     ).rejects.toThrow(/Invalid --complexity/);
   });
 
-  it('allows create without an HTML preview when complexity is valid', async () => {
+  it('allows create when complexity is valid', async () => {
     await expect(
       executePlanCommand(apiUrl, projectId, headers, 'create', { ...baseCreateOptions, complexity: 'MINIMAL' }),
-    ).rejects.not.toThrow(/HTML preview is required/);
+    ).rejects.not.toThrow(/Invalid --complexity/);
   });
 });
 

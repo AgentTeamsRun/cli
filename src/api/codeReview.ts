@@ -21,6 +21,19 @@ export async function getCodeReview(apiUrl: string, projectId: string, headers: 
   return response.data;
 }
 
+export async function listCodeReviewFindings(
+  apiUrl: string,
+  projectId: string,
+  headers: any,
+  codeReviewId: string,
+  params?: Record<string, string | number>,
+): Promise<any> {
+  const baseUrl = `${apiUrl}/api/projects/${projectId}/code-reviews/${encodeURIComponent(codeReviewId)}/findings`;
+  const requestConfig = params && Object.keys(params).length > 0 ? { headers, params } : { headers };
+  const response = await httpClient.get(baseUrl, requestConfig);
+  return response.data;
+}
+
 export async function getCodeReviewFinding(
   apiUrl: string,
   projectId: string,

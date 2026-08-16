@@ -148,6 +148,26 @@ const LIST_CASES = [
     },
   },
   {
+    tool: 'agentteams_skill_list',
+    url: `${projectUrl}/skills`,
+    arguments: {
+      scope: 'PROJECT',
+      repositoryId: 'repo-1',
+      search: 'MCP',
+      legacyConventionId: 'agentteams_cnv_cnv-1',
+      page: 2,
+      pageSize: 20,
+    },
+    expectedParams: {
+      scope: 'PROJECT',
+      repositoryId: 'repo-1',
+      search: 'MCP',
+      legacyConventionId: 'cnv-1',
+      page: 2,
+      pageSize: 20,
+    },
+  },
+  {
     tool: 'agentteams_codereview_list',
     url: `${projectUrl}/code-reviews`,
     arguments: {
@@ -173,6 +193,19 @@ const LIST_CASES = [
       sourcePlanId: 'plan-1',
       sourceCompletionReportId: 'report-1',
       createdByMemberId: 'member-1',
+      page: 2,
+      pageSize: 20,
+    },
+  },
+  {
+    tool: 'agentteams_codereview_finding_list',
+    url: `${projectUrl}/code-reviews/review-1/findings`,
+    arguments: {
+      codeReviewId: 'agentteams_rev_review-1',
+      page: 2,
+      pageSize: 20,
+    },
+    expectedParams: {
       page: 2,
       pageSize: 20,
     },
@@ -286,7 +319,7 @@ describe('mcp exact list and missing detail tools', () => {
     jest.restoreAllMocks();
   });
 
-  it('exposes exactly nine list, eleven get, and one search tool without duplicates', async () => {
+  it('exposes exactly ten list, eleven get, and one search tool without duplicates', async () => {
     const { client, handle } = connect();
     openHandle = handle;
 
@@ -294,12 +327,12 @@ describe('mcp exact list and missing detail tools', () => {
     const response = await client.request('tools/list', { _meta: MODERN_META });
     const names = (response.result?.tools ?? []).map((tool: { name: string }) => tool.name);
 
-    // 20 shared read tools + 2 CLI-local tools + 9 write tools; agentteams_guide_get
+    // 23 shared read tools + 2 CLI-local tools + 14 write tools; agentteams_guide_get
     // also ends in `_get`, while agentteams_resolve matches none of the suffixes.
-    expect(names).toHaveLength(31);
-    expect(new Set(names).size).toBe(31);
-    expect(names.filter((name: string) => name.endsWith('_list'))).toHaveLength(9);
-    expect(names.filter((name: string) => name.endsWith('_get'))).toHaveLength(11);
+    expect(names).toHaveLength(39);
+    expect(new Set(names).size).toBe(39);
+    expect(names.filter((name: string) => name.endsWith('_list'))).toHaveLength(11);
+    expect(names.filter((name: string) => name.endsWith('_get'))).toHaveLength(12);
     expect(names.filter((name: string) => name === 'agentteams_search')).toHaveLength(1);
     expect(names.filter((name: string) => name === 'agentteams_codereview_get')).toHaveLength(1);
     expect(names).not.toContain('agentteams_code_review_get');
@@ -311,8 +344,8 @@ describe('mcp exact list and missing detail tools', () => {
     const definitions = [...getContextToolDefinitions(), ...cliLocalDefinitions()];
     const budget = measureToolDefinitionBudget(definitions);
 
-    expect(catalog).toHaveLength(31);
-    expect(new Set(catalog.map(({ name }) => name)).size).toBe(31);
+    expect(catalog).toHaveLength(39);
+    expect(new Set(catalog.map(({ name }) => name)).size).toBe(39);
     expect(getToolNamesForProfile(catalog, 'full')).toEqual(catalog.map(({ name }) => name));
     expect(getToolNamesForProfile(catalog, 'read')).toEqual(readSpecs.map(({ name }) => name));
     expect(getToolNamesForProfile(catalog, 'documents')).toEqual([
@@ -350,12 +383,13 @@ describe('mcp exact list and missing detail tools', () => {
     for (const profile of ['read', 'documents', 'comments', 'minimal'] as const) {
       expect(getToolNamesForProfile(catalog, profile)).not.toContain('agentteams_resolve');
     }
-    expect(budget).toMatchObject({ toolCount: 31 });
+    expect(budget).toMatchObject({ toolCount: 39 });
     expect(budget.descriptionChars).toBeGreaterThan(15_000);
     // 코멘트 두 툴의 최상위 union 을 평탄화하면서 중복 분기가 사라져 스키마가 줄었다(2026-08-08).
     expect(budget.schemaChars).toBeGreaterThan(24_000);
     expect(budget.totalChars).toBeGreaterThan(43_000);
-    expect(budget.totalChars).toBeLessThan(48_000);
+    // 3단계 write 도구 5종(co-action 3 + post-mortem 2)이 합쳐져 57.3k가 됐다.
+    expect(budget.totalChars).toBeLessThan(60_000);
     expect(budget.estimatedTokens).toBe(Math.ceil(budget.totalChars / 4));
     process.stderr.write(`[mcp catalog budget] ${JSON.stringify(budget)}\n`);
   });

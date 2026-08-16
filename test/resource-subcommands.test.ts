@@ -95,6 +95,7 @@ const TASK4_ACTION_OPTIONS: Record<string, Record<string, string>> = {
   'code-review': {
     list: '--page-size',
     get: '--finding-id',
+    'finding-list': '--page-size',
     create: '--target-ref',
     update: '--diff-file',
     'create-plan': '--finding-ids',

@@ -5,7 +5,7 @@ import { addPaginationOptions } from './options/pagination.js';
 import { RUNNER_TYPE_OPTION_DESCRIPTION } from '../utils/runnerTypes.js';
 
 /**
- * 액션 인벤토리: list/get/create/update/delete/download/cleanup/start/finish/quick/status/set-status/upload-html/link-issue/unlink-issue/list-issues.
+ * 액션 인벤토리: list/get/create/update/delete/download/cleanup/start/finish/quick/status/set-status/link-issue/unlink-issue/list-issues.
  * get/show와 link-issue/issue는 별칭이었으며 get과 link-issue만 유지합니다.
  */
 export function registerPlanCommand(program: Command): void {
@@ -61,14 +61,6 @@ export function registerPlanCommand(program: Command): void {
     command.option('--id <id>', 'Plan ID').option('--status <status>', 'Plan status'),
   );
 
-  addLeaf('upload-html', 'Upload a legacy V1 plan HTML preview', (command) =>
-    command
-      .option('--id <id>', 'Plan ID')
-      .option('--file <path>', 'Read plan HTML summary from a local file')
-      .option('--stdin', 'Read plan HTML summary from stdin', false)
-      .option('--source-label <label>', 'Optional source label for uploaded plan HTML summary'),
-  );
-
   addLeaf('start', 'Start plan execution', (command) =>
     addGitToggleOption(command)
       .option('--id <id>', 'Plan ID')
@@ -111,9 +103,6 @@ export function registerPlanCommand(program: Command): void {
         'Keep the uploaded file under .agentteams/cli/temp/ instead of deleting it after upload',
         false,
       )
-      .option('--html-file <path>', 'Read a legacy V1 plan HTML preview from a local file')
-      .option('--html-stdin', 'Read a legacy V1 plan HTML preview from stdin', false)
-      .option('--source-label <label>', 'Optional source label for uploaded plan HTML summary')
       .option('--template <name>', 'Plan content template (refactor-minimal, quick-minimal)')
       .option('--status <status>', 'Ignored because new plans start as BACKLOG')
       .option('--type <type>', 'Plan type (FEATURE, BUG_FIX, ISSUE, REFACTOR, CHORE)')
@@ -137,9 +126,6 @@ export function registerPlanCommand(program: Command): void {
         'Keep the uploaded file under .agentteams/cli/temp/ instead of deleting it after upload',
         false,
       )
-      .option('--html-file <path>', 'Read a legacy V1 plan HTML preview from a local file')
-      .option('--html-stdin', 'Read a legacy V1 plan HTML preview from stdin', false)
-      .option('--source-label <label>', 'Optional source label for uploaded plan HTML summary')
       .option('--status <status>', 'Plan status')
       .option('--type <type>', 'Plan type (FEATURE, BUG_FIX, ISSUE, REFACTOR, CHORE)')
       .option('--complexity <level>', 'Plan complexity (MINIMAL, STANDARD, FULL)')

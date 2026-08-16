@@ -38,12 +38,16 @@ describe('removedContractHint', () => {
     ["error: unknown option '--team-id'", 'AGENTTEAMS_TEAM_ID'],
     ["error: unknown option '--limit'", 'Use --page-size.'],
     ["error: unknown command 'show'", "Use 'get'."],
+    ["error: unknown option '--html-file'", 'Plan HTML previews were removed.'],
+    ["error: unknown option '--html-stdin'", 'Plan HTML previews were removed.'],
+    ["error: unknown option '--source-label'", 'Plan HTML previews were removed.'],
+    ["error: unknown command 'upload-html'", 'Plan HTML previews were removed.'],
   ])('%s에 대체 수단을 안내한다', (message, expected) => {
     expect(removedContractHint(message)).toContain(expected);
   });
 
   it('제거 대상이 아닌 인자에는 힌트를 붙이지 않는다', () => {
-    expect(removedContractHint("error: unknown option '--html-file'")).toBeUndefined();
+    expect(removedContractHint("error: unknown option '--nope'")).toBeUndefined();
     expect(removedContractHint("error: unknown command 'nope'")).toBeUndefined();
   });
 });
@@ -61,9 +65,21 @@ describe('제거된 인자의 실제 실패 출력', () => {
     expect(stderr).toContain("hint: The 'show' alias was removed. Use 'get'.");
   });
 
-  it('제거 대상이 아닌 실패에는 힌트를 붙이지 않는다', async () => {
-    const stderr = await stderrOf(['plan', 'list', '--html-file', 'x']);
+  it('제거된 --html-file 실패에 HTML 프리뷰 제거를 안내한다', async () => {
+    const stderr = await stderrOf(['plan', 'create', '--html-file', 'x']);
     expect(stderr).toContain("unknown option '--html-file'");
+    expect(stderr).toContain('hint: Plan HTML previews were removed.');
+  });
+
+  it('제거된 upload-html 커맨드 실패에 HTML 프리뷰 제거를 안내한다', async () => {
+    const stderr = await stderrOf(['plan', 'upload-html', '--id', 'x']);
+    expect(stderr).toContain("unknown command 'upload-html'");
+    expect(stderr).toContain('hint: Plan HTML previews were removed.');
+  });
+
+  it('제거 대상이 아닌 실패에는 힌트를 붙이지 않는다', async () => {
+    const stderr = await stderrOf(['plan', 'list', '--nope', 'x']);
+    expect(stderr).toContain("unknown option '--nope'");
     expect(stderr).not.toContain('hint:');
   });
 });

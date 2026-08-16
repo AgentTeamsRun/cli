@@ -36,6 +36,11 @@ const WRITE_TOOL_NAMES = [
   'agentteams_comment_reply_create',
   'agentteams_comment_reply_update',
   'agentteams_comment_reply_delete',
+  'agentteams_coaction_create',
+  'agentteams_coaction_update',
+  'agentteams_coaction_delete',
+  'agentteams_postmortem_create',
+  'agentteams_postmortem_update',
 ];
 
 describe('mcp write tools', () => {
@@ -64,11 +69,26 @@ describe('mcp write tools', () => {
       'utf-8',
     );
     writeFileSync(
+      join(projectRoot, '.agentteams', 'platform', 'co-action-guide.md'),
+      '# Co-Action Guide\n핸드오프 기록.\n',
+      'utf-8',
+    );
+    writeFileSync(
+      join(projectRoot, '.agentteams', 'platform', 'post-mortem-guide.md'),
+      '# Post-Mortem Guide\n재현 가능한 실패만.\n',
+      'utf-8',
+    );
+    writeFileSync(
       join(projectRoot, '.agentteams', 'conventions.manifest.json'),
       JSON.stringify({
         version: 1,
         generatedAt: '2026-08-01T00:00:00.000Z',
-        platformGuideHashes: { 'document-guide.md': 'doc-hash', 'comment-guide.md': 'comment-hash' },
+        platformGuideHashes: {
+          'document-guide.md': 'doc-hash',
+          'comment-guide.md': 'comment-hash',
+          'co-action-guide.md': 'co-action-hash',
+          'post-mortem-guide.md': 'post-mortem-hash',
+        },
         entries: [],
       }),
       'utf-8',
@@ -95,7 +115,7 @@ describe('mcp write tools', () => {
     return client.request('tools/call', { name, arguments: args, _meta: MODERN_META });
   };
 
-  it('advertises exactly the document and comment write tools alongside the read surface', async () => {
+  it('advertises document, comment, co-action, and post-mortem write tools alongside the read surface', async () => {
     const { client, handle } = connect();
     openHandle = handle;
 
@@ -107,7 +127,7 @@ describe('mcp write tools', () => {
     for (const writeTool of WRITE_TOOL_NAMES) {
       expect(names).toContain(writeTool);
     }
-    // 3단계 이후 엔티티(플랜·보고서 등)의 쓰기 도구를 미리 만들지 않는다.
+    // 4단계(Code Review / Finding 쓰기)는 아직 만들지 않는다.
     const writeSuffixed = names.filter((name: string) => /_(create|update|delete)$/.test(name));
     expect(writeSuffixed.sort()).toEqual(
       [
@@ -120,8 +140,15 @@ describe('mcp write tools', () => {
         'agentteams_comment_reply_create',
         'agentteams_comment_reply_delete',
         'agentteams_comment_reply_update',
+        'agentteams_coaction_create',
+        'agentteams_coaction_update',
+        'agentteams_coaction_delete',
+        'agentteams_postmortem_create',
+        'agentteams_postmortem_update',
       ].sort(),
     );
+    expect(names).not.toContain('agentteams_postmortem_delete');
+    expect(names).not.toContain('agentteams_codereview_create');
   });
 
   it('exposes no projectId argument on any write tool', async () => {
@@ -149,6 +176,25 @@ describe('mcp write tools', () => {
     expect(payload.guideHash).toBe('doc-hash');
     expect(payload.content).toContain('# Document Guide');
     expect(payload.warning).toBeUndefined();
+  });
+
+  it('returns the local co-action and post-mortem guides with their hashes', async () => {
+    const coAction = await callTool('agentteams_guide_get', { recordKind: 'co-action' });
+    expect(coAction.result?.isError).toBeFalsy();
+    const coActionPayload = JSON.parse(coAction.result?.content[0].text);
+    expect(coActionPayload.fileName).toBe('co-action-guide.md');
+    expect(coActionPayload.guideHash).toBe('co-action-hash');
+    expect(coActionPayload.content).toContain('# Co-Action Guide');
+
+    await openHandle?.close();
+    openHandle = undefined;
+
+    const postMortem = await callTool('agentteams_guide_get', { recordKind: 'post-mortem' });
+    expect(postMortem.result?.isError).toBeFalsy();
+    const postMortemPayload = JSON.parse(postMortem.result?.content[0].text);
+    expect(postMortemPayload.fileName).toBe('post-mortem-guide.md');
+    expect(postMortemPayload.guideHash).toBe('post-mortem-hash');
+    expect(postMortemPayload.content).toContain('# Post-Mortem Guide');
   });
 
   it('ignores the cwd project when the session is bound elsewhere and reads the guide from the server', async () => {
@@ -573,6 +619,249 @@ describe('mcp write tools', () => {
     const payload = JSON.parse(call.result?.content[0].text);
     expect(payload.data).not.toHaveProperty('bodyTiptap');
     expect(payload.data.updatedAt).toBe('2026-08-01T00:00:00.000Z');
+  });
+
+  it('creates a traceable co-action without exposing source or projectId and returns id plus webUrl', async () => {
+    const postSpy = jest.spyOn(axios, 'post').mockResolvedValue({
+      data: {
+        data: {
+          id: 'act-1',
+          status: 'OPEN',
+          webUrl: 'https://agentteams.run/go?type=co-action&id=act-1',
+        },
+      },
+    } as never);
+
+    const call = await callTool('agentteams_coaction_create', {
+      title: '핸드오프',
+      content: '본문',
+      planId: 'agentteams_pln_plan-1',
+      status: 'OPEN',
+      visibility: 'PROJECT',
+      guideHash: 'co-action-hash',
+      idempotencyKey: 'coa-1',
+    });
+
+    expect(call.result?.isError).toBeFalsy();
+    expect(postSpy).toHaveBeenCalledWith(
+      `${apiUrl}/api/projects/${projectId}/co-actions`,
+      {
+        title: '핸드오프',
+        content: '본문',
+        planId: 'plan-1',
+        status: 'OPEN',
+        visibility: 'PROJECT',
+        guideHash: 'co-action-hash',
+        idempotencyKey: 'coa-1',
+      },
+      { headers },
+    );
+    const payload = JSON.parse(call.result?.content[0].text);
+    expect(payload.data.id).toBe('act-1');
+    expect(payload.data.webUrl).toContain('act-1');
+  });
+
+  it('rejects co-action create without a traceability target and update without a mutable field', async () => {
+    const orphan = await callTool('agentteams_coaction_create', {
+      title: '고아 코액션',
+      content: '추적 링크 없음',
+    });
+    expect(orphan.result?.isError).toBe(true);
+    expect(orphan.result?.content[0].text).toMatch(/planId|completionReportId|postMortemId/);
+
+    const noOp = await callTool('agentteams_coaction_update', {
+      id: 'act-1',
+      guideHash: 'co-action-hash',
+    });
+    expect(noOp.result?.isError).toBe(true);
+    expect(noOp.result?.content[0].text).toMatch(/title|content|status|visibility/);
+  });
+
+  it('transitions co-action status and surfaces a 403 instead of swallowing it', async () => {
+    const putSpy = jest.spyOn(axios, 'put').mockResolvedValue({
+      data: {
+        data: {
+          id: 'act-1',
+          status: 'CLOSED',
+          webUrl: 'https://agentteams.run/go?type=co-action&id=act-1',
+        },
+      },
+    } as never);
+
+    const updated = await callTool('agentteams_coaction_update', {
+      id: 'agentteams_act_act-1',
+      status: 'CLOSED',
+      expectedUpdatedAt: '2026-08-01T00:00:00.000Z',
+    });
+    expect(putSpy).toHaveBeenCalledWith(
+      `${apiUrl}/api/projects/${projectId}/co-actions/act-1`,
+      { status: 'CLOSED', expectedUpdatedAt: '2026-08-01T00:00:00.000Z' },
+      { headers },
+    );
+    expect(JSON.parse(updated.result?.content[0].text).data.status).toBe('CLOSED');
+
+    await openHandle?.close();
+    openHandle = undefined;
+    jest.spyOn(axios, 'put').mockRejectedValue({
+      isAxiosError: true,
+      message: 'Request failed',
+      response: {
+        status: 403,
+        data: { errorCode: 'FORBIDDEN', errorDetailCode: 'CO_ACTION_RUNNER_SOURCE_WRITE_DENIED' },
+      },
+    } as never);
+
+    const denied = await callTool('agentteams_coaction_update', { id: 'act-2', title: '수정' });
+    expect(denied.result?.isError).toBe(true);
+    expect(denied.result?.content[0].text).toMatch(/Forbidden/);
+  });
+
+  it('sends co-action delete contract fields as query params', async () => {
+    const deleteSpy = jest.spyOn(axios, 'delete').mockResolvedValue({ data: null } as never);
+
+    const call = await callTool('agentteams_coaction_delete', {
+      id: 'agentteams_act_act-1',
+      expectedUpdatedAt: '2026-08-01T00:00:00.000Z',
+      guideHash: 'co-action-hash',
+      idempotencyKey: 'del-1',
+    });
+
+    expect(deleteSpy).toHaveBeenCalledWith(`${apiUrl}/api/projects/${projectId}/co-actions/act-1`, {
+      headers: { 'X-API-Key': 'key_test' },
+      params: {
+        expectedUpdatedAt: '2026-08-01T00:00:00.000Z',
+        guideHash: 'co-action-hash',
+        idempotencyKey: 'del-1',
+      },
+    });
+    expect(JSON.parse(call.result?.content[0].text)).toEqual({ deleted: true, id: 'act-1' });
+  });
+
+  it('supports standalone and plan-linked post-mortem create while forwarding contract fields', async () => {
+    const postSpy = jest.spyOn(axios, 'post').mockResolvedValue({
+      data: {
+        data: {
+          id: 'pmt-standalone',
+          webUrl: 'https://agentteams.run/go?type=post-mortem&id=pmt-standalone',
+        },
+      },
+    } as never);
+    const standalone = await callTool('agentteams_postmortem_create', {
+      title: '사후분석',
+      content: '## 사후분석 테스트\n- 재현 가능한 실패가 작업을 유의미하게 지연시켰고 예방 가능한 원인이 있다',
+      actionItems: ['재발 방지'],
+    });
+    expect(standalone.result?.isError).toBeFalsy();
+    expect(postSpy).toHaveBeenLastCalledWith(
+      `${apiUrl}/api/projects/${projectId}/post-mortems`,
+      {
+        title: '사후분석',
+        content: '## 사후분석 테스트\n- 재현 가능한 실패가 작업을 유의미하게 지연시켰고 예방 가능한 원인이 있다',
+        actionItems: ['재발 방지'],
+      },
+      { headers },
+    );
+
+    postSpy.mockResolvedValue({
+      data: {
+        data: {
+          id: 'pmt-1',
+          webUrl: 'https://agentteams.run/go?type=post-mortem&id=pmt-1',
+        },
+      },
+    } as never);
+    const call = await callTool('agentteams_postmortem_create', {
+      planId: 'agentteams_pln_plan-1',
+      title: '사후분석',
+      content: '## 사후분석 테스트\n- 재현 가능한 실패가 작업을 유의미하게 지연시켰고 예방 가능한 원인이 있다',
+      actionItems: ['재발 방지'],
+      guideHash: 'post-mortem-hash',
+      idempotencyKey: 'pm-1',
+    });
+
+    expect(call.result?.isError).toBeFalsy();
+    expect(postSpy).toHaveBeenCalledWith(
+      `${apiUrl}/api/projects/${projectId}/post-mortems`,
+      {
+        planId: 'plan-1',
+        title: '사후분석',
+        content: '## 사후분석 테스트\n- 재현 가능한 실패가 작업을 유의미하게 지연시켰고 예방 가능한 원인이 있다',
+        actionItems: ['재발 방지'],
+        guideHash: 'post-mortem-hash',
+        idempotencyKey: 'pm-1',
+      },
+      { headers },
+    );
+    const payload = JSON.parse(call.result?.content[0].text);
+    expect(payload.data.id).toBe('pmt-1');
+    expect(payload.data.webUrl).toContain('pmt-1');
+  });
+
+  it('rejects post-mortem update without a mutable field', async () => {
+    const noOp = await callTool('agentteams_postmortem_update', {
+      id: 'pmt-1',
+      expectedUpdatedAt: '2026-08-01T00:00:00.000Z',
+    });
+    expect(noOp.result?.isError).toBe(true);
+    expect(noOp.result?.content[0].text).toMatch(/title|content|actionItems|status/);
+  });
+
+  it('rejects a stale post-mortem update without swallowing the 409', async () => {
+    jest.spyOn(axios, 'put').mockRejectedValue({
+      isAxiosError: true,
+      message: 'Request failed',
+      response: {
+        status: 409,
+        data: { errorCode: 'OPTIMISTIC_LOCK_CONFLICT', errorDetailCode: 'POST_MORTEM_UPDATE_CONFLICT' },
+      },
+    } as never);
+
+    const call = await callTool('agentteams_postmortem_update', {
+      id: 'pmt-1',
+      title: '수정',
+      expectedUpdatedAt: '2026-08-01T00:00:00.000Z',
+    });
+
+    expect(call.result?.isError).toBe(true);
+    expect(call.result?.content[0].text).toMatch(/Conflict|409|OPTIMISTIC_LOCK_CONFLICT/);
+  });
+
+  it('states guide-first and project-scope rules on the new write tools and hides source', async () => {
+    const { client, handle } = connect();
+    openHandle = handle;
+
+    await discover(client);
+    const response = await client.request('tools/list', { _meta: MODERN_META });
+    const tools = (response.result?.tools ?? []) as Array<{
+      name: string;
+      description: string;
+      inputSchema?: Record<string, any>;
+    }>;
+
+    for (const name of ['agentteams_coaction_create', 'agentteams_coaction_update', 'agentteams_coaction_delete']) {
+      const tool = tools.find((candidate) => candidate.name === name);
+      expect(tool?.description).toContain('agentteams_guide_get("co-action")');
+      expect(Object.keys(tool?.inputSchema?.properties ?? {})).not.toContain('projectId');
+      expect(Object.keys(tool?.inputSchema?.properties ?? {})).not.toContain('source');
+      expect(Object.keys(tool?.inputSchema?.properties ?? {})).toEqual(
+        expect.arrayContaining(['guideHash', 'idempotencyKey']),
+      );
+    }
+
+    const deleteDescription = tools.find((tool) => tool.name === 'agentteams_coaction_delete')?.description ?? '';
+    expect(deleteDescription).toContain('destructive');
+    expect(deleteDescription).toContain('unconditional delete');
+    expect(deleteDescription).toContain('Confirm with the user');
+
+    for (const name of ['agentteams_postmortem_create', 'agentteams_postmortem_update']) {
+      const tool = tools.find((candidate) => candidate.name === name);
+      expect(tool?.description).toContain('agentteams_guide_get("post-mortem")');
+      expect(Object.keys(tool?.inputSchema?.properties ?? {})).not.toContain('projectId');
+    }
+    const postMortemCreateRequired =
+      tools.find((tool) => tool.name === 'agentteams_postmortem_create')?.inputSchema?.required ?? [];
+    expect(postMortemCreateRequired).toEqual(expect.arrayContaining(['title', 'content', 'actionItems']));
+    expect(postMortemCreateRequired).not.toContain('planId');
   });
 
   it('leaves the delete acknowledgement shape unchanged', async () => {

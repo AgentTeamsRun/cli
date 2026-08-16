@@ -193,6 +193,45 @@ describe('local platform guide loader', () => {
       /agentteams convention download/,
     );
   });
+
+  it('loads co-action and post-mortem guides with the hash recorded in the manifest', () => {
+    const root = createTempProject({
+      guideHashes: {
+        'document-guide.md': 'doc-hash',
+        'co-action-guide.md': 'co-action-hash',
+        'post-mortem-guide.md': 'post-mortem-hash',
+      },
+    });
+    tempRoots.push(root);
+    writeFileSync(join(root, '.agentteams', 'platform', 'co-action-guide.md'), '# Co-Action Guide\n', 'utf-8');
+    writeFileSync(join(root, '.agentteams', 'platform', 'post-mortem-guide.md'), '# Post-Mortem Guide\n', 'utf-8');
+
+    const coAction = loadLocalPlatformGuide('co-action', root);
+    expect(coAction?.fileName).toBe('co-action-guide.md');
+    expect(coAction?.guideHash).toBe('co-action-hash');
+    expect(coAction?.content).toContain('# Co-Action Guide');
+
+    const postMortem = loadLocalPlatformGuide('post-mortem', root);
+    expect(postMortem?.fileName).toBe('post-mortem-guide.md');
+    expect(postMortem?.guideHash).toBe('post-mortem-hash');
+    expect(postMortem?.content).toContain('# Post-Mortem Guide');
+  });
+
+  it('degrades to a null hash for newly unlocked kinds when the manifest has no per-guide hashes', () => {
+    const root = createTempProject({});
+    tempRoots.push(root);
+    writeFileSync(join(root, '.agentteams', 'platform', 'co-action-guide.md'), '# Co-Action Guide\n', 'utf-8');
+
+    const guide = loadLocalPlatformGuide('co-action', root);
+    expect(guide?.guideHash).toBeNull();
+    expect(describeMissingGuideHash(guide!)).toMatch(/agentteams convention download/);
+  });
+
+  it('lists supported kinds when an unknown record kind is requested', () => {
+    expect(() => loadLocalPlatformGuide('code-review' as never, null)).toThrow(
+      /Unknown guide record kind: code-review\. Supported: document, comment, co-action, post-mortem/,
+    );
+  });
 });
 
 describe('GUIDE_OUTDATED error translation', () => {

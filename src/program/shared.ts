@@ -59,6 +59,9 @@ export function registerApiKeyHook(program: Command): void {
  * 각 프로젝트에 이미 배포된 `.agentteams/convention.md` 사본이나 기존 CI 스크립트는
  * 갱신 경로 없이 그대로 깨지므로, 오류 뒤에 대체 수단을 한 줄 덧붙입니다.
  */
+const PLAN_HTML_PREVIEW_HINT =
+  'Plan HTML previews were removed. Plans render their content directly in the web UI — drop the HTML flags and send the plan body with --content or --file.';
+
 const REMOVED_OPTION_HINTS: Record<string, string> = {
   '--format':
     '--format only exists on init, auth, sync, and doctor. Every other command already prints JSON; use --verbose for the full payload when --output-file is set.',
@@ -66,10 +69,14 @@ const REMOVED_OPTION_HINTS: Record<string, string> = {
   '--team-id':
     '--team-id was removed. Set the AGENTTEAMS_TEAM_ID environment variable or the teamId field in your CLI config.',
   '--limit': '--limit was removed from list actions. Use --page-size.',
+  '--html-file': PLAN_HTML_PREVIEW_HINT,
+  '--html-stdin': PLAN_HTML_PREVIEW_HINT,
+  '--source-label': PLAN_HTML_PREVIEW_HINT,
 };
 
 const REMOVED_COMMAND_HINTS: Record<string, string> = {
   show: "The 'show' alias was removed. Use 'get'.",
+  'upload-html': PLAN_HTML_PREVIEW_HINT,
 };
 
 export function removedContractHint(text: string): string | undefined {

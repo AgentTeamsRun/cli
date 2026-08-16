@@ -17,7 +17,6 @@ import {
   deleteIfTempFile,
   pruneStaleCacheFiles,
 } from '../utils/parsers.js';
-import { validatePlanPreviewHtmlSafety } from '../utils/planPreviewHtmlSafety.js';
 import {
   EXECUTION_SNAPSHOT_HINT,
   resolveExecutionSnapshot,
@@ -39,7 +38,6 @@ import {
   startPlanLifecycle,
   unlinkOriginIssue,
   updatePlan,
-  uploadPlanHtml,
 } from '../api/plan.js';
 
 const PLAN_COMPLEXITY_VALUES: readonly string[] = PLAN_COMPLEXITY_ORDER;
@@ -104,15 +102,6 @@ function warnOnComplexityMismatch(complexity: string, content: string): void {
   } else if (complexity === 'MINIMAL' && length > 4000) {
     process.stderr.write(
       '[warn] plan create: --complexity MINIMAL but the body is large. MINIMAL is for a single task touching 1–2 files — confirm the tier fits.\n',
-    );
-  }
-}
-
-function assertPlanPreviewHtmlSafety(html: string): void {
-  const result = validatePlanPreviewHtmlSafety(html);
-  if (!result.ok) {
-    throw new Error(
-      'Plan HTML preview is not theme-safe. ' + `Fix the preview before uploading: ${result.reasons.join('; ')}.`,
     );
   }
 }
@@ -343,99 +332,6 @@ export function buildPlanTaskSidecar(
   };
 }
 
-export function readPlanHtmlUploadInput(options: { file?: string; stdin?: boolean }): string {
-  const hasFile = typeof options.file === 'string' && options.file.trim().length > 0;
-  const hasStdin = options.stdin === true;
-
-  if (hasFile && hasStdin) {
-    throw new Error('Use either --file or --stdin for plan upload-html, not both');
-  }
-  if (!hasFile && !hasStdin) {
-    throw new Error('--file or --stdin is required for plan upload-html');
-  }
-
-  const html = hasFile
-    ? (() => {
-        const filePath = resolve(options.file as string);
-        if (!existsSync(filePath)) {
-          throw new Error(`File not found: ${options.file}`);
-        }
-        return readFileSync(filePath, 'utf-8');
-      })()
-    : readFileSync(0, 'utf-8');
-
-  if (html.trim().length === 0) {
-    throw new Error('HTML content is empty');
-  }
-  assertPlanPreviewHtmlSafety(html);
-
-  return html;
-}
-
-export function hasPlanHtmlPreviewInput(options: { htmlFile?: string; htmlStdin?: boolean }): boolean {
-  const hasFile = typeof options.htmlFile === 'string' && options.htmlFile.trim().length > 0;
-  const hasStdin = options.htmlStdin === true;
-  return hasFile || hasStdin;
-}
-
-export function readPlanHtmlPreviewInput(options: { htmlFile?: string; htmlStdin?: boolean }): string {
-  const hasFile = typeof options.htmlFile === 'string' && options.htmlFile.trim().length > 0;
-  const hasStdin = options.htmlStdin === true;
-
-  if (hasFile && hasStdin) {
-    throw new Error('Use either --html-file or --html-stdin for the plan HTML preview, not both');
-  }
-  if (!hasFile && !hasStdin) {
-    throw new Error('--html-file or --html-stdin is required to provide the plan HTML preview');
-  }
-
-  const html = hasFile
-    ? (() => {
-        const filePath = resolve(options.htmlFile as string);
-        if (!existsSync(filePath)) {
-          throw new Error(`File not found: ${options.htmlFile}`);
-        }
-        return readFileSync(filePath, 'utf-8');
-      })()
-    : readFileSync(0, 'utf-8');
-
-  if (html.trim().length === 0) {
-    throw new Error('HTML preview content is empty');
-  }
-  assertPlanPreviewHtmlSafety(html);
-
-  return html;
-}
-
-async function uploadPlanHtmlPreview(
-  apiUrl: string,
-  projectId: string,
-  headers: any,
-  planId: string,
-  html: string,
-  sourceLabel: string | undefined,
-  action: 'created' | 'updated',
-): Promise<void> {
-  try {
-    await withSpinner(
-      'Uploading plan HTML preview...',
-      () =>
-        uploadPlanHtml(apiUrl, projectId, headers, planId, {
-          html,
-          curationType: 'AI_CURATED',
-          sourceLabel,
-        }),
-      'Plan HTML preview uploaded',
-    );
-  } catch (error: any) {
-    const cause = error?.message ?? error;
-    throw new Error(
-      `Plan ${planId} was ${action}, but uploading the HTML preview failed (partial failure: the plan body and preview are now out of sync). ` +
-        `Re-run 'agentteams plan upload-html --id ${planId} --file <html-file>' to finish. Cause: ${cause}`,
-    );
-  }
-}
-
 function minimalPlanRefactorChecklistTemplate(): string {
   return [
     '## Refactor Checklist',
@@ -582,23 +478,6 @@ export async function executePlanCommand(
       if (!options.id) throw new Error('--id is required for plan set-status');
       if (!options.status) throw new Error('--status is required for plan set-status');
       return patchPlanStatus(apiUrl, projectId, headers, options.id, options.status);
-    }
-    case 'upload-html': {
-      if (!options.id) throw new Error('--id is required for plan upload-html');
-
-      const html = readPlanHtmlUploadInput({ file: options.file, stdin: options.stdin });
-      if (options.file) printFileInfo(options.file, html);
-
-      return withSpinner(
-        'Uploading plan HTML summary...',
-        () =>
-          uploadPlanHtml(apiUrl, projectId, headers, options.id, {
-            html,
-            curationType: 'AI_CURATED',
-            sourceLabel: options.sourceLabel,
-          }),
-        'Plan HTML summary uploaded',
-      );
     }
     case 'start': {
       if (!options.id) throw new Error('--id is required for plan start');
@@ -763,10 +642,6 @@ export async function executePlanCommand(
         );
       }
 
-      // Kept for legacy V1 compatibility; V2 web views do not render uploaded HTML previews.
-      const createHasHtmlInput = hasPlanHtmlPreviewInput(options);
-      const createHtmlContent = createHasHtmlInput ? readPlanHtmlPreviewInput(options) : undefined;
-
       // Lightweight complexity sanity check (warning only). A FULL plan body should look multi-wave;
       // a MINIMAL one should be short and single-scoped. This nudges authors toward the right tier
       // without rejecting the create.
@@ -793,20 +668,6 @@ export async function executePlanCommand(
         'Plan created',
       );
       if (options.file) deleteIfTempFile(options.file, { keep: options.keepTemp });
-
-      const createdPlanId: string | undefined = createResult?.data?.id;
-      if (createHtmlContent && createdPlanId) {
-        await uploadPlanHtmlPreview(
-          apiUrl,
-          projectId,
-          headers,
-          createdPlanId,
-          createHtmlContent,
-          options.sourceLabel,
-          'created',
-        );
-        if (options.htmlFile) deleteIfTempFile(options.htmlFile, { keep: options.keepTemp });
-      }
 
       // --origin-issue flag: link origin issues after plan creation
       const originIssueFlags: string[] = Array.isArray(options.originIssue)
@@ -913,28 +774,12 @@ export async function executePlanCommand(
         body.complexityChangeReason = options.complexityReason;
       }
 
-      const updateHasHtmlInput = hasPlanHtmlPreviewInput(options);
-      const updateHtmlContent = updateHasHtmlInput ? readPlanHtmlPreviewInput(options) : undefined;
-
       const updateResult = await withSpinner(
         'Updating plan...',
         () => updatePlan(apiUrl, projectId, headers, options.id, body),
         'Plan updated',
       );
       if (options.file) deleteIfTempFile(options.file, { keep: options.keepTemp });
-
-      if (updateHtmlContent) {
-        await uploadPlanHtmlPreview(
-          apiUrl,
-          projectId,
-          headers,
-          options.id,
-          updateHtmlContent,
-          options.sourceLabel,
-          'updated',
-        );
-        if (options.htmlFile) deleteIfTempFile(options.htmlFile, { keep: options.keepTemp });
-      }
 
       return updateResult;
     }
