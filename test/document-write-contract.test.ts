@@ -228,8 +228,8 @@ describe('local platform guide loader', () => {
   });
 
   it('lists supported kinds when an unknown record kind is requested', () => {
-    expect(() => loadLocalPlatformGuide('code-review' as never, null)).toThrow(
-      /Unknown guide record kind: code-review\. Supported: document, comment, co-action, post-mortem/,
+    expect(() => loadLocalPlatformGuide('unknown-kind' as never, null)).toThrow(
+      /Unknown guide record kind: unknown-kind\. Supported: document, comment, co-action, post-mortem, code-review/,
     );
   });
 });

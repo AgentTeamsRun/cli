@@ -47,8 +47,8 @@ describe('mcp convention tools', () => {
     const names = (list.result?.tools ?? []).map((tool: { name: string }) => tool.name);
 
     // 23 shared read tools + 2 CLI-local tools (guide handoff, reference resolve)
-    // + 14 write tools (document/comment/co-action/post-mortem).
-    expect(names).toHaveLength(39);
+    // + 17 write tools (document/comment/co-action/post-mortem/code-review).
+    expect(names).toHaveLength(42);
     expect(names).toEqual(
       expect.arrayContaining([
         'agentteams_search',

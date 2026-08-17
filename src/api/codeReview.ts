@@ -82,9 +82,15 @@ export async function createPlanFromCodeReview(
   return response.data;
 }
 
-export async function cancelCodeReview(apiUrl: string, projectId: string, headers: any, id: string): Promise<any> {
+export async function cancelCodeReview(
+  apiUrl: string,
+  projectId: string,
+  headers: any,
+  id: string,
+  body: Record<string, unknown> = {},
+): Promise<any> {
   const baseUrl = `${apiUrl}/api/projects/${projectId}/code-reviews`;
-  const response = await httpClient.post(`${baseUrl}/${id}/cancel`, {}, { headers });
+  const response = await httpClient.post(`${baseUrl}/${id}/cancel`, body, { headers });
   return response.data;
 }
 
@@ -112,9 +118,10 @@ export async function dismissCodeReviewFinding(
   headers: any,
   id: string,
   findingId: string,
+  body: Record<string, unknown> = {},
 ): Promise<any> {
   const baseUrl = `${apiUrl}/api/projects/${projectId}/code-reviews`;
-  const response = await httpClient.post(`${baseUrl}/${id}/findings/${findingId}/dismiss`, {}, { headers });
+  const response = await httpClient.post(`${baseUrl}/${id}/findings/${findingId}/dismiss`, body, { headers });
   return response.data;
 }
 
@@ -124,9 +131,10 @@ export async function resolveCodeReviewFinding(
   headers: any,
   id: string,
   findingId: string,
+  body: Record<string, unknown> = {},
 ): Promise<any> {
   const baseUrl = `${apiUrl}/api/projects/${projectId}/code-reviews`;
-  const response = await httpClient.post(`${baseUrl}/${id}/findings/${findingId}/resolve`, {}, { headers });
+  const response = await httpClient.post(`${baseUrl}/${id}/findings/${findingId}/resolve`, body, { headers });
   return response.data;
 }
 
@@ -136,8 +144,9 @@ export async function undismissCodeReviewFinding(
   headers: any,
   id: string,
   findingId: string,
+  body: Record<string, unknown> = {},
 ): Promise<any> {
   const baseUrl = `${apiUrl}/api/projects/${projectId}/code-reviews`;
-  const response = await httpClient.post(`${baseUrl}/${id}/findings/${findingId}/undismiss`, {}, { headers });
+  const response = await httpClient.post(`${baseUrl}/${id}/findings/${findingId}/undismiss`, body, { headers });
   return response.data;
 }

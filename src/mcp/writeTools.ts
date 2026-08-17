@@ -17,6 +17,15 @@ import {
 import { createDocumentComment, createDocument, deleteDocument, updateDocument } from '../api/document.js';
 import { createCoAction, deleteCoAction, updateCoAction } from '../api/coaction.js';
 import { createPostMortem, updatePostMortem } from '../api/postmortem.js';
+import {
+  cancelCodeReview,
+  createCodeReview,
+  dismissCodeReviewFinding,
+  resolveCodeReviewFinding,
+  undismissCodeReviewFinding,
+  updateCodeReview,
+} from '../api/codeReview.js';
+import { RUNNER_TYPE_VALUES } from '../utils/runnerTypes.js';
 import { resolveToolHeaders, type McpLocalToolSpec } from './localTools.js';
 
 /**
@@ -38,6 +47,7 @@ const GUIDE_FIRST = 'Call agentteams_guide_get("document") first and follow that
 const COMMENT_GUIDE_FIRST = 'Call agentteams_guide_get("comment") first and follow that guide.';
 const CO_ACTION_GUIDE_FIRST = 'Call agentteams_guide_get("co-action") first and follow that guide.';
 const POST_MORTEM_GUIDE_FIRST = 'Call agentteams_guide_get("post-mortem") first and follow that guide.';
+const CODE_REVIEW_GUIDE_FIRST = 'Call agentteams_guide_get("code-review") first and follow that guide.';
 const TAG_POLICY =
   'You cannot set confirmed tags. Anything you pass in suggestedTags is a suggestion for a human to confirm.';
 const PROJECT_SCOPE =
@@ -91,6 +101,10 @@ const postMortemWriteDiscovery = defineToolDiscoveryMetadata({
   domain: 'postMortems',
   profiles: ['full'],
 });
+const codeReviewWriteDiscovery = defineToolDiscoveryMetadata({
+  domain: 'codeReviews',
+  profiles: ['full'],
+});
 
 /** Credentials can expire mid-session, so headers are resolved per call, never captured. */
 const auth = resolveToolHeaders;
@@ -102,6 +116,50 @@ const definedFields = <T extends Record<string, unknown>>(fields: T): Record<str
 const requireOneOf = (toolName: string, args: Record<string, unknown>, fieldNames: readonly string[]) => {
   if (!fieldNames.some((fieldName) => args[fieldName] !== undefined)) {
     throw new Error(`${toolName} requires at least one of: ${fieldNames.join(', ')}.`);
+  }
+};
+
+const CODE_REVIEW_TARGET_TYPE_VALUES = [
+  'BRANCH_DIFF',
+  'GITHUB_PR',
+  'GITLAB_MR',
+  'BITBUCKET_PR',
+  'LOCAL_DIFF',
+  'UPLOADED_DIFF',
+  'COMMIT_RANGE',
+] as const;
+
+const CODE_REVIEW_UPDATE_METADATA_FIELDS = [
+  'title',
+  'targetType',
+  'targetRef',
+  'sourceCommitStart',
+  'sourceCommitEnd',
+  'sourceBranchName',
+  'baseBranchName',
+  'diffSummary',
+  'testSummary',
+  'reviewerContext',
+  'recommendationReason',
+  'runnerType',
+  'model',
+] as const;
+
+const validateInitialCodeReviewFindings = (args: Record<string, unknown>) => {
+  if (args.findings !== undefined && (args.runnerType === undefined || args.model === undefined)) {
+    throw new Error('agentteams_codereview_create requires runnerType and model when findings are provided.');
+  }
+};
+
+const validateCodeReviewCancellation = (args: Record<string, unknown>) => {
+  if (args.status !== 'CANCELLED') return;
+  const incompatibleFields = [...CODE_REVIEW_UPDATE_METADATA_FIELDS, 'expectedUpdatedAt'].filter(
+    (fieldName) => args[fieldName] !== undefined,
+  );
+  if (incompatibleFields.length > 0) {
+    throw new Error(
+      `agentteams_codereview_update with status CANCELLED cannot include: ${incompatibleFields.join(', ')}.`,
+    );
   }
 };
 
@@ -780,6 +838,212 @@ const postMortemUpdateSpec: McpWriteToolSpec = {
   },
 };
 
+const codeReviewCreateSpec: McpWriteToolSpec = {
+  name: 'agentteams_codereview_create',
+  title: 'Create AgentTeams Code Review',
+  description: [
+    'Create a code review for local diffs, git commit ranges, or pull requests. Findings can be supplied upfront when already known.',
+    CODE_REVIEW_GUIDE_FIRST,
+    PROJECT_SCOPE,
+    'Returns the created code review id, status, and webUrl.',
+  ].join(' '),
+  discovery: codeReviewWriteDiscovery,
+  inputSchema: z.strictObject({
+    title: z.string().min(1).max(255).describe('Code review title.'),
+    targetType: z
+      .enum(CODE_REVIEW_TARGET_TYPE_VALUES)
+      .optional()
+      .describe('Target inspection type from the API CodeReviewTargetType contract.'),
+    targetRef: z.string().min(1).max(500).optional().describe('Target reference (commit range, PR number or URL).'),
+    repositoryRemoteUrl: z.string().min(1).optional().describe('Git remote repository URL.'),
+    sourcePlanId: z
+      .string()
+      .min(1)
+      .optional()
+      .describe('Optional source plan id (bare uuid or agentteams_pln_-prefixed).'),
+    sourceCompletionReportId: z
+      .string()
+      .min(1)
+      .optional()
+      .describe('Optional source completion report id (bare uuid or agentteams_rpt_-prefixed).'),
+    sourceCommitStart: z.string().min(1).optional().describe('Source starting commit hash.'),
+    sourceCommitEnd: z.string().min(1).optional().describe('Source ending commit hash.'),
+    sourceBranchName: z.string().min(1).optional().describe('Source branch name.'),
+    baseBranchName: z.string().min(1).optional().describe('Base branch name.'),
+    diffSummary: z.string().optional().describe('Summary of the diff inspected.'),
+    testSummary: z.string().optional().describe('Summary of test results.'),
+    reviewerContext: z.string().optional().describe('Reviewer instructions or context.'),
+    recommendationReason: z.string().optional().describe('Reason for recommending this code review.'),
+    runnerType: z.enum(RUNNER_TYPE_VALUES).optional().describe('Runner type performing or requesting the review.'),
+    model: z.string().min(1).optional().describe('Model snapshot used for the review.'),
+    findings: z
+      .array(
+        z.strictObject({
+          severity: z.enum(['P0', 'P1', 'P2', 'P3']).describe('Severity level (P0, P1, P2, P3).'),
+          title: z.string().min(1).max(255).describe('Finding title.'),
+          filePath: z.string().min(1).describe('Relative file path.'),
+          lineStart: z.number().int().positive().optional().describe('Starting line number.'),
+          lineEnd: z.number().int().positive().optional().describe('Ending line number.'),
+          problem: z.string().min(1).describe('Problem description.'),
+          impact: z.string().min(1).describe('Impact of the problem.'),
+          suggestion: z.string().min(1).describe('Concrete suggestion to resolve.'),
+        }),
+      )
+      .optional()
+      .describe('Initial review findings.'),
+    guideHash: guideHashField,
+    idempotencyKey: idempotencyKeyField,
+  }),
+  handler: async (args, context) => {
+    validateInitialCodeReviewFindings(args);
+    return createCodeReview(
+      context.apiUrl,
+      context.projectId,
+      await auth(context),
+      definedFields({
+        title: args.title,
+        targetType: args.targetType,
+        targetRef: args.targetRef,
+        repositoryRemoteUrl: args.repositoryRemoteUrl,
+        sourcePlanId:
+          typeof args.sourcePlanId === 'string' ? stripContextEntityIdPrefix(args.sourcePlanId as string) : undefined,
+        sourceCompletionReportId:
+          typeof args.sourceCompletionReportId === 'string'
+            ? stripContextEntityIdPrefix(args.sourceCompletionReportId as string)
+            : undefined,
+        sourceCommitStart: args.sourceCommitStart,
+        sourceCommitEnd: args.sourceCommitEnd,
+        sourceBranchName: args.sourceBranchName,
+        baseBranchName: args.baseBranchName,
+        diffSummary: args.diffSummary,
+        testSummary: args.testSummary,
+        reviewerContext: args.reviewerContext,
+        recommendationReason: args.recommendationReason,
+        runnerType: args.runnerType,
+        model: args.model,
+        findings: args.findings,
+        guideHash: args.guideHash,
+        idempotencyKey: args.idempotencyKey,
+      }),
+    );
+  },
+};
+
+const codeReviewUpdateSpec: McpWriteToolSpec = {
+  name: 'agentteams_codereview_update',
+  title: 'Update AgentTeams Code Review',
+  description: [
+    'Update an existing code review metadata or cancel a pending code review.',
+    CODE_REVIEW_GUIDE_FIRST,
+    'Pass expectedUpdatedAt (from agentteams_codereview_get) so a concurrent edit is rejected rather than silently overwritten.',
+    PROJECT_SCOPE,
+    'Returns the updated code review id, status, and webUrl.',
+  ].join(' '),
+  discovery: codeReviewWriteDiscovery,
+  inputSchema: z.strictObject({
+    id: z.string().min(1).describe('Code review id (bare uuid or agentteams_rev_-prefixed).'),
+    title: z.string().min(1).max(255).optional().describe('New title.'),
+    status: z.enum(['CANCELLED']).optional().describe('Status transition. CANCELLED cancels a pending code review.'),
+    targetType: z.enum(CODE_REVIEW_TARGET_TYPE_VALUES).optional().describe('New target inspection type.'),
+    targetRef: z.string().min(1).max(500).optional().describe('New target reference.'),
+    sourceCommitStart: z.string().min(1).optional().describe('New starting commit hash.'),
+    sourceCommitEnd: z.string().min(1).optional().describe('New ending commit hash.'),
+    sourceBranchName: z.string().min(1).optional().describe('New source branch name.'),
+    baseBranchName: z.string().min(1).optional().describe('New base branch name.'),
+    diffSummary: z.string().optional().describe('New summary of the diff.'),
+    testSummary: z.string().optional().describe('New summary of test results.'),
+    reviewerContext: z.string().optional().describe('New reviewer context.'),
+    recommendationReason: z.string().optional().describe('New recommendation reason.'),
+    runnerType: z.enum(RUNNER_TYPE_VALUES).optional().describe('New runner type.'),
+    model: z.string().min(1).optional().describe('New model snapshot.'),
+    expectedUpdatedAt: expectedUpdatedAtFieldFor('code review'),
+    guideHash: guideHashField,
+    idempotencyKey: idempotencyKeyField,
+  }),
+  handler: async (args, context) => {
+    requireOneOf('agentteams_codereview_update', args, ['status', ...CODE_REVIEW_UPDATE_METADATA_FIELDS]);
+    validateCodeReviewCancellation(args);
+    const reviewId = stripContextEntityIdPrefix(args.id as string);
+    if (args.status === 'CANCELLED') {
+      return cancelCodeReview(
+        context.apiUrl,
+        context.projectId,
+        await auth(context),
+        reviewId,
+        definedFields({
+          guideHash: args.guideHash,
+          idempotencyKey: args.idempotencyKey,
+        }),
+      );
+    }
+    return updateCodeReview(
+      context.apiUrl,
+      context.projectId,
+      await auth(context),
+      reviewId,
+      definedFields({
+        title: args.title,
+        targetType: args.targetType,
+        targetRef: args.targetRef,
+        sourceCommitStart: args.sourceCommitStart,
+        sourceCommitEnd: args.sourceCommitEnd,
+        sourceBranchName: args.sourceBranchName,
+        baseBranchName: args.baseBranchName,
+        diffSummary: args.diffSummary,
+        testSummary: args.testSummary,
+        reviewerContext: args.reviewerContext,
+        recommendationReason: args.recommendationReason,
+        runnerType: args.runnerType,
+        model: args.model,
+        expectedUpdatedAt: args.expectedUpdatedAt,
+        guideHash: args.guideHash,
+        idempotencyKey: args.idempotencyKey,
+      }),
+    );
+  },
+};
+
+const codeReviewFindingStatusSetSpec: McpWriteToolSpec = {
+  name: 'agentteams_codereview_finding_status_set',
+  title: 'Set AgentTeams Code Review Finding Status',
+  description: [
+    'Change the status of a single code review finding (DISMISSED to dismiss, OPEN to undismiss, RESOLVED to mark resolved).',
+    CODE_REVIEW_GUIDE_FIRST,
+    'Pass expectedUpdatedAt (from agentteams_codereview_finding_get) so a concurrent transition is rejected rather than silently overwritten.',
+    PROJECT_SCOPE,
+    'Returns the updated code review.',
+  ].join(' '),
+  discovery: codeReviewWriteDiscovery,
+  inputSchema: z.strictObject({
+    codeReviewId: z.string().min(1).describe('Parent code review id (bare uuid or agentteams_rev_-prefixed).'),
+    findingId: z.string().min(1).describe('Finding id (bare uuid or agentteams_rvf_-prefixed).'),
+    status: z
+      .enum(['OPEN', 'DISMISSED', 'RESOLVED'])
+      .describe('New status: DISMISSED to dismiss, OPEN to undismiss/reopen, RESOLVED to mark resolved.'),
+    expectedUpdatedAt: expectedUpdatedAtFieldFor('code review finding'),
+    guideHash: guideHashField,
+    idempotencyKey: idempotencyKeyField,
+  }),
+  handler: async (args, context) => {
+    const codeReviewId = stripContextEntityIdPrefix(args.codeReviewId as string);
+    const findingId = stripContextEntityIdPrefix(args.findingId as string);
+    const body = definedFields({
+      expectedUpdatedAt: args.expectedUpdatedAt,
+      guideHash: args.guideHash,
+      idempotencyKey: args.idempotencyKey,
+    });
+    const headers = await auth(context);
+
+    if (args.status === 'DISMISSED') {
+      return dismissCodeReviewFinding(context.apiUrl, context.projectId, headers, codeReviewId, findingId, body);
+    }
+    if (args.status === 'OPEN') {
+      return undismissCodeReviewFinding(context.apiUrl, context.projectId, headers, codeReviewId, findingId, body);
+    }
+    return resolveCodeReviewFinding(context.apiUrl, context.projectId, headers, codeReviewId, findingId, body);
+  },
+};
+
 /** Every write tool the CLI MCP server exposes, in registration order. */
 export function getWriteToolSpecs(): McpWriteToolSpec[] {
   return [
@@ -797,5 +1061,8 @@ export function getWriteToolSpecs(): McpWriteToolSpec[] {
     coActionDeleteSpec,
     postMortemCreateSpec,
     postMortemUpdateSpec,
+    codeReviewCreateSpec,
+    codeReviewUpdateSpec,
+    codeReviewFindingStatusSetSpec,
   ];
 }
