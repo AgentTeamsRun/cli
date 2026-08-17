@@ -39,6 +39,10 @@ describe('CLI Integration Tests', () => {
       AGENTTEAMS_TEAM_ID: 'team_1',
       AGENTTEAMS_PROJECT_ID: PROJECT_ID,
     };
+    delete process.env.AGENTTEAMS_RUNNER_TYPE;
+    delete process.env.AGENTTEAMS_MODEL;
+    delete process.env.AGENTTEAMS_FAST_MODE;
+    delete process.env.AGENTTEAMS_AGENT_NAME;
 
     axiosGetSpy = jest.spyOn(axios, 'get');
     axiosPostSpy = jest.spyOn(axios, 'post');

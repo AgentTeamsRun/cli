@@ -41,6 +41,9 @@ const WRITE_TOOL_NAMES = [
   'agentteams_coaction_delete',
   'agentteams_postmortem_create',
   'agentteams_postmortem_update',
+  'agentteams_codereview_create',
+  'agentteams_codereview_update',
+  'agentteams_codereview_finding_status_set',
 ];
 
 describe('mcp write tools', () => {
@@ -79,6 +82,11 @@ describe('mcp write tools', () => {
       'utf-8',
     );
     writeFileSync(
+      join(projectRoot, '.agentteams', 'platform', 'code-review-guide.md'),
+      '# Code Review Guide\n검토 가이드.\n',
+      'utf-8',
+    );
+    writeFileSync(
       join(projectRoot, '.agentteams', 'conventions.manifest.json'),
       JSON.stringify({
         version: 1,
@@ -88,6 +96,7 @@ describe('mcp write tools', () => {
           'comment-guide.md': 'comment-hash',
           'co-action-guide.md': 'co-action-hash',
           'post-mortem-guide.md': 'post-mortem-hash',
+          'code-review-guide.md': 'code-review-hash',
         },
         entries: [],
       }),
@@ -127,8 +136,7 @@ describe('mcp write tools', () => {
     for (const writeTool of WRITE_TOOL_NAMES) {
       expect(names).toContain(writeTool);
     }
-    // 4단계(Code Review / Finding 쓰기)는 아직 만들지 않는다.
-    const writeSuffixed = names.filter((name: string) => /_(create|update|delete)$/.test(name));
+    const writeSuffixed = names.filter((name: string) => /_(create|update|delete|set)$/.test(name));
     expect(writeSuffixed.sort()).toEqual(
       [
         'agentteams_document_create',
@@ -145,10 +153,13 @@ describe('mcp write tools', () => {
         'agentteams_coaction_delete',
         'agentteams_postmortem_create',
         'agentteams_postmortem_update',
+        'agentteams_codereview_create',
+        'agentteams_codereview_update',
+        'agentteams_codereview_finding_status_set',
       ].sort(),
     );
     expect(names).not.toContain('agentteams_postmortem_delete');
-    expect(names).not.toContain('agentteams_codereview_create');
+    expect(names).not.toContain('agentteams_codereview_delete');
   });
 
   it('exposes no projectId argument on any write tool', async () => {
@@ -186,15 +197,19 @@ describe('mcp write tools', () => {
     expect(coActionPayload.guideHash).toBe('co-action-hash');
     expect(coActionPayload.content).toContain('# Co-Action Guide');
 
-    await openHandle?.close();
-    openHandle = undefined;
-
     const postMortem = await callTool('agentteams_guide_get', { recordKind: 'post-mortem' });
     expect(postMortem.result?.isError).toBeFalsy();
     const postMortemPayload = JSON.parse(postMortem.result?.content[0].text);
     expect(postMortemPayload.fileName).toBe('post-mortem-guide.md');
     expect(postMortemPayload.guideHash).toBe('post-mortem-hash');
     expect(postMortemPayload.content).toContain('# Post-Mortem Guide');
+
+    const codeReview = await callTool('agentteams_guide_get', { recordKind: 'code-review' });
+    expect(codeReview.result?.isError).toBeFalsy();
+    const codeReviewPayload = JSON.parse(codeReview.result?.content[0].text);
+    expect(codeReviewPayload.fileName).toBe('code-review-guide.md');
+    expect(codeReviewPayload.guideHash).toBe('code-review-hash');
+    expect(codeReviewPayload.content).toContain('# Code Review Guide');
   });
 
   it('ignores the cwd project when the session is bound elsewhere and reads the guide from the server', async () => {
@@ -862,6 +877,285 @@ describe('mcp write tools', () => {
       tools.find((tool) => tool.name === 'agentteams_postmortem_create')?.inputSchema?.required ?? [];
     expect(postMortemCreateRequired).toEqual(expect.arrayContaining(['title', 'content', 'actionItems']));
     expect(postMortemCreateRequired).not.toContain('planId');
+
+    for (const name of [
+      'agentteams_codereview_create',
+      'agentteams_codereview_update',
+      'agentteams_codereview_finding_status_set',
+    ]) {
+      const tool = tools.find((candidate) => candidate.name === name);
+      expect(tool?.description).toContain('agentteams_guide_get("code-review")');
+      expect(Object.keys(tool?.inputSchema?.properties ?? {})).not.toContain('projectId');
+      expect(Object.keys(tool?.inputSchema?.properties ?? {})).toEqual(
+        expect.arrayContaining(['guideHash', 'idempotencyKey']),
+      );
+    }
+  });
+
+  it('creates a code review with optional findings and forwards contract fields', async () => {
+    const postSpy = jest.spyOn(axios, 'post').mockResolvedValue({
+      data: {
+        data: {
+          id: 'crv-1',
+          status: 'OPEN',
+          webUrl: 'https://agentteams.run/go?type=code-review&id=crv-1',
+        },
+      },
+    } as never);
+
+    const call = await callTool('agentteams_codereview_create', {
+      title: 'Local diff review',
+      targetType: 'LOCAL_DIFF',
+      sourcePlanId: 'agentteams_pln_p-1',
+      runnerType: 'CODEX',
+      model: 'gpt-5.6-sol',
+      findings: [
+        {
+          severity: 'P1',
+          title: 'Missing input validation',
+          filePath: 'src/api.ts',
+          lineStart: 10,
+          lineEnd: 20,
+          problem: 'No validation on input',
+          impact: 'Malformed input crashes service',
+          suggestion: 'Add Zod schema',
+        },
+      ],
+      guideHash: 'code-review-hash',
+      idempotencyKey: 'crv-create-key',
+    });
+
+    expect(call.result?.isError).toBeFalsy();
+    expect(postSpy).toHaveBeenCalledWith(
+      `${apiUrl}/api/projects/${projectId}/code-reviews`,
+      {
+        title: 'Local diff review',
+        targetType: 'LOCAL_DIFF',
+        sourcePlanId: 'p-1',
+        runnerType: 'CODEX',
+        model: 'gpt-5.6-sol',
+        findings: [
+          {
+            severity: 'P1',
+            title: 'Missing input validation',
+            filePath: 'src/api.ts',
+            lineStart: 10,
+            lineEnd: 20,
+            problem: 'No validation on input',
+            impact: 'Malformed input crashes service',
+            suggestion: 'Add Zod schema',
+          },
+        ],
+        guideHash: 'code-review-hash',
+        idempotencyKey: 'crv-create-key',
+      },
+      { headers },
+    );
+    expect(JSON.parse(call.result?.content[0].text)).toEqual({
+      data: {
+        id: 'crv-1',
+        status: 'OPEN',
+        webUrl: 'https://agentteams.run/go?type=code-review&id=crv-1',
+      },
+    });
+  });
+
+  it('uses the API target type contract for code review create and update', async () => {
+    const { client, handle } = connect();
+    openHandle = handle;
+
+    await discover(client);
+    const response = await client.request('tools/list', { _meta: MODERN_META });
+    const tools = (response.result?.tools ?? []) as Array<{
+      name: string;
+      inputSchema?: { properties?: Record<string, { enum?: string[] }> };
+    }>;
+    const expectedTargetTypes = [
+      'BRANCH_DIFF',
+      'GITHUB_PR',
+      'GITLAB_MR',
+      'BITBUCKET_PR',
+      'LOCAL_DIFF',
+      'UPLOADED_DIFF',
+      'COMMIT_RANGE',
+    ];
+
+    for (const name of ['agentteams_codereview_create', 'agentteams_codereview_update']) {
+      expect(tools.find((tool) => tool.name === name)?.inputSchema?.properties?.targetType?.enum).toEqual(
+        expectedTargetTypes,
+      );
+    }
+  });
+
+  it('rejects initial findings without runnerType and model before calling the API', async () => {
+    const postSpy = jest.spyOn(axios, 'post');
+
+    const call = await callTool('agentteams_codereview_create', {
+      title: 'Incomplete review snapshot',
+      findings: [
+        {
+          severity: 'P1',
+          title: 'Finding',
+          filePath: 'src/api.ts',
+          problem: 'Problem',
+          impact: 'Impact',
+          suggestion: 'Suggestion',
+        },
+      ],
+    });
+
+    expect(call.result?.isError).toBe(true);
+    expect(call.result?.content[0].text).toMatch(/runnerType.*model|model.*runnerType/);
+    expect(postSpy).not.toHaveBeenCalled();
+  });
+
+  it('updates code review metadata and forwards expectedUpdatedAt', async () => {
+    const patchSpy = jest.spyOn(axios, 'patch').mockResolvedValue({
+      data: {
+        data: {
+          id: 'crv-1',
+          status: 'OPEN',
+          webUrl: 'https://agentteams.run/go?type=code-review&id=crv-1',
+        },
+      },
+    } as never);
+
+    const call = await callTool('agentteams_codereview_update', {
+      id: 'agentteams_rev_crv-1',
+      diffSummary: 'Updated diff summary',
+      expectedUpdatedAt: '2026-08-01T00:00:00.000Z',
+      guideHash: 'code-review-hash',
+      idempotencyKey: 'crv-update-key',
+    });
+
+    expect(call.result?.isError).toBeFalsy();
+    expect(patchSpy).toHaveBeenCalledWith(
+      `${apiUrl}/api/projects/${projectId}/code-reviews/crv-1`,
+      {
+        diffSummary: 'Updated diff summary',
+        expectedUpdatedAt: '2026-08-01T00:00:00.000Z',
+        guideHash: 'code-review-hash',
+        idempotencyKey: 'crv-update-key',
+      },
+      { headers },
+    );
+  });
+
+  it('cancels a pending code review when status CANCELLED is passed', async () => {
+    const postSpy = jest.spyOn(axios, 'post').mockResolvedValue({
+      data: {
+        data: {
+          id: 'crv-1',
+          status: 'CANCELLED',
+        },
+      },
+    } as never);
+
+    const call = await callTool('agentteams_codereview_update', {
+      id: 'agentteams_rev_crv-1',
+      status: 'CANCELLED',
+      guideHash: 'code-review-hash',
+      idempotencyKey: 'crv-cancel-key',
+    });
+
+    expect(call.result?.isError).toBeFalsy();
+    expect(postSpy).toHaveBeenCalledWith(
+      `${apiUrl}/api/projects/${projectId}/code-reviews/crv-1/cancel`,
+      {
+        guideHash: 'code-review-hash',
+        idempotencyKey: 'crv-cancel-key',
+      },
+      { headers },
+    );
+  });
+
+  it('rejects cancellation mixed with optimistic locking or metadata before calling the API', async () => {
+    const postSpy = jest.spyOn(axios, 'post');
+
+    for (const input of [
+      { status: 'CANCELLED', expectedUpdatedAt: '2026-08-01T00:00:00.000Z' },
+      { status: 'CANCELLED', title: 'Silently discarded title' },
+    ]) {
+      const call = await callTool('agentteams_codereview_update', {
+        id: 'crv-1',
+        ...input,
+      });
+      expect(call.result?.isError).toBe(true);
+      expect(call.result?.content[0].text).toMatch(/CANCELLED/);
+    }
+
+    expect(postSpy).not.toHaveBeenCalled();
+  });
+
+  it('transitions finding status (dismiss, undismiss, resolve) with expectedUpdatedAt', async () => {
+    const postSpy = jest.spyOn(axios, 'post').mockResolvedValue({
+      data: {
+        data: {
+          id: 'crv-1',
+          status: 'OPEN',
+        },
+      },
+    } as never);
+
+    // 1. DISMISSED
+    const dismissCall = await callTool('agentteams_codereview_finding_status_set', {
+      codeReviewId: 'agentteams_rev_crv-1',
+      findingId: 'agentteams_rvf_f-1',
+      status: 'DISMISSED',
+      expectedUpdatedAt: '2026-08-01T00:00:00.000Z',
+      guideHash: 'code-review-hash',
+      idempotencyKey: 'crv-dismiss-key',
+    });
+    expect(dismissCall.result?.isError).toBeFalsy();
+    expect(postSpy).toHaveBeenCalledWith(
+      `${apiUrl}/api/projects/${projectId}/code-reviews/crv-1/findings/f-1/dismiss`,
+      {
+        expectedUpdatedAt: '2026-08-01T00:00:00.000Z',
+        guideHash: 'code-review-hash',
+        idempotencyKey: 'crv-dismiss-key',
+      },
+      { headers },
+    );
+
+    // 2. OPEN
+    const undismissCall = await callTool('agentteams_codereview_finding_status_set', {
+      codeReviewId: 'agentteams_rev_crv-1',
+      findingId: 'agentteams_rvf_f-1',
+      status: 'OPEN',
+      expectedUpdatedAt: '2026-08-01T00:00:00.000Z',
+      guideHash: 'code-review-hash',
+      idempotencyKey: 'crv-undismiss-key',
+    });
+    expect(undismissCall.result?.isError).toBeFalsy();
+    expect(postSpy).toHaveBeenCalledWith(
+      `${apiUrl}/api/projects/${projectId}/code-reviews/crv-1/findings/f-1/undismiss`,
+      {
+        expectedUpdatedAt: '2026-08-01T00:00:00.000Z',
+        guideHash: 'code-review-hash',
+        idempotencyKey: 'crv-undismiss-key',
+      },
+      { headers },
+    );
+
+    // 3. RESOLVED
+    const resolveCall = await callTool('agentteams_codereview_finding_status_set', {
+      codeReviewId: 'agentteams_rev_crv-1',
+      findingId: 'agentteams_rvf_f-1',
+      status: 'RESOLVED',
+      expectedUpdatedAt: '2026-08-01T00:00:00.000Z',
+      guideHash: 'code-review-hash',
+      idempotencyKey: 'crv-resolve-key',
+    });
+    expect(resolveCall.result?.isError).toBeFalsy();
+    expect(postSpy).toHaveBeenCalledWith(
+      `${apiUrl}/api/projects/${projectId}/code-reviews/crv-1/findings/f-1/resolve`,
+      {
+        expectedUpdatedAt: '2026-08-01T00:00:00.000Z',
+        guideHash: 'code-review-hash',
+        idempotencyKey: 'crv-resolve-key',
+      },
+      { headers },
+    );
   });
 
   it('leaves the delete acknowledgement shape unchanged', async () => {

@@ -475,11 +475,12 @@ describe('agentteams_resolve MCP tool', () => {
 
     // Measured 2026-08-16, after the co-action create contract gained optional
     // traceability ids and post-mortem create gained standalone incident support.
+    // Updated 2026-08-17 after adding code-review and finding write tools (stage 4).
     // This is the number that decided the profile membership above: 1.7k chars is
     // cheap in `full` and a 50% jump in `minimal` (3.4k), which is why `minimal`
     // does not carry it.
     expect(delta).toBe(1_688);
-    expect(withResolve.totalChars).toBe(57_721);
+    expect(withResolve.totalChars).toBe(65_979);
     process.stderr.write(`[agentteams_resolve budget] ${JSON.stringify({ delta, full: withResolve.totalChars })}\n`);
   });
 });

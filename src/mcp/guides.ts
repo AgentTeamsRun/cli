@@ -28,7 +28,7 @@ const MANIFEST_FILE = 'conventions.manifest.json';
 const RESYNC_HINT = "Run 'agentteams convention download' and retry.";
 
 /** Record kinds whose guide can be handed to an agent. These are the write-enabled kinds. */
-export const GUIDE_RECORD_KINDS = ['document', 'comment', 'co-action', 'post-mortem'] as const;
+export const GUIDE_RECORD_KINDS = ['document', 'comment', 'co-action', 'post-mortem', 'code-review'] as const;
 export type GuideRecordKind = (typeof GUIDE_RECORD_KINDS)[number];
 
 const GUIDE_FILE_NAMES: Record<GuideRecordKind, string> = {
@@ -36,6 +36,7 @@ const GUIDE_FILE_NAMES: Record<GuideRecordKind, string> = {
   comment: 'comment-guide.md',
   'co-action': 'co-action-guide.md',
   'post-mortem': 'post-mortem-guide.md',
+  'code-review': 'code-review-guide.md',
 };
 
 export interface LoadedGuide {
