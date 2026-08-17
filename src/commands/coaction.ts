@@ -18,13 +18,11 @@ import {
   linkPostMortemToCoAction,
   unlinkPostMortemFromCoAction,
 } from '../api/coaction.js';
-import { getMemberQuota } from '../api/member.js';
 import { checkConventionFreshness } from './convention.js';
 import { buildFreshnessNoticeLines } from './plan.js';
 import { findProjectConfig } from '../utils/config.js';
 import { deleteIfTempFile, pruneStaleCacheFiles, toPositiveInteger, toSafeFileName } from '../utils/parsers.js';
 import { printFileInfo, withSpinner } from '../utils/spinner.js';
-import { isAxiosError } from 'axios';
 
 function findProjectRoot(): string | null {
   const configPath = findProjectConfig(process.cwd());
@@ -53,16 +51,6 @@ async function runFreshnessCheckSilent(
   } catch (error) {
     void error;
   }
-}
-
-function formatQuotaExceededMessage(
-  coAction: NonNullable<Awaited<ReturnType<typeof getMemberQuota>>['coAction']>,
-): string {
-  if (coAction.daily.used >= coAction.daily.limit) {
-    return `Daily limit reached: ${coAction.daily.used}/${coAction.daily.limit} used. Resets tomorrow (UTC).`;
-  }
-
-  return `Monthly limit reached: ${coAction.monthly.used}/${coAction.monthly.limit} used. Resets next month (UTC).`;
 }
 
 export async function executeCoActionCommand(apiUrl: string, headers: any, action: string, options: any): Promise<any> {
@@ -255,19 +243,6 @@ export async function executeCoActionCommand(apiUrl: string, headers: any, actio
         );
       } catch (error) {
         if (options.file) deleteIfTempFile(options.file, { keep: options.keepTemp });
-
-        if (
-          isAxiosError(error) &&
-          error.response?.status === 403 &&
-          error.response.data &&
-          typeof error.response.data === 'object' &&
-          (error.response.data as { errorCode?: unknown }).errorCode === 'QUOTA_EXCEEDED'
-        ) {
-          const quota = await getMemberQuota(apiUrl, headers);
-          if (quota.coAction) {
-            return formatQuotaExceededMessage(quota.coAction);
-          }
-        }
 
         throw error;
       }

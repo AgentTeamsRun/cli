@@ -12,86 +12,35 @@ describe('coaction command', () => {
     axiosPostSpy = jest.spyOn(axios, 'post');
   });
 
-  it('returns a daily quota message when coaction create hits QUOTA_EXCEEDED', async () => {
-    axiosPostSpy.mockRejectedValueOnce(
-      new AxiosError('quota exceeded', 'ERR_BAD_REQUEST', undefined, undefined, {
-        status: 403,
-        statusText: 'Forbidden',
-        headers: {},
-        config: { headers: {} } as any,
-        data: {
-          errorCode: 'QUOTA_EXCEEDED',
-          message: 'CO_ACTION_QUOTA_EXCEEDED',
-        },
-      }),
-    );
-    axiosGetSpy.mockResolvedValueOnce({
+  // 코액션 생성 쿼터가 상품 한도에서 빠지면서 403 QUOTA_EXCEEDED 안내 분기도 사라졌다.
+  // 남은 계약은 "서버 에러를 그대로 올린다" 하나이며, 쿼터 스냅샷 조회도 더는 하지 않는다.
+  it('rethrows a 403 from coaction create without looking up a quota snapshot', async () => {
+    const error = new AxiosError('forbidden', 'ERR_BAD_REQUEST', undefined, undefined, {
+      status: 403,
+      statusText: 'Forbidden',
+      headers: {},
+      config: { headers: {} } as any,
       data: {
-        data: {
-          coAction: {
-            daily: { used: 5, limit: 5 },
-            monthly: { used: 20, limit: 100 },
-          },
+        errorCode: 'QUOTA_EXCEEDED',
+        message: 'CO_ACTION_QUOTA_EXCEEDED',
+      },
+    });
+    axiosPostSpy.mockRejectedValueOnce(error);
+
+    await expect(
+      executeCoActionCommand(
+        'http://localhost:3001',
+        { 'X-API-Key': 'key_test123', 'Content-Type': 'application/json' },
+        'create',
+        {
+          projectId: 'project_1',
+          title: 'Quota test',
+          content: 'body',
         },
-      },
-    } as any);
+      ),
+    ).rejects.toBe(error);
 
-    const result = await executeCoActionCommand(
-      'http://localhost:3001',
-      { 'X-API-Key': 'key_test123', 'Content-Type': 'application/json' },
-      'create',
-      {
-        projectId: 'project_1',
-        title: 'Quota test',
-        content: 'body',
-      },
-    );
-
-    expect(result).toBe('Daily limit reached: 5/5 used. Resets tomorrow (UTC).');
-    expect(axiosGetSpy).toHaveBeenCalledWith(
-      'http://localhost:3001/api/members/quota',
-      expect.objectContaining({
-        headers: { 'X-API-Key': 'key_test123', 'Content-Type': 'application/json' },
-      }),
-    );
-  });
-
-  it('returns a monthly quota message when daily usage is still below the limit', async () => {
-    axiosPostSpy.mockRejectedValueOnce(
-      new AxiosError('quota exceeded', 'ERR_BAD_REQUEST', undefined, undefined, {
-        status: 403,
-        statusText: 'Forbidden',
-        headers: {},
-        config: { headers: {} } as any,
-        data: {
-          errorCode: 'QUOTA_EXCEEDED',
-          message: 'CO_ACTION_QUOTA_EXCEEDED',
-        },
-      }),
-    );
-    axiosGetSpy.mockResolvedValueOnce({
-      data: {
-        data: {
-          coAction: {
-            daily: { used: 3, limit: 5 },
-            monthly: { used: 100, limit: 100 },
-          },
-        },
-      },
-    } as any);
-
-    const result = await executeCoActionCommand(
-      'http://localhost:3001',
-      { 'X-API-Key': 'key_test123', 'Content-Type': 'application/json' },
-      'create',
-      {
-        projectId: 'project_1',
-        title: 'Quota test',
-        content: 'body',
-      },
-    );
-
-    expect(result).toBe('Monthly limit reached: 100/100 used. Resets next month (UTC).');
+    expect(axiosGetSpy).not.toHaveBeenCalledWith('http://localhost:3001/api/members/quota', expect.anything());
   });
 
   describe('list filters', () => {
