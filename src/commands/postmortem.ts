@@ -19,6 +19,7 @@ import {
   toSafeFileName,
 } from '../utils/parsers.js';
 import { printFileInfo, withSpinner } from '../utils/spinner.js';
+import { mutationContractFields, writeContractFields } from '../utils/writeContract.js';
 
 export async function executePostMortemCommand(
   apiUrl: string,
@@ -74,6 +75,7 @@ export async function executePostMortemCommand(
         content: options.content,
         actionItems: splitCsv(options.actionItems),
         status: options.status,
+        ...writeContractFields(options),
       };
 
       return withSpinner(
@@ -105,6 +107,7 @@ export async function executePostMortemCommand(
       }
       if (options.actionItems !== undefined) body.actionItems = splitCsv(options.actionItems);
       if (options.status) body.status = options.status;
+      Object.assign(body, mutationContractFields(options));
 
       const updateResult = await updatePostMortem(apiUrl, options.projectId, headers, options.id, body);
       if (options.file) deleteIfTempFile(options.file, { keep: options.keepTemp });
@@ -112,7 +115,7 @@ export async function executePostMortemCommand(
     }
     case 'delete': {
       if (!options.id) throw new Error('--id is required for postmortem delete');
-      await deletePostMortem(apiUrl, options.projectId, headers, options.id);
+      await deletePostMortem(apiUrl, options.projectId, headers, options.id, mutationContractFields(options));
       return { message: `PostMortem ${options.id} deleted successfully` };
     }
     case 'download': {
