@@ -19,6 +19,7 @@ import { getGitRemoteOriginUrl } from '../utils/git.js';
 import { toNonEmptyString, toPositiveInteger } from '../utils/parsers.js';
 import { EXECUTION_SNAPSHOT_HINT, resolveExecutionSnapshot } from '../utils/agentIdentity.js';
 import { withSpinner } from '../utils/spinner.js';
+import { mutationContractFields, writeContractFields } from '../utils/writeContract.js';
 
 const parseCsv = (value: unknown): string[] => {
   if (typeof value !== 'string') return [];
@@ -172,6 +173,7 @@ export async function executeCodeReviewCommand(
       body.model = model;
       if (options.recommendationReason) body.recommendationReason = options.recommendationReason;
       if (findings !== undefined) body.findings = findings;
+      Object.assign(body, writeContractFields(options));
 
       return withSpinner(
         'Creating code review...',
@@ -204,6 +206,8 @@ export async function executeCodeReviewCommand(
       if (Object.keys(body).length === 0) {
         throw new Error('At least one metadata field is required for code-review update');
       }
+      // 계약 필드는 "변경할 내용"이 아니므로 위 검사 뒤에 붙인다. --guide-hash만 준 호출은 여전히 오류다.
+      Object.assign(body, mutationContractFields(options));
 
       return withSpinner(
         'Updating code review...',
@@ -238,7 +242,7 @@ export async function executeCodeReviewCommand(
       if (!options.id) throw new Error('--id is required for code-review cancel');
       return withSpinner(
         'Cancelling code review...',
-        () => cancelCodeReview(apiUrl, projectId, headers, options.id),
+        () => cancelCodeReview(apiUrl, projectId, headers, options.id, writeContractFields(options)),
         'Code review cancelled',
       );
     }
@@ -277,19 +281,44 @@ export async function executeCodeReviewCommand(
       if (!options.findingId) throw new Error('--finding-id is required for code-review dismiss');
       return withSpinner(
         'Dismissing finding...',
-        () => dismissCodeReviewFinding(apiUrl, projectId, headers, options.id, options.findingId),
+        () =>
+          dismissCodeReviewFinding(
+            apiUrl,
+            projectId,
+            headers,
+            options.id,
+            options.findingId,
+            mutationContractFields(options),
+          ),
         'Finding dismissed',
       );
     }
     case 'resolve': {
       if (!options.id) throw new Error('--id is required for code-review resolve');
       const findingIds = parseFindingIdOptions(options, 'resolve');
+      // 여러 finding은 finding마다 별개의 요청이라 하나의 멱등 키를 공유할 수 없다.
+      // 두 번째 호출부터 같은 키 + 다른 요청 본문이 되어 서버가 키 재사용(409)으로 거절한다.
+      if (options.idempotencyKey && findingIds.length > 1) {
+        throw new Error(
+          '--idempotency-key applies to a single finding. Resolve one finding per call, or omit the key.',
+        );
+      }
+      // 동시성 토큰은 각 finding의 updatedAt에 대응한다. 하나를 여러 요청에 재사용하면
+      // 앞선 resolve만 적용된 뒤 나머지가 409로 실패하는 부분 성공 상태가 생긴다.
+      if (options.expectedUpdatedAt !== undefined && findingIds.length > 1) {
+        throw new Error(
+          "--expected-updated-at applies to a single finding. Resolve one finding per call with that finding's updatedAt, or omit the timestamp.",
+        );
+      }
+      const contractFields = mutationContractFields(options);
       return withSpinner(
         findingIds.length === 1 ? 'Resolving finding...' : 'Resolving findings...',
         async () => {
           const results = [];
           for (const findingId of findingIds) {
-            results.push(await resolveCodeReviewFinding(apiUrl, projectId, headers, options.id, findingId));
+            results.push(
+              await resolveCodeReviewFinding(apiUrl, projectId, headers, options.id, findingId, contractFields),
+            );
           }
           return findingIds.length === 1
             ? results[0]
@@ -309,7 +338,15 @@ export async function executeCodeReviewCommand(
       if (!options.findingId) throw new Error('--finding-id is required for code-review undismiss');
       return withSpinner(
         'Restoring finding...',
-        () => undismissCodeReviewFinding(apiUrl, projectId, headers, options.id, options.findingId),
+        () =>
+          undismissCodeReviewFinding(
+            apiUrl,
+            projectId,
+            headers,
+            options.id,
+            options.findingId,
+            mutationContractFields(options),
+          ),
         'Finding restored',
       );
     }

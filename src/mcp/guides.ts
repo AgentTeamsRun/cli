@@ -31,7 +31,8 @@ const RESYNC_HINT = "Run 'agentteams convention download' and retry.";
 export const GUIDE_RECORD_KINDS = ['document', 'comment', 'co-action', 'post-mortem', 'code-review'] as const;
 export type GuideRecordKind = (typeof GUIDE_RECORD_KINDS)[number];
 
-const GUIDE_FILE_NAMES: Record<GuideRecordKind, string> = {
+/** Guide file name per record kind. Exported so guards can check the shipped file, not a copy of this map. */
+export const GUIDE_FILE_NAMES: Record<GuideRecordKind, string> = {
   document: 'document-guide.md',
   comment: 'comment-guide.md',
   'co-action': 'co-action-guide.md',

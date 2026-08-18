@@ -2,6 +2,7 @@ import { Command, CONVENTION_HINT, executeCommand, handleError, printCommandResu
 import { addConnectionOptions } from './options/connection.js';
 import { addOutputOptions } from './options/output.js';
 import { addPaginationOptions } from './options/pagination.js';
+import { addMutationContractOptions, addWriteContractOptions } from './options/writeContract.js';
 
 /**
  * 액션 인벤토리: list/get/create/update/delete/download/cleanup/takeaway-list/takeaway-create/takeaway-update/takeaway-delete/history/link-plan/unlink-plan/link-completion-report/unlink-completion-report/link-post-mortem/unlink-post-mortem.
@@ -84,7 +85,7 @@ export function registerCoactionCommand(program: Command): void {
     addPaginationOptions(command).option('--id <id>', 'Co-action ID'),
   );
   addLeaf('create', 'Create a co-action', (command) =>
-    command
+    addWriteContractOptions(command, 'co-action')
       .option('--title <title>', 'Co-action title')
       .option('--content <content>', 'Co-action content (short text; use --file for long content)')
       .option('--file <path>', 'Read co-action content from a local file')
@@ -97,7 +98,7 @@ export function registerCoactionCommand(program: Command): void {
       .option('--visibility <visibility>', 'Co-action visibility (PRIVATE, PROJECT)'),
   );
   addLeaf('update', 'Update a co-action', (command) =>
-    command
+    addMutationContractOptions(command, 'co-action', 'co-action')
       .option('--id <id>', 'Co-action ID')
       .option('--title <title>', 'Co-action title')
       .option('--content <content>', 'Co-action content (short text; use --file for long content)')
@@ -111,7 +112,9 @@ export function registerCoactionCommand(program: Command): void {
       .option('--visibility <visibility>', 'Co-action visibility (PRIVATE, PROJECT)')
       .option('--plan-id <id>', 'Plan ID to set, or null to clear'),
   );
-  addLeaf('delete', 'Delete a co-action', (command) => command.option('--id <id>', 'Co-action ID'));
+  addLeaf('delete', 'Delete a co-action', (command) =>
+    addMutationContractOptions(command, 'co-action', 'co-action').option('--id <id>', 'Co-action ID'),
+  );
   addLeaf('download', 'Download a co-action', (command) => command.option('--id <id>', 'Co-action ID'));
   addLeaf('cleanup', 'Remove downloaded co-actions', (command) =>
     command.option('--id <id>', 'Co-action ID (omit to remove all downloaded co-actions)'),

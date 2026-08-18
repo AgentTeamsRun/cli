@@ -2,6 +2,7 @@ import { Command, CONVENTION_HINT } from './shared.js';
 import { addGitToggleOption } from './options/completionReport.js';
 import { addPaginationOptions } from './options/pagination.js';
 import { addJsonResourceLeaf } from './options/resource.js';
+import { addMutationContractOptions, addWriteContractOptions } from './options/writeContract.js';
 
 /** 액션 인벤토리: list/get/create/update/delete/download. */
 export function registerPostmortemCommand(program: Command): void {
@@ -28,12 +29,16 @@ export function registerPostmortemCommand(program: Command): void {
   );
   addLeaf('get', 'Get a post mortem', (command) => command.option('--id <id>', 'Post mortem ID'));
   addLeaf('create', 'Create a post mortem', (command) =>
-    addGitToggleOption(addContent(command)).option(
+    addWriteContractOptions(addGitToggleOption(addContent(command)), 'post-mortem').option(
       '--repository-remote-url <url>',
       'Repository remote origin URL (defaults to git origin)',
     ),
   );
-  addLeaf('update', 'Update a post mortem', (command) => addContent(command.option('--id <id>', 'Post mortem ID')));
-  addLeaf('delete', 'Delete a post mortem', (command) => command.option('--id <id>', 'Post mortem ID'));
+  addLeaf('update', 'Update a post mortem', (command) =>
+    addMutationContractOptions(addContent(command.option('--id <id>', 'Post mortem ID')), 'post-mortem', 'post mortem'),
+  );
+  addLeaf('delete', 'Delete a post mortem', (command) =>
+    addMutationContractOptions(command, 'post-mortem', 'post mortem').option('--id <id>', 'Post mortem ID'),
+  );
   addLeaf('download', 'Download a post mortem', (command) => command.option('--id <id>', 'Post mortem ID'));
 }

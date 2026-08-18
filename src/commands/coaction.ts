@@ -23,6 +23,7 @@ import { buildFreshnessNoticeLines } from './plan.js';
 import { findProjectConfig } from '../utils/config.js';
 import { deleteIfTempFile, pruneStaleCacheFiles, toPositiveInteger, toSafeFileName } from '../utils/parsers.js';
 import { printFileInfo, withSpinner } from '../utils/spinner.js';
+import { mutationContractFields, writeContractFields } from '../utils/writeContract.js';
 
 function findProjectRoot(): string | null {
   const configPath = findProjectConfig(process.cwd());
@@ -224,6 +225,7 @@ export async function executeCoActionCommand(apiUrl: string, headers: any, actio
         content: options.content,
         status: options.status,
         visibility: options.visibility,
+        ...writeContractFields(options),
       };
 
       try {
@@ -267,6 +269,8 @@ export async function executeCoActionCommand(apiUrl: string, headers: any, actio
         body.planId = options.planId === null || options.planId === 'null' ? null : options.planId;
       }
 
+      Object.assign(body, mutationContractFields(options));
+
       const updateResult = await updateCoAction(apiUrl, options.projectId, headers, options.id, body);
       if (options.file) deleteIfTempFile(options.file, { keep: options.keepTemp });
       if (options.id)
@@ -277,7 +281,7 @@ export async function executeCoActionCommand(apiUrl: string, headers: any, actio
     }
     case 'delete': {
       if (!options.id) throw new Error('--id is required for coaction delete');
-      await deleteCoAction(apiUrl, options.projectId, headers, options.id);
+      await deleteCoAction(apiUrl, options.projectId, headers, options.id, mutationContractFields(options));
       return { message: `CoAction ${options.id} deleted successfully` };
     }
     case 'download': {

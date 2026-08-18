@@ -3,6 +3,7 @@ import { addGitToggleOption } from './options/completionReport.js';
 import { addConnectionOptions } from './options/connection.js';
 import { addOutputOptions } from './options/output.js';
 import { addPaginationOptions } from './options/pagination.js';
+import { addMutationContractOptions, addWriteContractOptions } from './options/writeContract.js';
 import { RUNNER_TYPE_OPTION_DESCRIPTION } from '../utils/runnerTypes.js';
 
 /** 액션 인벤토리: list/get/finding-list/create/update/create-plan/submit-result/cancel/delete/dismiss/resolve/undismiss. */
@@ -54,7 +55,7 @@ export function registerCodeReviewCommand(program: Command): void {
     addPaginationOptions(command).option('--id <id>', 'Code review ID'),
   );
   addLeaf('create', 'Create a code review', (command) =>
-    addGitToggleOption(command)
+    addWriteContractOptions(addGitToggleOption(command), 'code review')
       .option('--title <title>', 'Code review title')
       .option('--target-type <type>', 'Review target type')
       .option('--target-ref <ref>', 'Target reference')
@@ -76,7 +77,7 @@ export function registerCodeReviewCommand(program: Command): void {
       .option('--model <model>', 'Model ID snapshot'),
   );
   addLeaf('update', 'Update a code review', (command) =>
-    command
+    addMutationContractOptions(command, 'code review', 'code review')
       .option('--id <id>', 'Code review ID')
       .option('--title <title>', 'Code review title')
       .option('--target-type <type>', 'Review target type')
@@ -112,18 +113,24 @@ export function registerCodeReviewCommand(program: Command): void {
       .option('--result-summary <text>', 'Review result summary')
       .option('--error-message <text>', 'Failure reason when status is FAILED'),
   );
-  addLeaf('cancel', 'Cancel a code review', (command) => command.option('--id <id>', 'Code review ID'));
+  addLeaf('cancel', 'Cancel a code review', (command) =>
+    addWriteContractOptions(command, 'code review').option('--id <id>', 'Code review ID'),
+  );
   addLeaf('delete', 'Delete a code review', (command) => command.option('--id <id>', 'Code review ID'));
   addLeaf('dismiss', 'Dismiss a finding', (command) =>
-    command.option('--id <id>', 'Code review ID').option('--finding-id <id>', 'Finding ID'),
+    addMutationContractOptions(command, 'code review', 'finding')
+      .option('--id <id>', 'Code review ID')
+      .option('--finding-id <id>', 'Finding ID'),
   );
   addLeaf('resolve', 'Resolve findings', (command) =>
-    command
+    addMutationContractOptions(command, 'code review', 'finding')
       .option('--id <id>', 'Code review ID')
       .option('--finding-id <id>', 'Finding ID')
       .option('--finding-ids <ids>', 'Comma-separated finding IDs'),
   );
   addLeaf('undismiss', 'Restore a dismissed finding', (command) =>
-    command.option('--id <id>', 'Code review ID').option('--finding-id <id>', 'Finding ID'),
+    addMutationContractOptions(command, 'code review', 'finding')
+      .option('--id <id>', 'Code review ID')
+      .option('--finding-id <id>', 'Finding ID'),
   );
 }
