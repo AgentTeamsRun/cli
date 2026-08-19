@@ -44,8 +44,9 @@ export function collectGitMetrics(
 
 export function getGitRemoteOriginUrl(
   execFileSyncImpl: ExecFileSyncFn = childProcess.execFileSync,
+  cwd?: string,
 ): string | undefined {
-  return runGit(execFileSyncImpl, ['remote', 'get-url', 'origin']);
+  return runGit(execFileSyncImpl, ['remote', 'get-url', 'origin'], cwd);
 }
 
 export function resolveMainCheckoutRoot(
