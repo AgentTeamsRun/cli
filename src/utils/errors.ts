@@ -188,6 +188,20 @@ Details: ${message}`;
           }
           return `Forbidden.\nNext: Confirm your API key permissions for this project/team.\nDetails: ${message}`;
         case 404:
+          // The caller already passed an id here, so "pass --repository-id" would leave
+          // them with nothing to do. Name the id itself as the thing to check.
+          if (errorDetailCode === 'WORKTREE_REPOSITORY_ID_NOT_ACCESSIBLE') {
+            return `The repository id you passed is not a repository this runner can access.
+Next: Check --repository-id, or confirm the repository is registered in a project this runner can reach.
+Details: ${message}`;
+          }
+          // A registered repository whose remote URL differs from origin fails the same
+          // lookup, so do not claim outright that the repository is unregistered.
+          if (errorDetailCode === 'WORKTREE_REPOSITORY_NOT_FOUND') {
+            return `No registered repository matches this Git repository's origin remote.
+Next: Register the repository in the project, check that its remote URL matches origin, or pass --repository-id.
+Details: ${message}`;
+          }
           return `Resource not found.\nNext: Check identifiers (e.g., --id) and the target project.\nDetails: ${message}`;
         case 409:
           // The server names the guide and the hash it wants, so the recovery is
