@@ -61,6 +61,39 @@ describe('errors', () => {
     expect(handleError(makeAxiosError(500, { message: 'boom' }))).toContain('Server error occurred.');
   });
 
+  it('maps unmatched worktree repository 404 to a register-or-check-remote guide', () => {
+    const result = handleError(
+      makeAxiosError(404, {
+        message:
+          "No registered repository matches this Git repository's origin remote. Register it, check that the registered repository's remote URL matches origin, or pass --repository-id.",
+        errorCode: 'NOT_FOUND',
+        errorDetailCode: 'WORKTREE_REPOSITORY_NOT_FOUND',
+      }),
+    );
+
+    expect(result).toContain('No registered repository matches');
+    expect(result).toContain('remote URL matches origin');
+    expect(result).toContain('--repository-id');
+    expect(result).not.toContain('try again later');
+    expect(result).not.toContain('Resource not found.');
+  });
+
+  it('maps an out-of-scope repository id 404 to a check-the-id guide, not pass-the-flag', () => {
+    const result = handleError(
+      makeAxiosError(404, {
+        message:
+          'The repository id you passed is not a repository this runner can access. Check the id, or confirm the repository is registered in a project this runner can reach.',
+        errorCode: 'NOT_FOUND',
+        errorDetailCode: 'WORKTREE_REPOSITORY_ID_NOT_ACCESSIBLE',
+      }),
+    );
+
+    expect(result).toContain('not a repository this runner can access');
+    expect(result).toContain('Check --repository-id');
+    expect(result).not.toContain('Register the repository in the project');
+    expect(result).not.toContain('Resource not found.');
+  });
+
   it('maps 426 / CLI_UPGRADE_REQUIRED to a friendly upgrade guide', () => {
     const result = handleError(
       makeAxiosError(426, {
