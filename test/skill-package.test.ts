@@ -164,6 +164,55 @@ describe('package validation', () => {
 
     expect(() => collectSkillPackageFiles(packageDir)).toThrow(/Symlinks are not allowed/);
   });
+
+  it('refuses to collect a package containing a binary resource', () => {
+    const packageDir = join(projectRoot, 'pkg');
+    writeFile(join(packageDir, 'SKILL.md'), entryContent());
+    mkdirSync(join(packageDir, 'scripts'), { recursive: true });
+    // PNG 매직 바이트 + invalid UTF-8 연속(0xff, 0xfe) — NUL 없이도 디코드 왕복이 깨져야 한다.
+    writeFileSync(
+      join(packageDir, 'scripts', 'logo.png'),
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0xff, 0xfe, 0x8b]),
+    );
+
+    expect(() => collectSkillPackageFiles(packageDir)).toThrow(/must be UTF-8 text \(not valid UTF-8\)/);
+  });
+
+  it('refuses to collect a text file containing a null byte', () => {
+    const packageDir = join(projectRoot, 'pkg');
+    writeFile(join(packageDir, 'SKILL.md'), entryContent());
+    mkdirSync(join(packageDir, 'references'), { recursive: true });
+    writeFileSync(join(packageDir, 'references', 'nul.txt'), Buffer.from('before\0after'));
+
+    expect(() => collectSkillPackageFiles(packageDir)).toThrow(/must be UTF-8 text \(found a null byte\)/);
+  });
+
+  it('collects valid UTF-8 resources with their content unchanged', () => {
+    const packageDir = join(projectRoot, 'pkg');
+    writeFile(join(packageDir, 'SKILL.md'), entryContent());
+    const original = '한글 텍스트와 emoji 🚀 탭(\t) CRLF(\r\n)';
+    writeFile(join(packageDir, 'references', 'notes.md'), original);
+
+    const files = collectSkillPackageFiles(packageDir);
+    expect(files.find((file) => file.relativePath === 'references/notes.md')?.content).toBe(original);
+  });
+
+  it('skips well-known OS junk files instead of failing collection', () => {
+    const packageDir = join(projectRoot, 'pkg');
+    writeFile(join(packageDir, 'SKILL.md'), entryContent());
+    mkdirSync(join(packageDir, 'references'), { recursive: true });
+    writeFile(join(packageDir, 'references', 'notes.md'), 'notes');
+    // Finder/Explorer가 넣는 바이너리 — NUL이 있어 콘텐츠 검사에 걸리면 push 전체가 멈춘다.
+    writeFileSync(
+      join(packageDir, 'references', '.DS_Store'),
+      Buffer.from([0x00, 0x00, 0x00, 0x01, 0x42, 0x75, 0x64, 0x31]),
+    );
+    writeFileSync(join(packageDir, 'Thumbs.db'), Buffer.from([0xd0, 0xcf, 0x11, 0xe0]));
+    writeFileSync(join(packageDir, 'references', '._notes.md'), Buffer.from([0x00, 0x05, 0x16, 0x07]));
+
+    const files = collectSkillPackageFiles(packageDir);
+    expect(files.map((file) => file.relativePath).sort()).toEqual(['SKILL.md', 'references/notes.md']);
+  });
 });
 
 describe('atomic package replacement', () => {
