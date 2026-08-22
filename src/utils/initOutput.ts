@@ -77,6 +77,8 @@ function printAgentFiles(agentFiles: AgentFileEntry[] | undefined): void {
   for (const file of agentFiles ?? []) {
     if (file.type === 'created') {
       console.log(`✓ Agent file created: ${file.relativePath}`);
+    } else if (file.type === 'upgraded') {
+      console.log(`✓ Agent file updated to the current convention reference: ${file.relativePath}`);
     } else if (file.type === 'example') {
       console.log(`✓ Example file created: ${file.relativePath}`);
     } else {

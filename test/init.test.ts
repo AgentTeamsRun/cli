@@ -545,7 +545,7 @@ describe('non-git root entry point materialization', () => {
     expect(result.issues).toEqual([]);
 
     const claudeContent = readFileSync(join(worktreeDir, 'CLAUDE.md'), 'utf-8');
-    expect(claudeContent).toContain('**Before starting any task, always refer to `.agentteams/convention.md`.**');
+    expect(claudeContent).toContain('**Read it once per session**, before your first substantive action.');
     expect(claudeContent).not.toContain('Root CLAUDE entry point');
 
     expect(existsSync(join(worktreeDir, 'GEMINI.md'))).toBe(false);

@@ -52,6 +52,7 @@ import {
 import { bootstrapLinkedWorktree, resolveLinkedWorktreeSource, type WorktreeInitResult } from './initWorktree.js';
 import {
   DEFAULT_CONVENTION_REFERENCE,
+  upgradeLegacyConventionReference,
   ensurePostCheckoutHook,
   type EnsurePostCheckoutHookResult,
 } from '../utils/conventionLink.js';
@@ -133,7 +134,7 @@ export type InitAdapterOutcome = {
 
 export type AgentFileEntry = {
   relativePath: string;
-  type: 'created' | 'example' | 'skipped';
+  type: 'created' | 'example' | 'skipped' | 'upgraded';
 };
 
 /** One entry point path that could not be written, and why. */
@@ -509,6 +510,11 @@ function ensureGeminiIgnore(cwd: string): void {
  * the old behavior for the case it was built for — a first-time setup on a repo
  * that already has its own CLAUDE.md.
  *
+ * A file still holding a body an older CLI wrote is refreshed in place instead
+ * of being skipped. The match is exact, so this only ever rewrites a file the
+ * user never edited, and it is what carries an already-initialized repository
+ * onto the current wording.
+ *
  * Each file is written under its own try/catch and failures come back alongside
  * the entries instead of as an exception. Letting one unwritable path throw out
  * of the loop discarded the record of every file already on disk, so the caller
@@ -528,6 +534,11 @@ function generateAgentEntryPointFiles(
 
     try {
       if (existsSync(fullPath)) {
+        if (upgradeLegacyConventionReference(fullPath)) {
+          entries.push({ relativePath, type: 'upgraded' });
+          continue;
+        }
+
         if (!options.createExample) {
           entries.push({ relativePath, type: 'skipped' });
           continue;

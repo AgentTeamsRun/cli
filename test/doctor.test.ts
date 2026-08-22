@@ -100,12 +100,8 @@ describe('doctor on a non-git root project', () => {
       expect(exclude).toContain('/.agentteams\n');
       expect(exclude).toContain('/CLAUDE.md\n');
       expect(exclude).toContain('/AGENTS.md\n');
-      expect(readFileSync(join(repoDir, 'CLAUDE.md'), 'utf-8')).toContain(
-        'always refer to `.agentteams/convention.md`',
-      );
-      expect(readFileSync(join(repoDir, 'AGENTS.md'), 'utf-8')).toContain(
-        'always refer to `.agentteams/convention.md`',
-      );
+      expect(readFileSync(join(repoDir, 'CLAUDE.md'), 'utf-8')).toContain('Read it once per session');
+      expect(readFileSync(join(repoDir, 'AGENTS.md'), 'utf-8')).toContain('Read it once per session');
       const hookLines = readFileSync(join(repoDir, '.git', 'hooks', 'post-checkout'), 'utf-8').split('\n');
       expect(hookLines[0]).toBe('#!/bin/sh');
       expect(hookLines[1]).toContain('AgentTeams managed post-checkout hook');
@@ -329,9 +325,7 @@ describe('doctor root preflight failures', () => {
     expect(result.rootEntryPoints).toEqual(['AGENTS.md']);
     expect(result.issues.map((issue) => issue.code)).toContain('root-entry-point-invalid');
     expect(existsSync(join(memberDir, 'CLAUDE.md'))).toBe(false);
-    expect(readFileSync(join(memberDir, 'AGENTS.md'), 'utf-8')).toContain(
-      'always refer to `.agentteams/convention.md`',
-    );
+    expect(readFileSync(join(memberDir, 'AGENTS.md'), 'utf-8')).toContain('Read it once per session');
   });
 });
 

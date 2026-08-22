@@ -10,6 +10,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
+import { DEFAULT_CONVENTION_REFERENCE, LEGACY_CONVENTION_REFERENCES } from '../src/utils/conventionLink.js';
 
 const WEB_ORIGIN = 'https://web.test.agentteams.run';
 const API_URL = 'https://api.test.agentteams.run';
@@ -382,6 +383,29 @@ describe('init local adapters (new project path)', () => {
 
     expect(result.agentFiles).toEqual([{ relativePath: 'CLAUDE-example.md', type: 'example' }]);
     expect(existsSync(join(cwd, 'CLAUDE-example.md'))).toBe(true);
+  }, 20000);
+
+  test('refreshes an entry point an older CLI wrote instead of leaving it stale', async () => {
+    // 이미 init한 저장소가 새 문구를 받는 유일한 경로다. 내용이 옛 상수와 정확히 일치하면
+    // 사용자가 손대지 않은 우리 파일이므로 제자리에서 갱신한다.
+    const cwd = createTempProject();
+    writeFileSync(join(cwd, 'CLAUDE.md'), LEGACY_CONVENTION_REFERENCES[0], 'utf-8');
+
+    const result = await runNewProjectInit(cwd, { agentFiles: 'CLAUDE.md' });
+
+    expect(result.agentFiles).toEqual([{ relativePath: 'CLAUDE.md', type: 'upgraded' }]);
+    expect(readFileSync(join(cwd, 'CLAUDE.md'), 'utf-8')).toBe(DEFAULT_CONVENTION_REFERENCE);
+    expect(adapterOf(result, 'agent-entry-points')).toMatchObject({ status: 'READY' });
+  }, 20000);
+
+  test('upgrades in place rather than writing a -example sibling for a stale entry point', async () => {
+    const cwd = createTempProject();
+    writeFileSync(join(cwd, 'CLAUDE.md'), LEGACY_CONVENTION_REFERENCES[0], 'utf-8');
+
+    const result = await runNewProjectInit(cwd, { agentFiles: 'CLAUDE.md', agentFilesExample: true });
+
+    expect(result.agentFiles).toEqual([{ relativePath: 'CLAUDE.md', type: 'upgraded' }]);
+    expect(existsSync(join(cwd, 'CLAUDE-example.md'))).toBe(false);
   }, 20000);
 
   test('an explicit --agent-files list creates exactly those files and nothing else', async () => {

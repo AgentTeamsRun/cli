@@ -16,12 +16,16 @@ import {
 import { tmpdir } from 'node:os';
 import { delimiter, isAbsolute, join } from 'node:path';
 import {
+  DEFAULT_CONVENTION_REFERENCE,
+  LEGACY_CONVENTION_REFERENCES,
   POST_CHECKOUT_HOOK_MARKER,
+  ensureConventionEntryPoints,
   ensureConventionLink,
   ensureLocalExclude,
   ensurePostCheckoutHook,
   inspectConventionLink,
   toAnchoredExcludePattern,
+  upgradeLegacyConventionReference,
 } from '../src/utils/conventionLink.js';
 import { findProjectConfig } from '../src/utils/config.js';
 
@@ -350,5 +354,108 @@ describePosix('managed hook runtime behavior', () => {
     });
     expect(add.status).toBe(0);
     expect(add.stderr).toContain('agentteams: skipped worktree bootstrap');
+  });
+});
+
+describe('convention entry point upgrades', () => {
+  const legacyReference = LEGACY_CONVENTION_REFERENCES[0];
+
+  it('keeps every released entry point body recognizable', () => {
+    // Dropping a legacy body would make `doctor` report entry-point-conflict
+    // for a file the CLI itself wrote, so the list must never shrink.
+    expect(LEGACY_CONVENTION_REFERENCES.length).toBeGreaterThan(0);
+    expect(legacyReference).toContain('always refer to `.agentteams/convention.md`');
+    expect(LEGACY_CONVENTION_REFERENCES).not.toContain(DEFAULT_CONVENTION_REFERENCE);
+  });
+
+  it('states the reference is read once per session, not per task', () => {
+    // The per-task phrasing is what made agents re-read the convention on every
+    // turn; the replacement has to grant the session-level cache explicitly.
+    expect(DEFAULT_CONVENTION_REFERENCE).toContain('Read it once per session');
+    expect(DEFAULT_CONVENTION_REFERENCE).toContain('Do not re-read it for each task');
+    expect(DEFAULT_CONVENTION_REFERENCE).not.toContain('before starting any task');
+  });
+
+  it('refreshes a legacy body in place and reports it as changed', () => {
+    const { repoDir } = createNonGitRoot();
+    const entryPath = join(repoDir, 'CLAUDE.md');
+    writeFileSync(entryPath, legacyReference, 'utf-8');
+
+    const result = ensureConventionEntryPoints(repoDir, ['CLAUDE.md'], {
+      allowCreate: true,
+      validateExistingReference: true,
+    });
+
+    expect(readFileSync(entryPath, 'utf-8')).toBe(DEFAULT_CONVENTION_REFERENCE);
+    expect(result.changedCount).toBe(1);
+    expect(result.ready).toBe(true);
+    expect(result.issues).toEqual([]);
+    expect(result.entries).toEqual([
+      { relativePath: 'CLAUDE.md', state: 'existing', compatible: true, upgraded: true },
+    ]);
+  });
+
+  it('upgrades a tracked entry point too, so committed files reach the current wording', () => {
+    const { repoDir } = createNonGitRoot();
+    const entryPath = join(repoDir, 'AGENTS.md');
+    writeFileSync(entryPath, legacyReference, 'utf-8');
+    execFileSync('git', ['add', 'AGENTS.md'], { cwd: repoDir });
+    execFileSync(
+      'git',
+      ['-c', 'user.name=AgentTeams Test', '-c', 'user.email=test@agentteams.run', 'commit', '-m', 'entry point'],
+      { cwd: repoDir },
+    );
+
+    const result = ensureConventionEntryPoints(repoDir, ['AGENTS.md'], {
+      allowCreate: true,
+      validateExistingReference: true,
+    });
+
+    expect(readFileSync(entryPath, 'utf-8')).toBe(DEFAULT_CONVENTION_REFERENCE);
+    expect(result.entries).toEqual([{ relativePath: 'AGENTS.md', state: 'tracked', compatible: true, upgraded: true }]);
+  });
+
+  it('leaves a user-edited entry point alone and still reports the conflict', () => {
+    const { repoDir } = createNonGitRoot();
+    const entryPath = join(repoDir, 'CLAUDE.md');
+    const edited = `${legacyReference}\nOur own house rules.\n`;
+    writeFileSync(entryPath, edited, 'utf-8');
+
+    const result = ensureConventionEntryPoints(repoDir, ['CLAUDE.md'], {
+      allowCreate: true,
+      validateExistingReference: true,
+    });
+
+    expect(readFileSync(entryPath, 'utf-8')).toBe(edited);
+    expect(result.changedCount).toBe(0);
+    expect(result.ready).toBe(false);
+    expect(result.issues.map((issue) => issue.code)).toEqual(['entry-point-conflict']);
+  });
+
+  it('is a no-op once the entry point already holds the current body', () => {
+    const { repoDir } = createNonGitRoot();
+    const entryPath = join(repoDir, 'CLAUDE.md');
+    writeFileSync(entryPath, DEFAULT_CONVENTION_REFERENCE, 'utf-8');
+
+    expect(upgradeLegacyConventionReference(entryPath)).toBe(false);
+
+    const result = ensureConventionEntryPoints(repoDir, ['CLAUDE.md'], {
+      allowCreate: true,
+      validateExistingReference: true,
+    });
+
+    expect(result.changedCount).toBe(0);
+    expect(result.entries).toEqual([{ relativePath: 'CLAUDE.md', state: 'existing', compatible: true }]);
+  });
+
+  it('refuses to follow a symlink standing in for an entry point', () => {
+    const { repoDir } = createNonGitRoot();
+    const targetPath = join(repoDir, 'real-entry.md');
+    const linkPath = join(repoDir, 'CLAUDE.md');
+    writeFileSync(targetPath, legacyReference, 'utf-8');
+    symlinkSync(targetPath, linkPath);
+
+    expect(upgradeLegacyConventionReference(linkPath)).toBe(false);
+    expect(readFileSync(targetPath, 'utf-8')).toBe(legacyReference);
   });
 });
