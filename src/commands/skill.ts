@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, statSync } from 'node:fs';
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { createSkill, deleteSkill, downloadSkill, getSkill, listSkills, updateSkill } from '../api/skill.js';
+import { resolveSessionRunnerType } from '../utils/agentIdentity.js';
 import {
   SKILL_ENTRY_FILE,
   SKILL_PACKAGE_DIR,
@@ -11,6 +12,7 @@ import {
   type SkillPackageFile,
   collectSkillPackageFiles,
   detectSkillMirrorTargets,
+  findUnregisteredSkillSlugs,
   ensureMirrorGitignore,
   mirrorDirFor,
   parseSkillTargetsOption,
@@ -62,12 +64,14 @@ const toRelativeProjectPath = (projectRoot: string, absolutePath: string): strin
   relative(projectRoot, absolutePath).split(sep).join('/');
 
 /**
- * mirror 대상 결정. `--skill-targets`가 있으면 그것만 쓰고, 없으면 마커가 실재하는 클라이언트만
- * 고른다. 사용자 홈 아래 경로는 어떤 경우에도 대상이 아니다 — 전부 프로젝트 로컬이다.
+ * mirror 대상 결정. `--skill-targets`가 있으면 그것만 쓰고, 없으면 마커가 실재하는 클라이언트에
+ * **현재 엔진이 읽는 경로**를 더한다. 마커 탐지만으로는 `.claude/`가 없는 저장소의 CLAUDE_CODE가
+ * 미러를 통째로 못 받는다 — 그 보정을 러너가 매번 `--skill-targets`로 하던 것을 여기로 옮겼다.
+ * 사용자 홈 아래 경로는 어떤 경우에도 대상이 아니다 — 전부 프로젝트 로컬이다.
  */
 const resolveMirrorTargets = (projectRoot: string, options: SkillOptions): SkillMirrorTarget[] => {
   const explicit = parseSkillTargetsOption(options.skillTargets);
-  return explicit ?? detectSkillMirrorTargets(projectRoot);
+  return explicit ?? detectSkillMirrorTargets(projectRoot, resolveSessionRunnerType());
 };
 
 /** 구형 flat `.agentteams/skills/<name>.md`. 이관 전에는 지우지 않고 경고만 한다. */
@@ -250,10 +254,27 @@ const skillStatus = async (
     changes.push({ slug, type: 'deleted' });
   }
 
+  // 원격·매니페스트 어디에도 없는 로컬 패키지. `changes`와 섞지 않는다 — 이건 다운로드로 해결되는
+  // 드리프트가 아니라 `skill create --apply`를 안 한 상태이고, `updateAvailable`을 켜면
+  // `session sync`가 받을 게 없는데도 download를 부르게 된다.
+  const manifestSlugs = new Set(manifest.entries.map((entry) => entry.slug));
+  const unregistered = findUnregisteredSkillSlugs(
+    projectRoot,
+    new Set([...manifestSlugs, ...remote.map((s) => s.slug)]),
+  );
+
   return {
     updateAvailable: changes.length > 0,
     changes,
-    summary: changes.length === 0 ? '✓ Skills up to date' : `${changes.length} skill change(s) available`,
+    ...(unregistered.length > 0 ? { unregistered } : {}),
+    summary: [
+      changes.length === 0 ? '✓ Skills up to date' : `${changes.length} skill change(s) available`,
+      unregistered.length > 0
+        ? `${unregistered.length} local package(s) not registered — run 'agentteams skill create --dir .agentteams/skills/<slug> --apply'`
+        : null,
+    ]
+      .filter(Boolean)
+      .join('; '),
   };
 };
 

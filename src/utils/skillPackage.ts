@@ -127,9 +127,30 @@ export const parseSkillTargetsOption = (raw: unknown): SkillMirrorTarget[] | nul
   return selected;
 };
 
-/** 마커가 실재하는 클라이언트만 고른다. `.agents`는 마커 없이도 항상 포함된다. */
-export const detectSkillMirrorTargets = (projectRoot: string): SkillMirrorTarget[] => {
+/**
+ * 마커 탐지만으로는 자기 엔진 경로를 못 받는 러너를 보정하는 매핑.
+ *
+ * `.agents`는 마커 없이도 항상 쓰이므로 그 경로를 읽는 엔진(COPILOT_CLI·AMP·CODEX·OPENCODE·
+ * GROK_BUILD)은 이미 커버된다. 거기에 `claude`를 더하면 한 엔진이 같은 스킬을 두 번 로드한다
+ * (`skill-package-guide.md` §5). 그래서 `.claude/`만 읽는 CLAUDE_CODE 한 건만 매핑한다 —
+ * `.claude/` 마커가 없는 저장소에서 미러를 통째로 못 받는 유일한 엔진이다.
+ *
+ * index-reference 엔진(CURSOR_CLI·KIRO_CLI)은 미러 대상이 아니고, 미측정 엔진(KIMI_CLI·
+ * ANTIGRAVITY)은 매핑하지 않는다 — 근거 없는 매핑보다 마커 탐지 폴백이 낫다.
+ */
+const RUNNER_REQUIRED_TARGETS: Record<string, readonly SkillMirrorTarget[]> = {
+  CLAUDE_CODE: ['claude'],
+};
+
+/**
+ * 마커가 실재하는 클라이언트만 고른다. `.agents`는 마커 없이도 항상 포함된다.
+ * `runnerType`을 알면 그 엔진이 읽는 경로를 마커 유무와 무관하게 추가한다.
+ */
+export const detectSkillMirrorTargets = (projectRoot: string, runnerType?: string): SkillMirrorTarget[] => {
+  const required = new Set<SkillMirrorTarget>(runnerType ? (RUNNER_REQUIRED_TARGETS[runnerType] ?? []) : []);
+
   return SKILL_MIRROR_TARGETS.filter((target) => {
+    if (required.has(target)) return true;
     const { markerDir } = MIRROR_SPECS[target];
     if (!markerDir) return true;
     const markerPath = join(projectRoot, markerDir);
@@ -139,6 +160,26 @@ export const detectSkillMirrorTargets = (projectRoot: string): SkillMirrorTarget
       return false;
     }
   });
+};
+
+/**
+ * 로컬에만 있는 패키지 slug — 매니페스트에도 원격에도 없는 것.
+ *
+ * `skill status`는 원래 매니페스트와 원격만 비교했다. 그래서 방금 만들고 `skill create --apply`를
+ * 안 한 패키지는 **양쪽 어디에도 없어서 보이지 않았고**, 그 침묵을 convention.md가 "스킬이 제일
+ * 잊기 쉽다"는 상시 산문으로 메우고 있었다. 잊은 그 시점에 도구가 말하는 편이 강하다.
+ */
+export const findUnregisteredSkillSlugs = (projectRoot: string, knownSlugs: Set<string>): string[] => {
+  const root = skillPackageRoot(projectRoot);
+  if (!existsSync(root)) {
+    return [];
+  }
+
+  return readdirSync(root, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && !knownSlugs.has(entry.name))
+    .filter((entry) => existsSync(join(root, entry.name, SKILL_ENTRY_FILE)))
+    .map((entry) => entry.name)
+    .sort();
 };
 
 export const mirrorDirFor = (projectRoot: string, target: SkillMirrorTarget, slug: string): string =>

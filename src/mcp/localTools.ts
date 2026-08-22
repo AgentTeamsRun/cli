@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs';
 import { posix, resolve as resolvePath } from 'node:path';
 import { z } from 'zod';
 import { getLinearIssue } from '../api/linear.js';
+import { getSentryIssue } from '../api/sentry.js';
 import { getPlanTask } from '../api/task.js';
 import { parseEntityRef, SUPPORTED_REF_FORMS, type ParsedEntityRef } from '../utils/entityRef.js';
 import type { McpToolContext } from './context.js';
@@ -69,10 +70,10 @@ const guideGetSpec: McpLocalToolSpec = {
   name: 'agentteams_guide_get',
   title: 'Get AgentTeams Record Guide',
   description: [
-    'Fetch the platform guide that governs how a record type must be written.',
+    'Fetch the platform guide that governs a record type — how to write it, and the workflow around it.',
     'Reads this project’s local copy when the session sits in it, and falls back to the server otherwise.',
     'Returns the full guide body plus the guideHash to pass to the matching write tool.',
-    'Read this before any AgentTeams write tool call — the rules it states (visibility, tag policy, structure) are enforced server-side.',
+    'Read this before creating, updating, or deleting any AgentTeams platform record — the rules it states (visibility, tag policy, structure) are enforced server-side.',
     'If it reports that the local guide hash is unknown, run `agentteams convention download` in the project.',
   ].join(' '),
   discovery: guideDiscovery,
@@ -80,7 +81,7 @@ const guideGetSpec: McpLocalToolSpec = {
     recordKind: z
       .enum(GUIDE_RECORD_KINDS)
       .describe(
-        'Record type whose guide you need. "document", "comment", "co-action", and "post-mortem" are write-enabled.',
+        'Record type or workflow whose guide you need. "document", "comment", "co-action", "post-mortem" and "code-review" back MCP write contracts and return a guideHash the write tool compares; the rest are read-only references.',
       ),
   }),
   handler: async (args, context) => {
@@ -212,6 +213,11 @@ async function resolveInlineRecord(parsed: ParsedEntityRef, context: McpToolCont
     // session (the default for `agentteams mcp`) gets 401 from the Linear route.
     return getLinearIssue(context.apiUrl, await resolveToolHeaders(context), parsed.id, context.projectId);
   }
+  if (parsed.refType === 'SENTRY_ISSUE') {
+    // 서버가 프로젝트 바인딩을 검증하고 저장된 permalink를 함께 돌려준다. 토큰이 나르는 숫자
+    // ID만으로는 permalink를 만들 수 없으므로, 이 경로가 곧 "링크를 지어내지 않는" 보장이다.
+    return getSentryIssue(context.apiUrl, context.projectId, await resolveToolHeaders(context), parsed.id);
+  }
 
   const toolName = READ_TOOL_BY_REF_TYPE[parsed.refType];
   if (!toolName) {
@@ -286,7 +292,9 @@ const resolveSpec: McpLocalToolSpec = {
     return {
       ...base,
       kind: 'record',
-      message: `${parsed.refType} resolved`,
+      // 다른 kind와 마찬가지로 서술이 아니라 지시여야 한다 — 호출부가 `kind`별 규칙을 따로
+      // 갖지 않고 이 문장만 따르면 되도록.
+      message: `${parsed.refType} resolved — use the inline \`record\` payload`,
       record: await resolveInlineRecord(parsed, context),
     };
   },

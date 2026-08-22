@@ -84,6 +84,15 @@ const ENTITY_REF_DESCRIPTORS: EntityRefDescriptor[] = [
     external: true,
     resolver: 'agentteams linear issue get --issue-id <id>',
   },
+  // `record`이지 `external`이 아니다. 토큰이 나르는 건 Sentry의 숫자 ID뿐이라 그것만으로는
+  // permalink를 만들 수 없고(조직·프로젝트 슬러그가 없다), 추측해서 만든 링크는 잘못된 이슈를
+  // 가리킨다. 서버가 프로젝트 바인딩을 검증하고 저장된 permalink를 돌려주게 해야 한다.
+  {
+    refType: 'SENTRY_ISSUE',
+    kind: 'record',
+    external: true,
+    resolver: 'agentteams sentry issue get --issue-id <id>',
+  },
   { refType: 'GITHUB_ISSUE', kind: 'external', external: true, resolver: 'gh issue view <number> --repo <owner/repo>' },
   { refType: 'GITHUB_PR', kind: 'external', external: true, resolver: 'gh pr view <number> --repo <owner/repo>' },
   {
@@ -118,7 +127,7 @@ export const SUPPORTED_REF_FORMS = [
   'type:id:path (convention:<id>:.agentteams/rules/context.md)',
   'parent:child (codeReview:<reviewId>:<findingId>, plan:<planId>:<taskId>)',
   'bare prefixed id (agentteams_doc_<uuid>)',
-  'external marker (LINEAR_ISSUE:<uuid>, GITHUB_ISSUE:<owner/repo#n>, GITHUB_PR, GITLAB_ISSUE, GITLAB_MERGE_REQUEST, BITBUCKET_ISSUE, BITBUCKET_PR)',
+  'external marker (LINEAR_ISSUE:<uuid>, SENTRY_ISSUE:<numeric-id>, GITHUB_ISSUE:<owner/repo#n>, GITHUB_PR, GITLAB_ISSUE, GITLAB_MERGE_REQUEST, BITBUCKET_ISSUE, BITBUCKET_PR)',
   'a whole markdown link wrapping any of the above ([label](type:id))',
 ].join('; ');
 

@@ -308,7 +308,7 @@ describe('CLI Integration Tests', () => {
       rmSync(tempCwd, { recursive: true, force: true });
     });
 
-    it('sync download: should download conventions by category', async () => {
+    it('sync download: should download conventions by category and skill packages', async () => {
       axiosGetSpy
         .mockResolvedValueOnce({ data: { data: [{ id: 'ag-1' }] } } as any)
         .mockResolvedValueOnce({ data: { data: { content: '# reporting from sync\n' } } } as any)
@@ -329,7 +329,10 @@ describe('CLI Integration Tests', () => {
               { id: 'cv-2', title: 'API Rules', category: 'rules', contentMarkdown: '# api rules' },
             ],
           },
-        } as any);
+        } as any)
+        // `sync`는 사람이 부르는 강제 동기화라 스킬까지 함께 받는다. 이 응답이 빠지면 컨벤션만
+        // 받고 끝나던 예전 동작으로 조용히 되돌아간 것이다.
+        .mockResolvedValueOnce({ data: { data: [], meta: { totalPages: 0 } } } as any);
 
       const originalCwd = process.cwd();
       const tempCwd = mkdtempSync(join(tmpdir(), 'agentteams-sync-download-'));
@@ -364,6 +367,58 @@ describe('CLI Integration Tests', () => {
         expect(downloadedApi).toBe('# api rules');
         expect(reporting).toBe('# reporting from sync\n');
         expect(planGuide).toBe('# plan guide\n');
+        expect(axiosGetSpy.mock.calls.some(([url]) => typeof url === 'string' && url.includes('/skills'))).toBe(true);
+      } finally {
+        process.chdir(originalCwd);
+        rmSync(tempCwd, { recursive: true, force: true });
+      }
+    });
+
+    it('sync download: should not fail the whole command when only the skill download fails', async () => {
+      // 컨벤션은 이미 받아진 뒤다. 스킬 쪽 네트워크·API 오류가 exit 1로 승격되면
+      // 사용자가 컨벤션 동기화까지 실패한 것으로 오판한다 — 부분 실패는 message로만 드러낸다.
+      axiosGetSpy
+        .mockResolvedValueOnce({ data: { data: [{ id: 'ag-1' }] } } as any)
+        .mockResolvedValueOnce({ data: { data: { content: '# reporting from sync\n' } } } as any)
+        .mockResolvedValueOnce({
+          data: { data: [{ fileName: 'plan-guide.md', content: '# plan guide\n' }] },
+        } as any)
+        .mockResolvedValueOnce({ data: { data: { hash: 'platform-guides-hash-1' } } } as any)
+        .mockResolvedValueOnce({
+          data: { data: [{ id: 'cv-1', title: 'Core Rules', category: 'rules', contentMarkdown: '# core rules' }] },
+        } as any)
+        .mockRejectedValueOnce(new Error('Network Error'));
+
+      const originalCwd = process.cwd();
+      const tempCwd = mkdtempSync(join(tmpdir(), 'agentteams-sync-skill-fail-'));
+
+      try {
+        const agentteamsDir = join(tempCwd, '.agentteams');
+        mkdirSync(agentteamsDir, { recursive: true });
+        writeFileSync(
+          join(agentteamsDir, 'config.json'),
+          JSON.stringify(
+            {
+              teamId: 'team_1',
+              projectId: PROJECT_ID,
+              agentName: 'test-agent',
+              apiKey: 'key_test123',
+              apiUrl: API_URL,
+            },
+            null,
+            2,
+          ) + '\n',
+          'utf-8',
+        );
+
+        process.chdir(tempCwd);
+        const result = (await executeCommand('sync', 'download', { cwd: tempCwd })) as {
+          skills: { message: string; warning?: string };
+        };
+
+        expect(readFileSync(join(agentteamsDir, 'rules', 'core-rules.md'), 'utf-8')).toBe('# core rules');
+        expect(result.skills.message).toContain('Skill download failed');
+        expect(result.skills.message).toContain('Network Error');
       } finally {
         process.chdir(originalCwd);
         rmSync(tempCwd, { recursive: true, force: true });

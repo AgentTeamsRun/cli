@@ -166,6 +166,29 @@ describe('resolve command', () => {
       });
       expect(result).toMatchObject({ kind: 'record', refType: 'LINEAR_ISSUE', id: uuid });
     });
+
+    // 토큰은 Sentry의 숫자 ID만 나른다. 그것만으로는 permalink를 만들 수 없으므로(조직·프로젝트
+    // 슬러그가 없다), 서버가 프로젝트 바인딩을 검증하고 저장된 permalink를 돌려주는 이 경로가
+    // 곧 "링크를 지어내지 않는" 보장이다. 이 케이스가 빠지면 convention.md가 다시 산문으로
+    // "그 ID로 permalink를 만들지 마라"를 금지해야 한다.
+    it('fetches a Sentry issue through the project-scoped endpoint', async () => {
+      const getSpy = jest.spyOn(axios, 'get').mockResolvedValue({ data: { data: { id: '12345' } } } as never);
+
+      const result = await executeResolveCommand({ ref: 'SENTRY_ISSUE:12345' }, loadContext);
+
+      expect(getSpy).toHaveBeenCalledWith(`${apiUrl}/api/projects/${projectId}/sentry/issues/12345`, { headers });
+      expect(result).toMatchObject({ kind: 'record', refType: 'SENTRY_ISSUE', id: '12345' });
+    });
+
+    // 다섯 kind 중 이 하나만 서술문이면, 호출부는 결국 `kind`별 규칙을 따로 갖게 된다 —
+    // convention.md에서 지운 그 표가 되돌아오는 경로다.
+    it('answers the record kind with an instruction, not a description', async () => {
+      jest.spyOn(axios, 'get').mockResolvedValue({ data: { data: { id: 'lin-1' } } } as never);
+
+      const result = await executeResolveCommand({ ref: `LINEAR_ISSUE:${uuid}` }, loadContext);
+
+      expect(result.message).toMatch(/use the inline `record` payload/);
+    });
   });
 
   describe('kind: file', () => {

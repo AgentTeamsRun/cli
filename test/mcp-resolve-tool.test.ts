@@ -149,6 +149,15 @@ const DISPATCH_CASES: Array<{
     params: { projectId },
   },
   {
+    // 토큰이 나르는 건 Sentry의 숫자 ID뿐이라 그것만으로 permalink를 만들 수 없다. 이 경로가
+    // 서버 바인딩 검증을 거쳐 저장된 permalink를 돌려주므로, 링크를 지어낼 이유 자체가 없다.
+    label: 'SENTRY_ISSUE',
+    ref: 'SENTRY_ISSUE:12345',
+    refType: 'SENTRY_ISSUE',
+    id: '12345',
+    url: `${projectUrl}/sentry/issues/12345`,
+  },
+  {
     label: 'markdown link wrapping',
     ref: `[Safari pull-to-refresh](plan:agentteams_pln_${uuid})`,
     refType: 'plan',
@@ -476,11 +485,17 @@ describe('agentteams_resolve MCP tool', () => {
     // Measured 2026-08-16, after the co-action create contract gained optional
     // traceability ids and post-mortem create gained standalone incident support.
     // Updated 2026-08-17 after adding code-review and finding write tools (stage 4).
+    // Updated 2026-08-22 after `SENTRY_ISSUE:<numeric-id>` joined the supported ref
+    // forms (+27 chars) — that entry is what let convention.md drop its Sentry
+    // permalink prose, so the cost belongs here rather than in the always-on file.
+    // Updated again the same day: `agentteams_guide_get` opened from 5 record kinds to
+    // all 19 (+411 chars in `full`), which is what let the 1,846-char routing table
+    // leave the always-on file. Net across the two surfaces is strongly negative.
     // This is the number that decided the profile membership above: 1.7k chars is
     // cheap in `full` and a 50% jump in `minimal` (3.4k), which is why `minimal`
     // does not carry it.
-    expect(delta).toBe(1_688);
-    expect(withResolve.totalChars).toBe(65_979);
+    expect(delta).toBe(1_715);
+    expect(withResolve.totalChars).toBe(66_417);
     process.stderr.write(`[agentteams_resolve budget] ${JSON.stringify({ delta, full: withResolve.totalChars })}\n`);
   });
 });

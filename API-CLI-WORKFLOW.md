@@ -225,7 +225,11 @@ Types: `RISK`, `MODIFICATION`, `GENERAL`
 
 Convention commands are tightly coupled to `.agentteams/`.
 
-- Sync download: `agentteams sync` (internally runs `convention download`)
+- Session-start sync: `agentteams session sync` (checks first, downloads only what changed)
+  - Reports `reread` (changed always-on files) and `invalidated` (always-on rules removed on the server)
+  - Gates the skill fetch on `skill status` — `skill download` overwrites every local package ungated
+  - Absorbs every failure into `notes`; it must never block the start of a session
+- Force sync: `agentteams sync` (runs `convention download` + `skill download`, no change check)
   - Writes conventions and platform guides under `.agentteams/`
   - Updates `.agentteams/conventions.manifest.json`
 - Create/Update/Delete: `agentteams convention create|update|delete`
