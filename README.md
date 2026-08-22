@@ -12,6 +12,18 @@ It supports convention sync and plan/comment/report management.
 npm install -g @agentteams/cli
 ```
 
+### Short alias (`agt`)
+
+`agentteams` is also installed as `agt`. The canonical name keeps working — the alias is an addition, not a replacement.
+
+```bash
+agt --help    # same as: agentteams --help
+```
+
+- The alias symlink is created at install time. If you installed an earlier version, rerun `npm install -g @agentteams/cli` to get it.
+- Use the alias only when you type commands yourself. Scripts, MCP server registration, and agent guides should keep using `agentteams`, which exists in every environment.
+- Help output echoes the alias only where npm installs bins as symlinks (POSIX). Windows `.cmd`/`.ps1` shims and pnpm global installs are shell wrappers, so `agt --help` still prints `Usage: agentteams ...` there. Running the alias itself works everywhere.
+
 ## Quick Start
 
 ### 1. Initialize

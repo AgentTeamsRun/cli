@@ -5,7 +5,8 @@
   "type": "module",
   "main": "dist/index.js",
   "bin": {
-    "agentteams": "dist/index.js"
+    "agentteams": "dist/index.js",
+    "agt": "dist/index.js"
   },
   "publishConfig": {
     "access": "public"

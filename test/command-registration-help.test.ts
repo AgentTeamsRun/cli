@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { CommanderError } from 'commander';
 import { createProgram } from '../src/program/index.js';
+import { CANONICAL_CLI_NAME } from '../src/program/invokedName.js';
 
 const BASELINE_HELP_SHA256: Record<string, string> = {
   init: 'b36b829aa0856709225939100e92e2ae824c24de695ff57af4ac04117af72a47',
@@ -9,7 +10,9 @@ const BASELINE_HELP_SHA256: Record<string, string> = {
 };
 
 async function renderHelp(commandName: string): Promise<string> {
-  const program = createProgram('0.0.0');
+  // 서브커맨드 usage 첫 줄에 부모 프로그램명이 들어가므로, baseline이 실행 진입점(process.argv[1])에
+  // 좌우되지 않도록 정식 이름을 명시 고정한다.
+  const program = createProgram('0.0.0', CANONICAL_CLI_NAME);
   let output = '';
   program.configureOutput({ writeOut: (text) => (output += text) });
   const configureExitOverride = (command: typeof program): void => {
