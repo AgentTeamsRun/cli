@@ -251,10 +251,30 @@ Common errors:
 
 ### `sync`
 
-Resync convention files.
+Force-resync convention files and skill packages. No change check — skill packages are overwritten.
 
 ```bash
 agentteams sync
+```
+
+### `session`
+
+Session-start sync. Checks both surfaces, downloads only what changed, and reports which always-on files
+must be re-read (`reread`) or no longer apply (`invalidated`). Exits cleanly on failure so a session start
+is never blocked.
+
+```bash
+agentteams session sync
+```
+
+### `guide`
+
+Read the platform guide that governs a record type. Same loader as the `agentteams_guide_get` MCP
+tool, which exists only in the `full` tool profile — this is the path for sessions without it.
+
+```bash
+agentteams guide list
+agentteams guide get --record-kind completion-report
 ```
 
 ### `plan`

@@ -6,6 +6,7 @@ import { getConvention } from '../api/convention.js';
 import { getCodeReview, getCodeReviewFinding } from '../api/codeReview.js';
 import { getPlanTask } from '../api/task.js';
 import { getLinearIssue } from '../api/linear.js';
+import { getSentryIssue } from '../api/sentry.js';
 import { executePlanCommand } from './plan.js';
 import { executeReportCommand } from './report.js';
 import { executePostMortemCommand } from './postmortem.js';
@@ -107,6 +108,10 @@ async function resolveRecord(parsed: ParsedEntityRef, context: ResolveApiContext
       return getConvention(apiUrl, projectId, headers, parsed.id);
     case 'LINEAR_ISSUE':
       return getLinearIssue(apiUrl, headers, parsed.id, projectId);
+    // 서버가 프로젝트 바인딩을 검증하고 저장된 permalink를 함께 돌려준다. 토큰의 숫자 ID만으로는
+    // permalink를 만들 수 없으므로, 이 경로가 곧 "링크를 지어내지 않는" 보장이다.
+    case 'SENTRY_ISSUE':
+      return getSentryIssue(apiUrl, projectId, headers, parsed.id);
     default:
       throw new Error(`No record lookup for reference type: ${parsed.refType}`);
   }
@@ -200,7 +205,9 @@ export async function executeResolveCommand(
   return {
     ...base,
     kind: 'record',
-    message: `${parsed.refType} record resolved`,
+    // 다른 kind와 마찬가지로 서술이 아니라 지시여야 한다 — 호출부가 `kind`별 규칙을 따로 갖지
+    // 않고 이 문장만 따르면 되도록.
+    message: `${parsed.refType} resolved — use the inline \`record\` payload`,
     record,
   };
 }

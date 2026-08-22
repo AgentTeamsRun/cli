@@ -18,9 +18,9 @@ import { SKILL_PACKAGE_DIR } from '../utils/skillPackage.js';
 const require = createRequire(import.meta.url);
 const pkg = require('../../package.json') as { version: string };
 
-const CONVENTION_DIR = '.agentteams';
+export const CONVENTION_DIR = '.agentteams';
 const LEGACY_CONVENTION_DOWNLOAD_DIR = 'conventions';
-const CONVENTION_INDEX_FILE = 'convention.md';
+export const CONVENTION_INDEX_FILE = 'convention.md';
 /** Exported so `init` can tell "never downloaded" from "up to date" without a second copy of the name. */
 export const CONVENTION_MANIFEST_FILE = 'conventions.manifest.json';
 
@@ -114,7 +114,7 @@ type PlatformGuide = {
   hash?: string;
 };
 
-function findProjectRoot(cwd?: string): string | null {
+export function findProjectRoot(cwd?: string): string | null {
   const configPath = findProjectConfig(cwd ?? process.cwd());
   if (!configPath) return null;
   // configPath = /path/.agentteams/config.json → resolve up 2 levels to project root
@@ -125,7 +125,7 @@ function getApiBaseUrl(apiUrl: string): string {
   return apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl;
 }
 
-async function getApiConfigOrThrow(options?: ConventionCommandOptions) {
+export async function getApiConfigOrThrow(options?: ConventionCommandOptions) {
   // Credential-aware: a personal-token project keeps no `apiKey` on disk, and
   // the conventions these commands sync become always-on agent rules — reading
   // "not initialized" there would silently freeze a project's rules.
@@ -193,6 +193,23 @@ function loadManifestOrThrow(projectRoot: string): ConventionDownloadManifestV1 
     throw new Error(`Invalid manifest format: ${manifestPath}`);
   }
   return parsed;
+}
+
+/**
+ * 매니페스트에 기록된 배포 경로 목록. `session sync`가 다운로드 전후로 같은 목록을 떠서
+ * 내용이 바뀐 파일을 가려내는 데 쓴다.
+ *
+ * ⚠️ `convention.md`는 이 목록에 **없다** — 매니페스트 엔트리가 아니라 별도 경로
+ * (`downloadReportingTemplate`)로 받아오기 때문이다. 재독 대상을 매니페스트만 보고
+ * 만들면 always_on인 그 파일이 조용히 빠진다. 호출부가 따로 더해야 한다.
+ */
+export function readDeployedConventionPaths(projectRoot: string): string[] {
+  try {
+    return loadManifestOrCreate(projectRoot).entries.map((entry) => entry.fileRelativePath);
+  } catch {
+    // 매니페스트가 깨졌으면 "배포된 파일 없음"으로 읽는다. 여기서 던지면 세션 시작이 막힌다.
+    return [];
+  }
 }
 
 function loadManifestOrCreate(projectRoot: string): ConventionDownloadManifestV1 {

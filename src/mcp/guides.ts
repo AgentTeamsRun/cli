@@ -27,17 +27,76 @@ const MANIFEST_FILE = 'conventions.manifest.json';
 
 const RESYNC_HINT = "Run 'agentteams convention download' and retry.";
 
-/** Record kinds whose guide can be handed to an agent. These are the write-enabled kinds. */
-export const GUIDE_RECORD_KINDS = ['document', 'comment', 'co-action', 'post-mortem', 'code-review'] as const;
+/**
+ * Record kinds whose guide can be handed to an agent — **every** guide the platform ships, not just
+ * the write-enabled ones.
+ *
+ * This list was once the five write-enabled kinds, and the other fourteen were reachable only
+ * through a hand-written routing table in `convention.md`. That table was a copy of each guide's own
+ * frontmatter description, it drifted (six files were missing), and it cost ~1.8k always-on chars.
+ * Opening the accessor is what let it be deleted: the mapping now lives in one testable place.
+ *
+ * ⚠️ Mirror pair with `platformGuideMetas` in `api/src/services/platformGuides.ts`. Adding a guide
+ * there without adding it here leaves it unreachable by name; `test/guide-mcp-tool-smoke.test.ts`
+ * guards the pair.
+ */
+export const GUIDE_RECORD_KINDS = [
+  'plan',
+  'plan-authoring',
+  'plan-execution',
+  'plan-template-minimal',
+  'plan-template-standard',
+  'plan-template-full',
+  'completion-report',
+  'document',
+  'comment',
+  'code-review',
+  'convention-authoring',
+  'convention-setup',
+  'convention-update',
+  'skill',
+  'post-mortem',
+  'co-action',
+  'linear',
+  'sentry',
+  'runner-history',
+] as const;
 export type GuideRecordKind = (typeof GUIDE_RECORD_KINDS)[number];
+
+/**
+ * Kinds whose guide backs an MCP write contract. `guide_get` returns a `guideHash` for every kind
+ * (the manifest carries all of them), but only these are compared server-side on write — for the
+ * rest the hash is informational.
+ */
+export const WRITE_ENABLED_GUIDE_RECORD_KINDS = [
+  'document',
+  'comment',
+  'co-action',
+  'post-mortem',
+  'code-review',
+] as const satisfies readonly GuideRecordKind[];
 
 /** Guide file name per record kind. Exported so guards can check the shipped file, not a copy of this map. */
 export const GUIDE_FILE_NAMES: Record<GuideRecordKind, string> = {
+  plan: 'plan-guide.md',
+  'plan-authoring': 'plan-authoring-guide.md',
+  'plan-execution': 'plan-execution-guide.md',
+  'plan-template-minimal': 'plan-template-minimal.md',
+  'plan-template-standard': 'plan-template-standard.md',
+  'plan-template-full': 'plan-template-full.md',
+  'completion-report': 'completion-report-guide.md',
   document: 'document-guide.md',
   comment: 'comment-guide.md',
-  'co-action': 'co-action-guide.md',
-  'post-mortem': 'post-mortem-guide.md',
   'code-review': 'code-review-guide.md',
+  'convention-authoring': 'convention-authoring-guide.md',
+  'convention-setup': 'convention-setup-guide.md',
+  'convention-update': 'convention-ud-guide.md',
+  skill: 'skill-package-guide.md',
+  'post-mortem': 'post-mortem-guide.md',
+  'co-action': 'co-action-guide.md',
+  linear: 'linear-guide.md',
+  sentry: 'sentry-guide.md',
+  'runner-history': 'runner-history-guide.md',
 };
 
 export interface LoadedGuide {

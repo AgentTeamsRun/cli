@@ -17,6 +17,7 @@ import {
   collectSkillPackageFiles,
   computeSkillVersion,
   detectSkillMirrorTargets,
+  findUnregisteredSkillSlugs,
   ensureMirrorGitignore,
   mirrorDirFor,
   parseSkillTargetsOption,
@@ -70,6 +71,46 @@ describe('mirror target detection', () => {
 
     mkdirSync(join(projectRoot, '.github'), { recursive: true });
     expect(detectSkillMirrorTargets(projectRoot)).toEqual(['agents', 'claude', 'github']);
+  });
+
+  // 마커 탐지만 쓰면 `.claude/`가 없는 저장소의 CLAUDE_CODE가 미러를 통째로 못 받는다.
+  // 러너가 `--skill-targets`로 매번 보정하던 자리라, 엔진을 알면 마커 없이도 붙어야 한다.
+  it("adds the running engine's own path even without its marker directory", () => {
+    expect(detectSkillMirrorTargets(projectRoot, 'CLAUDE_CODE')).toEqual(['agents', 'claude']);
+  });
+
+  // `.agents`를 읽는 엔진에 `claude`까지 붙이면 한 엔진이 같은 스킬을 두 번 로드한다
+  // (skill-package-guide.md §5). 미측정 엔진도 근거 없는 매핑보다 마커 폴백이 낫다.
+  it('leaves detection untouched for engines covered by .agents and for unmeasured ones', () => {
+    expect(detectSkillMirrorTargets(projectRoot, 'CODEX')).toEqual(['agents']);
+    expect(detectSkillMirrorTargets(projectRoot, 'ANTIGRAVITY')).toEqual(['agents']);
+    expect(detectSkillMirrorTargets(projectRoot, undefined)).toEqual(['agents']);
+  });
+});
+
+describe('unregistered local packages', () => {
+  // `skill status`는 매니페스트와 원격만 비교했다. 방금 만들고 `skill create --apply`를 안 한
+  // 패키지는 양쪽 어디에도 없어 보이지 않았고, 그 침묵을 convention.md가 상시 산문으로 메우고
+  // 있었다(355자). 이제 도구가 잊은 그 시점에 말한다.
+  it('reports a package directory that is in neither the manifest nor the remote', () => {
+    mkdirSync(join(projectRoot, '.agentteams', 'skills', 'brand-new'), { recursive: true });
+    writeFileSync(join(projectRoot, '.agentteams', 'skills', 'brand-new', 'SKILL.md'), entryContent('brand-new'));
+
+    expect(findUnregisteredSkillSlugs(projectRoot, new Set())).toEqual(['brand-new']);
+  });
+
+  it('stays silent for packages the manifest or the remote already knows', () => {
+    mkdirSync(join(projectRoot, '.agentteams', 'skills', 'known'), { recursive: true });
+    writeFileSync(join(projectRoot, '.agentteams', 'skills', 'known', 'SKILL.md'), entryContent('known'));
+
+    expect(findUnregisteredSkillSlugs(projectRoot, new Set(['known']))).toEqual([]);
+  });
+
+  // SKILL.md가 없으면 패키지가 아니다 — 작업 중 디렉터리를 미등록으로 신고하면 매 세션 잡음이 된다.
+  it('ignores a directory with no SKILL.md', () => {
+    mkdirSync(join(projectRoot, '.agentteams', 'skills', 'scratch'), { recursive: true });
+
+    expect(findUnregisteredSkillSlugs(projectRoot, new Set())).toEqual([]);
   });
 });
 

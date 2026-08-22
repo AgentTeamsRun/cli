@@ -5,7 +5,12 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { conventionDownload } from '../src/commands/convention.js';
 import { executeDocumentCommand } from '../src/commands/document.js';
-import { loadLocalPlatformGuide, describeMissingGuideHash, resolvePlatformGuide } from '../src/mcp/guides.js';
+import {
+  GUIDE_RECORD_KINDS,
+  loadLocalPlatformGuide,
+  describeMissingGuideHash,
+  resolvePlatformGuide,
+} from '../src/mcp/guides.js';
 import { handleError } from '../src/utils/errors.js';
 
 const apiUrl = 'http://localhost:3001';
@@ -227,9 +232,11 @@ describe('local platform guide loader', () => {
     expect(describeMissingGuideHash(guide!)).toMatch(/agentteams convention download/);
   });
 
+  // 지원 목록을 여기에 박아두지 않는다 — `GUIDE_RECORD_KINDS`가 SSOT이고, 그 목록은 배포되는
+  // 가이드 수만큼 늘어난다(cli/test/guide-mcp-tool-smoke.test.ts가 디렉터리와 대조해 지킨다).
   it('lists supported kinds when an unknown record kind is requested', () => {
     expect(() => loadLocalPlatformGuide('unknown-kind' as never, null)).toThrow(
-      /Unknown guide record kind: unknown-kind\. Supported: document, comment, co-action, post-mortem, code-review/,
+      new RegExp(`Unknown guide record kind: unknown-kind\\. Supported: ${GUIDE_RECORD_KINDS.join(', ')}`),
     );
   });
 });
