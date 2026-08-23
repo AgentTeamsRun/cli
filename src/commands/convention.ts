@@ -901,10 +901,11 @@ function persistPlatformGuideHashes(
  * 어떤 에이전트를 쓸지 모를 때의 폴백: 프로젝트의 첫 AgentConfig를 고른다.
  *
  * `agentteams convention download`를 직접 실행하는 사용자에게는 고를 근거가 없어서 남겨둔 경로다.
- * 오늘의 서버 응답이 config에 의존하지 않기 때문에(`api/src/routes/agent-configs/index.ts`의
- * `/convention` 핸들러는 404 판정에만 config를 쓰고 본문은 프로젝트 컨벤션만으로 만든다)
- * 아무 config나 골라도 결과가 같다. 그 가정이 깨지는 순간 이 폴백은 **조용히** 틀린 템플릿을
- * 쓰게 되므로, 응답이 config에 의존하게 되면 이 함수부터 다시 봐야 한다.
+ * `/convention` 본문의 PERSONAL 항목은 URL의 AgentConfig가 아니라 **호출자 자격증명**으로
+ * 걸러진다. 폴백으로 아무 config를 골라도 개인 항목 노출 범위는 달라지지 않는다.
+ *
+ * 남은 config 의존성은 존재 여부뿐이다. 존재하지 않는 id면 404이고, 호출자 축을 해석하지
+ * 못하면 대상 AgentConfig 소유자로 폴백하지 않고 PROJECT만 실린다.
  */
 async function resolveFallbackAgentConfigId(
   config: Config,

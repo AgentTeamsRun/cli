@@ -1,6 +1,6 @@
 {
   "name": "@agentteams/cli",
-  "version": "0.1.108",
+  "version": "0.1.109",
   "description": "CLI tool for AgentTeams API",
   "type": "module",
   "main": "dist/index.js",
@@ -43,7 +43,7 @@
     "node": ">=20.12.0"
   },
   "dependencies": {
-    "@agentteams/context-tools": "0.1.8",
+    "@agentteams/context-tools": "0.1.9",
     "@clack/prompts": "^1.4.0",
     "@modelcontextprotocol/server": "2.0.0",
     "axios": "^1.16.1",

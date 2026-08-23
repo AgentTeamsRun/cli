@@ -10,7 +10,7 @@ import { stripContextEntityIdPrefix } from '@agentteams/context-tools';
  *   agentteams_rev_ (codeReview) · agentteams_act_ (coAction)
  *   agentteams_cnv_ (convention) · agentteams_pmt_ (postMortem)
  *   agentteams_doc_ (document) · agentteams_rvf_ (codeReviewFinding)
- *   agentteams_tsk_ (planTask)
+ *   agentteams_tsk_ (planTask) · agentteams_skl_ (skill)
  */
 /**
  * Strip a known AgentTeams entity-id prefix from a value. Values without a
