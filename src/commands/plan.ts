@@ -506,13 +506,19 @@ export async function executePlanCommand(
       if (startGitInfo.branchName) {
         body.startBranch = startGitInfo.branchName;
       }
-      if (options.runnerType) {
-        body.runnerType = options.runnerType;
+
+      // 시작 시점의 엔진/모델은 WorkflowRun에 스냅샷되지만, plan-execution-guide는
+      // `plan start --id`만 치라고 안내하므로 플래그만 보면 러너 실행에서 항상 null이 된다.
+      // finish/create/quick과 같은 해석기를 써서 러너 세션 env를 폴백으로 받는다.
+      // 러너 밖에서는 여전히 undefined이므로 필드를 생략하는 기존 동작 그대로다.
+      const startSnapshot = resolveExecutionSnapshot(options);
+      if (startSnapshot.runnerType) {
+        body.runnerType = startSnapshot.runnerType;
       }
-      if (options.model) {
-        body.model = options.model;
+      if (startSnapshot.model) {
+        body.model = startSnapshot.model;
       }
-      if (options.fast === true) {
+      if (startSnapshot.fastMode) {
         body.fastMode = true;
       }
 
