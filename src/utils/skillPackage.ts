@@ -267,6 +267,21 @@ export const validateSkillPackageFiles = (files: SkillPackageFile[]): void => {
 };
 
 /**
+ * Finder·Explorer가 디렉터리에 자동으로 넣는 파일. 콘텐츠 검사에 걸리면 사용자가 만들지 않은
+ * 파일 때문에 push 전체가 멈춘다.
+ */
+const isOsJunkFileName = (name: string): boolean => {
+  const lower = name.toLowerCase();
+  return (
+    lower === '.ds_store' ||
+    lower === 'thumbs.db' ||
+    lower === 'desktop.ini' ||
+    lower === 'ehthumbs.db' ||
+    name.startsWith('._')
+  );
+};
+
+/**
  * 로컬 디렉터리에서 패키지 파일을 모은다. symlink는 따라가지 않는다 — 링크가 패키지 밖을
  * 가리키면 저장소 밖 파일이 업로드된다.
  */
@@ -276,6 +291,10 @@ export const collectSkillPackageFiles = (packageDir: string): SkillPackageFile[]
 
   const walk = (currentDir: string): void => {
     for (const entry of readdirSync(currentDir, { withFileTypes: true })) {
+      if (isOsJunkFileName(entry.name)) {
+        continue;
+      }
+
       const absolutePath = join(currentDir, entry.name);
       const relativePath = relative(rootPath, absolutePath).split(sep).join('/');
 
@@ -290,7 +309,19 @@ export const collectSkillPackageFiles = (packageDir: string): SkillPackageFile[]
         continue;
       }
 
-      files.push({ relativePath, content: readFileSync(absolutePath, 'utf8') });
+      // 콘텐츠 검사는 이 수집 지점에서만 한다. validateSkillPackageFiles는 다운로드 경로
+      // (commands/skill.ts)에서도 호출되는 공용 검증이라, 거기에 넣으면 이미 서버에 저장된
+      // 레거시 패키지의 다운로드까지 막힌다.
+      const raw = readFileSync(absolutePath);
+      const content = raw.toString('utf8');
+      if (!raw.equals(Buffer.from(content, 'utf8'))) {
+        throw new SkillPackageError(`${relativePath} must be UTF-8 text (not valid UTF-8)`);
+      }
+      if (raw.includes(0)) {
+        throw new SkillPackageError(`${relativePath} must be UTF-8 text (found a null byte)`);
+      }
+
+      files.push({ relativePath, content });
     }
   };
 

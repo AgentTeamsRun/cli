@@ -69,6 +69,16 @@ const setRequestHeader = (config: InternalAxiosRequestConfig, name: string, valu
   (headers as unknown as Record<string, string>)[name] = value;
 };
 
+const removeRequestHeader = (config: InternalAxiosRequestConfig, name: string): void => {
+  const headers = config.headers;
+  if (typeof headers.delete === 'function') {
+    headers.delete(name);
+    return;
+  }
+
+  delete (headers as unknown as Record<string, string>)[name];
+};
+
 /**
  * Session identity headers, resolved once per process.
  *
@@ -112,6 +122,14 @@ const getSessionIdentityHeaders = (): { machineId: string | null; projectRootHas
 };
 
 axios.interceptors.request.use((config: InternalAxiosRequestConfig) => {
+  // resolveApiContext()가 모든 요청에 Content-Type: application/json을 붙인다. Fastify는 이 헤더가
+  // 있으면 본문을 파싱하므로, 본문 없는 요청은 라우트 진입 전에 FST_ERR_CTP_EMPTY_JSON_BODY(400)로
+  // 거절되고 errors.ts가 이를 VALIDATION_ERROR로 감싸 원인이 보이지 않는다. data가 실제로 없을
+  // 때(undefined/null)만 헤더를 뺀다. 빈 문자열·빈 객체는 JSON 본문으로 보내야 하므로 유지한다.
+  if (config.data === undefined || config.data === null) {
+    removeRequestHeader(config, 'Content-Type');
+  }
+
   setRequestHeader(config, 'X-AgentTeams-Client', 'cli');
   setRequestHeader(config, 'X-AgentTeams-Command', getCommandContext());
   setRequestHeader(config, 'X-AgentTeams-Version', pkg.version);

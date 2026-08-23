@@ -27,9 +27,10 @@ import { registerSkillCommand } from './skill.js';
 import { registerSyncCommand } from './sync.js';
 import { registerTaskCommand } from './task.js';
 import { registerWorktreeCommand } from './worktree.js';
+import { resolveInvokedName } from './invokedName.js';
 import { registerApiKeyHook, removedContractHint } from './shared.js';
 
-export function createProgram(version: string): Command {
+export function createProgram(version: string, invokedName: string = resolveInvokedName()): Command {
   const program = new Command();
 
   // 서브커맨드는 생성 시점에 outputConfiguration을 상속하므로 등록보다 먼저 설정합니다.
@@ -42,7 +43,7 @@ export function createProgram(version: string): Command {
   });
 
   registerApiKeyHook(program);
-  program.name('agentteams').description('CLI tool for AgentTeams API').version(version);
+  program.name(invokedName).description('CLI tool for AgentTeams API').version(version);
 
   registerInitCommand(program);
   registerAuthCommand(program);

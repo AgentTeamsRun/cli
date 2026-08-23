@@ -27,8 +27,33 @@ alwaysApply: true
 
 # AGENT_RULES
 
-**Before starting any task, always refer to \`.agentteams/convention.md\`.**
+\`.agentteams/convention.md\` holds this project's conventions.
+
+- **Read it once per session**, before your first substantive action.
+- **Do not re-read it for each task.** Once it is in context, use what you already read.
+- Re-read only when it changed — \`agentteams session sync\` lists changed files under \`reread\`.
 `;
+
+/**
+ * Entry point bodies earlier CLI versions wrote verbatim. An exact match proves
+ * the file is still the one we generated — nobody edited it — so refreshing it in
+ * place is safe, the same reasoning the managed post-checkout hook applies to
+ * its marker line.
+ *
+ * Never drop an entry. A repository initialized by any released CLI has to keep
+ * being recognized as managed; otherwise `doctor` reports `entry-point-conflict`
+ * for a file the user never touched.
+ */
+export const LEGACY_CONVENTION_REFERENCES: readonly string[] = [
+  `---
+alwaysApply: true
+---
+
+# AGENT_RULES
+
+**Before starting any task, always refer to \`.agentteams/convention.md\`.**
+`,
+];
 
 export const POST_CHECKOUT_HOOK_MARKER = '# AgentTeams managed post-checkout hook';
 
@@ -125,6 +150,8 @@ export interface ConventionEntryPointEntry {
   relativePath: string;
   state: ConventionEntryPointState;
   compatible: boolean;
+  /** Set only when a stale managed body was refreshed in place on this run. */
+  upgraded?: boolean;
 }
 
 export interface EnsureConventionEntryPointsResult {
@@ -320,6 +347,37 @@ function ensureEntryPointParent(repoDir: string, relativePath: string): void {
   }
 }
 
+/**
+ * Refresh an entry point whose body is still one a previous CLI version wrote.
+ * The comparison is exact, so a single user edit takes the file out of scope
+ * and it is left alone.
+ *
+ * Returns `true` only when the file changed on disk. An already-current file,
+ * a user-edited one, a symlink, and an unreadable path all return `false`, so
+ * callers can count a `true` as one change without re-reading the file.
+ */
+export function upgradeLegacyConventionReference(fullPath: string): boolean {
+  let content: string;
+  let mode: number;
+  try {
+    const stats = lstatSync(fullPath);
+    if (stats.isSymbolicLink() || !stats.isFile()) return false;
+    mode = stats.mode & 0o777;
+    content = readFileSync(fullPath, 'utf-8');
+  } catch {
+    return false;
+  }
+
+  if (!LEGACY_CONVENTION_REFERENCES.includes(content)) return false;
+
+  try {
+    writeFileAtomically(fullPath, DEFAULT_CONVENTION_REFERENCE, mode);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function ensureConventionEntryPoints(
   repoDir: string,
   relativePaths: string[],
@@ -340,6 +398,13 @@ export function ensureConventionEntryPoints(
     }
 
     if (pathExists) {
+      // Refreshing a stale managed body is not gated on
+      // `validateExistingReference`: that option decides whether a mismatch is
+      // *reported*, while an exact legacy match is provably our own file and is
+      // always safe to bring forward.
+      const upgraded = upgradeLegacyConventionReference(fullPath);
+      if (upgraded) changedCount += 1;
+
       const state: ConventionEntryPointState = isTrackedInRepo(repoDir, relativePath) ? 'tracked' : 'existing';
       let compatible = true;
       if (options.validateExistingReference) {
@@ -349,7 +414,7 @@ export function ensureConventionEntryPoints(
           compatible = false;
         }
       }
-      entries.push({ relativePath, state, compatible });
+      entries.push(upgraded ? { relativePath, state, compatible, upgraded } : { relativePath, state, compatible });
       if (!compatible) {
         issues.push({
           code: 'entry-point-conflict',

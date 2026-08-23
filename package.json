@@ -1,11 +1,12 @@
 {
   "name": "@agentteams/cli",
-  "version": "0.1.107",
+  "version": "0.1.108",
   "description": "CLI tool for AgentTeams API",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
-    "agentteams": "dist/index.js"
+    "agentteams": "dist/index.js",
+    "agt": "dist/index.js"
   },
   "publishConfig": {
     "access": "public"

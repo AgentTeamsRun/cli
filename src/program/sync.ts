@@ -2,11 +2,41 @@ import {
   Command,
   CONVENTION_HINT,
   executeCommand,
-  formatOutput,
   handleError,
   normalizeInteractiveFormat,
   printCommandResult,
 } from './shared.js';
+
+function readString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+function formatSyncHumanOutput(result: unknown): string {
+  if (typeof result === 'string') return result;
+  if (!result || typeof result !== 'object' || Array.isArray(result)) return 'Sync completed.';
+
+  const sync = result as Record<string, unknown>;
+  const lines: string[] = [];
+  const message = readString(sync.message);
+  const warning = readString(sync.warning);
+
+  if (message) lines.push(message);
+  if (warning) {
+    lines.push(warning);
+  } else if (Array.isArray(sync.unmanagedFiles) && sync.unmanagedFiles.length > 0) {
+    lines.push(`Unmanaged convention files: ${sync.unmanagedFiles.map(String).join(', ')}`);
+  }
+
+  if (sync.skills && typeof sync.skills === 'object' && !Array.isArray(sync.skills)) {
+    const skills = sync.skills as Record<string, unknown>;
+    const skillMessage = readString(skills.message);
+    const skillWarning = readString(skills.warning);
+    if (skillMessage) lines.push(skillMessage);
+    if (skillWarning) lines.push(skillWarning);
+  }
+
+  return lines.length > 0 ? lines.join('\n') : 'Sync completed.';
+}
 
 /**
  * 액션 인벤토리: 액션: download. 실사용 옵션: cwd. 별칭/도움말 불일치: 없음.
@@ -27,7 +57,7 @@ export function registerSyncCommand(program: Command): void {
         const format = normalizeInteractiveFormat(options.format);
 
         if (format === 'human' && !options.outputFile) {
-          console.log(typeof result === 'string' ? result : formatOutput(result));
+          console.log(formatSyncHumanOutput(result));
           return;
         }
 
