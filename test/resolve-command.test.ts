@@ -115,6 +115,27 @@ describe('resolve command', () => {
   });
 
   describe('kind: record', () => {
+    it('fetches a path-less skill through the body-bearing download endpoint', async () => {
+      const getSpy = jest.spyOn(axios, 'get').mockResolvedValue({
+        data: {
+          data: {
+            id: uuid,
+            title: 'Dev CLI',
+            slug: 'dev-cli',
+            files: [{ relativePath: 'SKILL.md', content: '# AgentTeams CLI 개발' }],
+          },
+        },
+      } as never);
+
+      const result = await executeResolveCommand({ ref: `skill:${uuid}` }, loadContext);
+
+      expect(getSpy).toHaveBeenCalledWith(`${apiUrl}/api/projects/${projectId}/skills/${uuid}/download`, { headers });
+      expect(result).toMatchObject({ kind: 'record', refType: 'skill', id: uuid });
+      expect(result.record).toMatchObject({
+        data: { id: uuid, slug: 'dev-cli', files: [{ relativePath: 'SKILL.md', content: '# AgentTeams CLI 개발' }] },
+      });
+    });
+
     it('fetches a code review finding through the finding endpoint, narrowed by the parent review', async () => {
       const findingId = '0a1b2c3d-4e5f-4a6b-8c9d-0e1f2a3b4c5d';
       const getSpy = jest

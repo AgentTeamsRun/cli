@@ -104,6 +104,13 @@ const DISPATCH_CASES: Array<{
     id: uuid,
     url: `${projectUrl}/conventions/${uuid}`,
   },
+  {
+    label: 'skl',
+    ref: `agentteams_skl_${uuid}`,
+    refType: 'skill',
+    id: uuid,
+    url: `${projectUrl}/skills/${uuid}/download`,
+  },
   // type:id, three-part parent:child, and the wrapping layers.
   {
     label: 'type:id',
@@ -118,6 +125,13 @@ const DISPATCH_CASES: Array<{
     refType: 'convention',
     id: uuid,
     url: `${projectUrl}/conventions/${uuid}`,
+  },
+  {
+    label: 'skill:id (no path)',
+    ref: `skill:${uuid}`,
+    refType: 'skill',
+    id: uuid,
+    url: `${projectUrl}/skills/${uuid}/download`,
   },
   {
     label: 'codeReview:R:F',
@@ -451,7 +465,7 @@ describe('agentteams_resolve MCP tool', () => {
     expect(recovered.result?.isError).toBeFalsy();
   });
 
-  it('is advertised in the full profile only, and costs 1,715 definition chars', () => {
+  it('is advertised in the full profile only, and costs 1,762 definition chars', () => {
     const readSpecs = getContextToolSpecs();
     const localSpecs = getLocalToolSpecs();
     const writeSpecs = getWriteToolSpecs();
@@ -493,11 +507,13 @@ describe('agentteams_resolve MCP tool', () => {
     // leave the always-on file. Net across the two surfaces is strongly negative.
     // Updated 2026-08-23 after skill ids gained their canonical `agentteams_skl_`
     // prefix description (+28 chars in `full`; resolve itself is unchanged).
+    // Updated 2026-08-24 after skill 3-part refs joined SUPPORTED_REF_FORMS
+    // (`skill:<id>:.agentteams/skills/<slug>/SKILL.md`, +47 chars).
     // This is the number that decided the profile membership above: 1.7k chars is
     // cheap in `full` and a 50% jump in `minimal` (3.4k), which is why `minimal`
     // does not carry it.
-    expect(delta).toBe(1_715);
-    expect(withResolve.totalChars).toBe(66_445);
+    expect(delta).toBe(1_762);
+    expect(withResolve.totalChars).toBe(66_492);
     process.stderr.write(`[agentteams_resolve budget] ${JSON.stringify({ delta, full: withResolve.totalChars })}\n`);
   });
 });

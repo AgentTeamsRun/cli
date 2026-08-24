@@ -19,7 +19,13 @@ export interface EntityRefDescriptor {
    * whose ids never carry an AgentTeams prefix.
    */
   prefixCode?: string;
-  kind: EntityRefKind;
+  /** Fixed delivery kind. Omitted when `pathLocalFile` derives it from the token. */
+  kind?: EntityRefKind;
+  /**
+   * When true, a path segment means a local file and a path-less token degrades
+   * to a server record. Shared by convention and skill.
+   */
+  pathLocalFile?: boolean;
   /** Reference points at a system outside AgentTeams (no prefix normalization). */
   external?: boolean;
   /** Equivalent command for older CLIs that do not ship `resolve`. */
@@ -74,9 +80,15 @@ const ENTITY_REF_DESCRIPTORS: EntityRefDescriptor[] = [
     prefixCode: 'cnv',
     // A convention reference usually carries the local path it was deployed to,
     // so the default resolution is a local read; the id-only form falls back to
-    // a server fetch (see `resolveConventionKind`).
-    kind: 'localFile',
+    // a server fetch (see `resolvePathLocalFileKind`).
+    pathLocalFile: true,
     resolver: 'read the local path from the reference',
+  },
+  {
+    refType: 'skill',
+    prefixCode: 'skl',
+    pathLocalFile: true,
+    resolver: 'agentteams skill download',
   },
   {
     refType: 'LINEAR_ISSUE',
@@ -124,7 +136,7 @@ const descriptorByPrefixCode = new Map<string, EntityRefDescriptor>(
 
 export const SUPPORTED_REF_FORMS = [
   'type:id (e.g. plan:agentteams_pln_<uuid>)',
-  'type:id:path (convention:<id>:.agentteams/rules/context.md)',
+  'type:id:path (convention:<id>:.agentteams/rules/context.md, skill:<id>:.agentteams/skills/<slug>/SKILL.md)',
   'parent:child (codeReview:<reviewId>:<findingId>, plan:<planId>:<taskId>)',
   'bare prefixed id (agentteams_doc_<uuid>)',
   'external marker (LINEAR_ISSUE:<uuid>, SENTRY_ISSUE:<numeric-id>, GITHUB_ISSUE:<owner/repo#n>, GITHUB_PR, GITLAB_ISSUE, GITLAB_MERGE_REQUEST, BITBUCKET_ISSUE, BITBUCKET_PR)',
@@ -216,10 +228,10 @@ function buildFallbackCommand(descriptor: EntityRefDescriptor, parsed: { id: str
 }
 
 /**
- * A `convention:<id>` reference without a path cannot be read locally, so it
+ * A path-bearing reference without a path cannot be read locally, so it
  * degrades to a server fetch instead of the usual local read.
  */
-function resolveConventionKind(path: string | undefined): EntityRefKind {
+function resolvePathLocalFileKind(path: string | undefined): EntityRefKind {
   return path ? 'localFile' : 'record';
 }
 
@@ -283,9 +295,9 @@ export function parseEntityRef(input: string): ParsedEntityRef {
     throw unsupported(raw, 'three-part reference has an empty third segment');
   }
 
-  // The same three-part grammar carries a local path for conventions and a
-  // child id for code reviews and plans, so the parent type decides.
-  if (descriptor.refType === 'convention') {
+  // The same three-part grammar carries a local path for conventions/skills
+  // and a child id for code reviews and plans, so the parent type decides.
+  if (descriptor.pathLocalFile) {
     return finalize({ raw, label, descriptor, id: idPart, path: thirdPart });
   }
   if (descriptor.refType === 'codeReview') {
@@ -329,7 +341,10 @@ function finalize(input: {
       throw unsupported(raw, `"${parentId}" is not a valid parent id (expected a UUID)`);
     }
   }
-  const kind = descriptor.refType === 'convention' ? resolveConventionKind(path) : descriptor.kind;
+  const kind = descriptor.pathLocalFile ? resolvePathLocalFileKind(path) : descriptor.kind;
+  if (!kind) {
+    throw new Error(`Entity reference descriptor ${descriptor.refType} has no resolution kind`);
+  }
   const external = descriptor.external === true;
   const { url, suggestedCommand } = external ? buildExternalTarget(descriptor.refType, id) : {};
 

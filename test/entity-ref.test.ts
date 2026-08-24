@@ -39,6 +39,32 @@ describe('parseEntityRef', () => {
     });
   });
 
+  it('reads a skill reference as a local path', () => {
+    expect(parseEntityRef(`skill:agentteams_skl_${uuid}:.agentteams/skills/foo/SKILL.md`)).toMatchObject({
+      refType: 'skill',
+      id: uuid,
+      kind: 'localFile',
+      path: '.agentteams/skills/foo/SKILL.md',
+    });
+  });
+
+  it('falls back to a server record for a skill reference without a path', () => {
+    expect(parseEntityRef(`skill:${uuid}`)).toMatchObject({
+      refType: 'skill',
+      kind: 'record',
+      fallbackCommand: 'agentteams skill download',
+    });
+    expect(parseEntityRef(`skill:${uuid}`).path).toBeUndefined();
+  });
+
+  it('infers skill from a bare prefixed id', () => {
+    expect(parseEntityRef(`agentteams_skl_${uuid}`)).toMatchObject({
+      refType: 'skill',
+      id: uuid,
+      kind: 'record',
+    });
+  });
+
   it('falls back to a server record for a convention reference without a path', () => {
     expect(parseEntityRef(`convention:${uuid}`)).toMatchObject({
       refType: 'convention',
