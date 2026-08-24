@@ -4,6 +4,7 @@ import { posix, resolve as resolvePath } from 'node:path';
 import { z } from 'zod';
 import { getLinearIssue } from '../api/linear.js';
 import { getSentryIssue } from '../api/sentry.js';
+import { downloadSkill } from '../api/skill.js';
 import { getPlanTask } from '../api/task.js';
 import { parseEntityRef, SUPPORTED_REF_FORMS, type ParsedEntityRef } from '../utils/entityRef.js';
 import type { McpToolContext } from './context.js';
@@ -198,6 +199,9 @@ function describeLocalFile(
 }
 
 async function resolveInlineRecord(parsed: ParsedEntityRef, context: McpToolContext): Promise<unknown> {
+  if (parsed.refType === 'skill') {
+    return downloadSkill(context.apiUrl, context.projectId, await resolveToolHeaders(context), parsed.id);
+  }
   if (parsed.refType === 'planTask') {
     // Not in the shared `ContextToolsClient` contract — see the module note.
     return getPlanTask(

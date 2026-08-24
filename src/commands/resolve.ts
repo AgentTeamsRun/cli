@@ -3,6 +3,7 @@ import { dirname, isAbsolute, join, relative, resolve as resolvePath } from 'nod
 import { parseEntityRef, type EntityRefKind, type ParsedEntityRef } from '../utils/entityRef.js';
 import { findProjectConfig } from '../utils/config.js';
 import { getConvention } from '../api/convention.js';
+import { downloadSkill } from '../api/skill.js';
 import { getCodeReview, getCodeReviewFinding } from '../api/codeReview.js';
 import { getPlanTask } from '../api/task.js';
 import { getLinearIssue } from '../api/linear.js';
@@ -106,6 +107,8 @@ async function resolveRecord(parsed: ParsedEntityRef, context: ResolveApiContext
       return getPlanTask(apiUrl, projectId, headers, parsed.id, parsed.parentId);
     case 'convention':
       return getConvention(apiUrl, projectId, headers, parsed.id);
+    case 'skill':
+      return downloadSkill(apiUrl, projectId, headers, parsed.id);
     case 'LINEAR_ISSUE':
       return getLinearIssue(apiUrl, headers, parsed.id, projectId);
     // 서버가 프로젝트 바인딩을 검증하고 저장된 permalink를 함께 돌려준다. 토큰의 숫자 ID만으로는
