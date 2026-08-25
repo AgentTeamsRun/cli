@@ -37,6 +37,14 @@ function kiroHome(context: McpPathContext): string {
   return override && override.length > 0 ? override : join(context.homeDir, '.kiro');
 }
 
+function ompAgentDir(context: McpPathContext): string {
+  // Verified omp/18.0.4: `PI_CODING_AGENT_DIR` is the full agent-directory override
+  // (`omp config path` printed the absolute value). `PI_CONFIG_DIR` is a dirname
+  // under $HOME, not an absolute path, so it is not used here.
+  const override = context.env.PI_CODING_AGENT_DIR;
+  return override && override.length > 0 ? override : join(context.homeDir, '.omp', 'agent');
+}
+
 function grokHome(context: McpPathContext): string {
   // Verified 1.0.3: `GROK_HOME=<dir> grok mcp add --scope user` reports
   // `File modified: $GROK_HOME/config.toml` and writes there, and `grok mcp list --json`
@@ -516,6 +524,55 @@ export const MCP_CLIENTS: McpClientDefinition[] = [
           ],
           rerunBehavior: 'update',
         },
+      },
+    },
+  },
+  {
+    id: 'omp',
+    runnerType: 'OMP',
+    label: 'Oh My Pi',
+    executables: ['omp'],
+    // Verified omp/18.0.4 on macOS: the binary installer writes `$PI_INSTALL_DIR`
+    // (default `~/.local/bin`). An unrelated npm package (`omp@1.0.0`, 2019) shares
+    // the binary name, so detection checks the official `--help` marker.
+    extraBinDirs: (context) => {
+      const dirs = [join(context.homeDir, '.local', 'bin')];
+      const installDir = context.env.PI_INSTALL_DIR;
+      if (installDir && installDir.length > 0) dirs.unshift(installDir);
+      const localAppData = context.env.LOCALAPPDATA;
+      if (localAppData && localAppData.length > 0) dirs.push(join(localAppData, 'omp'));
+      return dirs;
+    },
+    executableIdentity: { args: ['--help'], marker: 'Oh My Pi', preferExtraBinDirs: true },
+    configSignals: (context) => [join(ompAgentDir(context), 'mcp.json'), ompAgentDir(context)],
+    docsUrl: 'https://github.com/can1357/oh-my-pi/blob/main/docs/mcp-config.md',
+    verifiedAt: '2026-08-24',
+    nativeDiscovery: {
+      status: 'unknown',
+      verifiedAt: '2026-08-24',
+      evidenceUrl: 'https://github.com/can1357/oh-my-pi/blob/main/docs/mcp-config.md',
+      version: '18.0.4',
+      reason: 'The Oh My Pi MCP guide does not document host-side progressive tool definition loading.',
+    },
+    scopes: {
+      // Verified omp/18.0.4: there is no non-interactive `omp mcp add`. Native config is
+      // JSON `{ mcpServers: { <name>: { command, args, env } } }` at
+      // `~/.omp/agent/mcp.json` (user) and `.omp/mcp.json` (project). Writing those
+      // files is what the runtime reads — a dummy stdio server in an isolated
+      // PI_CODING_AGENT_DIR was logged as `mcp:agentteams-probe` / `mcp:project-probe`.
+      user: {
+        configPath: (context) => join(ompAgentDir(context), 'mcp.json'),
+        format: 'json',
+        containerKey: 'mcpServers',
+        entryShape: 'plain',
+        strategy: 'jsonMerge',
+      },
+      project: {
+        configPath: (context) => join(context.cwd, '.omp', 'mcp.json'),
+        format: 'json',
+        containerKey: 'mcpServers',
+        entryShape: 'plain',
+        strategy: 'jsonMerge',
       },
     },
   },

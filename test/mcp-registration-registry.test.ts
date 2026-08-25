@@ -37,9 +37,9 @@ function snapshotTree(root: string): Record<string, string> {
 }
 
 describe('mcp client registry', () => {
-  it('exposes exactly the ten supported clients and excludes Orca and GEMINI', () => {
+  it('exposes exactly the eleven supported clients and excludes Orca and GEMINI', () => {
     expect(MCP_CLIENTS.map((client) => client.id)).toEqual([...MCP_CLIENT_IDS]);
-    expect(MCP_CLIENTS).toHaveLength(10);
+    expect(MCP_CLIENTS).toHaveLength(11);
     expect(MCP_CLIENT_IDS).not.toContain('orca');
     expect(MCP_CLIENTS.map((client) => client.runnerType)).not.toContain('GEMINI');
   });
@@ -72,6 +72,7 @@ describe('mcp client registry', () => {
       antigravity: 'unknown',
       'kiro-cli': 'unknown',
       'grok-build': 'unknown',
+      omp: 'unknown',
     });
 
     for (const client of MCP_CLIENTS) {
@@ -135,7 +136,7 @@ describe('mcp config output', () => {
     (scope) => {
       const output = run({ scope }) as { json: { clients: { clientId: string; snippet: string }[] } };
 
-      expect(output.json.clients).toHaveLength(10);
+      expect(output.json.clients).toHaveLength(11);
       for (const rendered of output.json.clients) {
         expect(rendered.snippet).toContain('agentteams');
         expect(rendered.snippet).toContain('mcp');
@@ -183,7 +184,7 @@ describe('mcp config output', () => {
       };
     };
 
-    expect(output.json.clients).toHaveLength(10);
+    expect(output.json.clients).toHaveLength(11);
     for (const client of output.json.clients) {
       expect(client.profileGuidance).toContain(`Native tool discovery: ${client.nativeDiscovery.status}`);
       expect(client.profileGuidance).toContain(client.nativeDiscovery.evidenceUrl);

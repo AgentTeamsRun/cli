@@ -60,12 +60,22 @@ const stubServer = (skills: ReturnType<typeof remoteSkill>[], pageSize = 100) =>
 const download = (options: Record<string, unknown> = {}) =>
   executeSkillCommand('https://api.example.test', 'project-1', {}, 'download', { cwd: projectRoot, ...options });
 
+// mirror 대상은 마커 탐지에 더해 **현재 세션의 엔진**(`AGENTTEAMS_RUNNER_TYPE`)이 읽는 경로를
+// 포함한다(`detectSkillMirrorTargets`). 그래서 이 변수가 상속된 환경 — 러너가 띄운 세션에서
+// `pnpm test`를 돌릴 때 — 에서는 마커 없는 저장소에도 `.claude/skills`가 생겨 마커 탐지만
+// 검증하는 케이스가 깨진다. CI에는 이 변수가 없어 드러나지 않는 형태의 누수라, 테스트가
+// 자기 환경을 직접 고정한다.
+const originalEnv = process.env;
+
 beforeEach(() => {
+  process.env = { ...originalEnv };
+  delete process.env.AGENTTEAMS_RUNNER_TYPE;
   projectRoot = mkdtempSync(join(tmpdir(), 'skill-download-'));
   mkdirSync(join(projectRoot, '.agentteams'), { recursive: true });
 });
 
 afterEach(() => {
+  process.env = originalEnv;
   jest.clearAllMocks();
   rmSync(projectRoot, { recursive: true, force: true });
 });
@@ -91,6 +101,18 @@ describe('skill download mirror fan-out', () => {
 
     expect(existsSync(join(projectRoot, '.claude', 'skills', 'my-skill', 'SKILL.md'))).toBe(true);
     expect(existsSync(join(projectRoot, '.github', 'skills', 'my-skill', 'SKILL.md'))).toBe(true);
+  });
+
+  // 위 케이스가 러너 세션에서만 깨졌던 이유를 테스트로 고정한다. 이 경로는 버그가 아니라
+  // 의도된 보정이므로(`RUNNER_REQUIRED_TARGETS`), 환경을 지우는 것으로 함께 사라지면 안 된다.
+  it('adds the .claude mirror without a marker when the session runs as CLAUDE_CODE', async () => {
+    process.env.AGENTTEAMS_RUNNER_TYPE = 'CLAUDE_CODE';
+    stubServer([remoteSkill('my-skill', [{ relativePath: 'SKILL.md', content: entryContent('my-skill') }])]);
+
+    await download();
+
+    expect(existsSync(join(projectRoot, '.claude', 'skills', 'my-skill', 'SKILL.md'))).toBe(true);
+    expect(existsSync(join(projectRoot, '.github', 'skills'))).toBe(false);
   });
 
   it('writes no mirror at all with --skill-targets=none', async () => {
