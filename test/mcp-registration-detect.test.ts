@@ -116,6 +116,23 @@ describe('mcp client detection', () => {
     expect(signals['grok-build'].executablePath).toBe(join(grokBin, 'grok'));
   });
 
+  it('skips a PATH name collision and detects the official Oh My Pi path', () => {
+    fakeExecutable('omp');
+    const localBin = join(home, '.local', 'bin');
+    mkdirSync(localBin, { recursive: true });
+    writeFileSync(join(localBin, 'omp'), '#!/bin/sh\n', { mode: 0o755 });
+
+    const signals = byId(
+      detectClients({
+        context,
+        probeExecutable: (executablePath) =>
+          executablePath === join(localBin, 'omp') ? 'omp v18.0.4\nOh My Pi as an ACP' : 'omp 1.0.0',
+      }),
+    );
+
+    expect(signals.omp.executablePath).toBe(join(localBin, 'omp'));
+  });
+
   it('detects Kiro CLI from its settings directory alone', () => {
     mkdirSync(join(home, '.kiro', 'settings'), { recursive: true });
     writeFileSync(join(home, '.kiro', 'settings', 'mcp.json'), '{}\n');
@@ -148,6 +165,20 @@ describe('mcp client detection', () => {
     expect(signals.codex.configPaths).toEqual([join(codexHome, 'config.toml'), codexHome]);
     expect(signals['copilot-cli'].configPaths).toEqual([join(copilotHome, 'mcp-config.json'), copilotHome]);
     expect(signals['kiro-cli'].configPaths).toEqual([join(kiroHome, 'settings', 'mcp.json'), kiroHome]);
+  });
+
+  it('detects Oh My Pi from PI_CODING_AGENT_DIR', () => {
+    const ompHome = join(home, 'custom-omp-agent');
+    mkdirSync(ompHome, { recursive: true });
+    writeFileSync(join(ompHome, 'mcp.json'), '{}\n');
+
+    const signals = byId(
+      detectClients({
+        context: { ...context, env: { ...context.env, PI_CODING_AGENT_DIR: ompHome } },
+      }),
+    );
+
+    expect(signals.omp.configPaths).toEqual([join(ompHome, 'mcp.json'), ompHome]);
   });
 
   describe('batch install', () => {
@@ -185,7 +216,7 @@ describe('mcp client detection', () => {
       expect(result.text).toContain('claude-code [INSTALLED]');
       expect(result.text).toContain('cursor-cli [INSTALLED]');
       expect(result.text).toContain('amp [SKIPPED_NOT_DETECTED]');
-      expect(result.text).toContain('Summary: 2 registered, 8 skipped, 0 failed.');
+      expect(result.text).toContain('Summary: 2 registered, 9 skipped, 0 failed.');
     });
 
     it('runs Grok registration through the verified absolute path in batch mode', () => {
@@ -235,7 +266,7 @@ describe('mcp client detection', () => {
       expect(result.text).toContain('claude-code [FAILED]');
       expect(result.text).toContain('codex [SKIPPED_CONFIG_ONLY]');
       expect(result.text).toContain('cursor-cli [INSTALLED]');
-      expect(result.text).toContain('Summary: 1 registered, 8 skipped, 1 failed.');
+      expect(result.text).toContain('Summary: 1 registered, 9 skipped, 1 failed.');
     });
 
     it('plans --scope project in batch mode without touching anything and refuses --yes', () => {

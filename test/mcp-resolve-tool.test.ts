@@ -509,11 +509,15 @@ describe('agentteams_resolve MCP tool', () => {
     // prefix description (+28 chars in `full`; resolve itself is unchanged).
     // Updated 2026-08-24 after skill 3-part refs joined SUPPORTED_REF_FORMS
     // (`skill:<id>:.agentteams/skills/<slug>/SKILL.md`, +47 chars).
+    // Updated 2026-08-25 after `OMP` joined RUNNER_TYPE_VALUES (+12 chars in `full`).
+    // That enum is inlined into two write-tool schemas (code-review create/update
+    // `runnerType`), so each new member costs `"OMP",` = 6 chars twice. `delta` is
+    // unchanged because agentteams_resolve carries no runner-type enum.
     // This is the number that decided the profile membership above: 1.7k chars is
     // cheap in `full` and a 50% jump in `minimal` (3.4k), which is why `minimal`
     // does not carry it.
     expect(delta).toBe(1_762);
-    expect(withResolve.totalChars).toBe(66_492);
+    expect(withResolve.totalChars).toBe(66_504);
     process.stderr.write(`[agentteams_resolve budget] ${JSON.stringify({ delta, full: withResolve.totalChars })}\n`);
   });
 });

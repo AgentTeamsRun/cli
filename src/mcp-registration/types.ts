@@ -12,6 +12,7 @@ export const MCP_CLIENT_IDS = [
   'antigravity',
   'kiro-cli',
   'grok-build',
+  'omp',
 ] as const;
 
 export type McpClientId = (typeof MCP_CLIENT_IDS)[number];
