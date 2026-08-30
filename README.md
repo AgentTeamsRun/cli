@@ -39,6 +39,8 @@ The `init` command:
 - Stores `teamId`, `projectId`, `apiKey`, and a non-default `apiUrl` when needed
 - Saves the convention template to `.agentteams/convention.md`
 - Syncs convention files into `.agentteams/<category>/*.md`
+- Adds `.agentteams` to `.gitignore` — it may contain API keys and must not be committed
+- Creates the agent entry point file for each AI client detected in the folder, leaving any file that already exists untouched
 
 ### Choosing a login method
 
@@ -151,16 +153,7 @@ The CLI talks to two services:
 - Web app (OAuth flow): defaults to `https://agentteams.run`
 - API: defaults to `https://api.agentteams.run`; `init` only writes `apiUrl` when the authorized API URL is different
 
-### 2. Protect Sensitive Data
-
-`.agentteams` may contain API keys, so do not commit it to git.
-
-```gitignore
-# AgentTeams CLI config (contains API keys)
-.agentteams
-```
-
-### 3. Use Conventions
+### 2. Use Conventions
 
 ```bash
 agentteams convention list
