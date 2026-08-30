@@ -45,7 +45,15 @@ export interface McpRegistrationCommandOptions {
   client?: string;
   scope?: string;
   serverEntry?: string;
+  /** Preview only: build the detection plan and touch nothing. */
+  dryRun?: boolean;
   yes?: boolean;
+  /**
+   * Machine-readable output. A programmatic caller cannot see or answer a prompt, so
+   * this also keeps the batch install behind an explicit `--yes` (see
+   * `runMcpInstallCommand`).
+   */
+  json?: boolean;
   apiKey?: string;
   apiUrl?: string;
   projectId?: string;
@@ -114,11 +122,17 @@ function parseScope(value: unknown): McpScope {
  * The bare executable is the fast path; `npx` is what a machine without a global install
  * gets. Either way the user sees the reason here instead of discovering it as a client-side
  * "server failed to start" (or as an unexplained cold start on every request).
+ *
+ * The two npx cases read differently and must not share one sentence: at project scope it
+ * is a deliberate choice about a file that gets committed, not a report that this machine
+ * is missing something.
  */
-function describeRuntime(spec: McpServerSpec): string {
-  return spec.command === 'npx'
-    ? 'No global `agentteams` was found on PATH, so the entry runs the published package with npx. Run `npm install -g @agentteams/cli` and re-register for a faster start.'
-    : 'The entry runs the globally installed `agentteams` executable.';
+function describeRuntime(spec: McpServerSpec, scope: McpScope): string {
+  if (spec.command !== 'npx') return 'The entry runs the globally installed `agentteams` executable.';
+  if (scope === 'project') {
+    return 'Project files are shared with everyone who clones this repository, so the entry runs the published package with npx rather than whichever runtime this machine happens to have. Use `--scope user` for a per-machine entry that starts faster.';
+  }
+  return 'No global `agentteams` was found on PATH, so the entry runs the published package with npx. Run `npm install -g @agentteams/cli` and re-register for a faster start.';
 }
 
 function describeNativeDiscovery(client: McpClientDefinition, toolProfile: string): string {
@@ -165,7 +179,7 @@ export function runMcpConfigCommand(
   const explicitToolProfile = isExplicitToolProfile(options.toolProfile);
   const clientIds = options.client ? [parseClientId(options.client)] : MCP_CLIENT_ID_LIST;
 
-  const spec = buildServerSpec({ serverEntry: options.serverEntry, context, toolProfile });
+  const spec = buildServerSpec({ serverEntry: options.serverEntry, context, toolProfile, scope });
 
   const sections = clientIds.map((clientId) => {
     const client = findClient(clientId);
@@ -177,7 +191,7 @@ export function runMcpConfigCommand(
     const clientSpec =
       resolved.toolProfile === toolProfile
         ? spec
-        : buildServerSpec({ serverEntry: options.serverEntry, context, toolProfile: resolved.toolProfile });
+        : buildServerSpec({ serverEntry: options.serverEntry, context, toolProfile: resolved.toolProfile, scope });
     return {
       clientId,
       label: client.label,
@@ -202,7 +216,7 @@ export function runMcpConfigCommand(
     `AgentTeams MCP config (${scope} scope) — project ${credentials.projectId}, team ${credentials.teamId}`,
     'No credentials or project binding are embedded. The MCP server resolves local configuration and the stored login (OS credential store, or a permission-protected file when that store is unavailable) at request time.',
     `Tool profile: ${toolProfile}${toolProfile === 'full' ? ' (default; all tools)' : ' (explicit limited catalog)'}.`,
-    describeRuntime(spec),
+    describeRuntime(spec, scope),
   ];
 
   for (const section of sections) {
@@ -236,16 +250,72 @@ function renderResultLine(result: InstallResult): string {
 function summarize(results: InstallResult[]): { applied: number; skipped: number; failed: number } {
   return {
     applied: results.filter((r) => r.outcome === 'INSTALLED' || r.outcome === 'ALREADY_REGISTERED').length,
-    skipped: results.filter((r) => r.outcome === 'SKIPPED_CONFIG_ONLY' || r.outcome === 'SKIPPED_NOT_DETECTED').length,
+    skipped: results.filter((r) => r.outcome.startsWith('SKIPPED_')).length,
     failed: results.filter((r) => r.outcome === 'FAILED').length,
   };
 }
 
+export interface McpBatchInstallResult {
+  scope: McpScope;
+  plan: BatchPlan;
+  results: InstallResult[];
+  summary: { applied: number; skipped: number; failed: number };
+  exitCode: number;
+}
+
 /**
- * `install` has two modes:
- *  - `--client <id>`: apply a single client/scope (project scope allowed here).
- *  - no `--client`: detect local clients and print the plan. Only `--yes` turns
- *    that plan into writes, and only at user scope.
+ * What the batch path actually reads.
+ *
+ * `client`, `dryRun`, `yes` and `json` are deliberately absent: they select *whether*
+ * the batch runs, and `runMcpInstallCommand` resolves them before it gets here.
+ * Accepting them would let a caller pass `dryRun: true` and still have files written.
+ */
+export type McpBatchInstallOptions = Omit<McpRegistrationCommandOptions, 'client' | 'dryRun' | 'yes' | 'json'>;
+
+/**
+ * Detect the local clients and register AgentTeams with every one this scope can
+ * apply automatically. This always applies — there is no preview mode here.
+ *
+ * Exported so `agentteams init --mcp` reuses the exact command path instead of
+ * re-deriving detection and strategy rules on its own.
+ */
+export function applyMcpBatchInstall(
+  options: McpBatchInstallOptions,
+  dependencies?: McpRegistrationDependencies,
+): McpBatchInstallResult {
+  const credentials = resolveCredentials(options, dependencies);
+  const context = resolvePathContext(dependencies?.context);
+  const scope = parseScope(options.scope);
+  const toolProfile = parseToolProfile(options.toolProfile);
+  const explicitToolProfile = isExplicitToolProfile(options.toolProfile);
+
+  const { plan, results } = runBatchInstall({
+    context,
+    credentials,
+    scope,
+    serverEntry: options.serverEntry,
+    toolProfile,
+    explicitToolProfile,
+    vendorRunner: dependencies?.vendorRunner,
+    detectionDependencies: dependencies?.detectionDependencies,
+  });
+
+  return { scope, plan, results, summary: summarize(results), exitCode: resolveInstallExitCode(results) };
+}
+
+/**
+ * `install` applies what it detects:
+ *  - `--client <id>`: apply that one client at the selected scope.
+ *  - no `--client`, project scope (the default): apply every detected client whose
+ *    project scope has a safe automated path. Project files are repository state the
+ *    caller already owns, so no extra approval is asked for.
+ *  - no `--client`, `--scope user`: machine-wide client configs, so the plan is only
+ *    printed until `--yes` approves it.
+ *  - no `--client`, `--json`: the plan is printed until `--yes` approves it, whatever
+ *    the scope. JSON output means another program is driving this, and the desktop
+ *    app has shipped versions that call the project-scope argv expecting a preview.
+ *  - `--dry-run`: preview at any scope. No file is written and no registration command
+ *    is run; detection may still run a client's own `--help` to confirm its identity.
  */
 export function runMcpInstallCommand(
   options: McpRegistrationCommandOptions,
@@ -256,7 +326,59 @@ export function runMcpInstallCommand(
   const scope = parseScope(options.scope);
   const toolProfile = parseToolProfile(options.toolProfile);
   const explicitToolProfile = isExplicitToolProfile(options.toolProfile);
-  const spec = buildServerSpec({ serverEntry: options.serverEntry, context, toolProfile });
+  const spec = buildServerSpec({ serverEntry: options.serverEntry, context, toolProfile, scope });
+
+  // Checked before anything reads a config or spawns a vendor CLI: the two flags state
+  // opposite intents, and guessing which one wins would either skip an approval or
+  // write during a preview.
+  if (options.dryRun && options.yes) {
+    throw new Error(
+      '--dry-run cannot be combined with --yes: one previews the plan and the other applies it. Re-run with only one of them.',
+    );
+  }
+
+  if (options.dryRun) {
+    // No file is written and no registration command runs here. Detection itself may
+    // still spawn a client's own `--help` to confirm the executable's identity — that
+    // is a read, but it is not "nothing runs".
+    //
+    // Validated here too so an unknown `--client` still fails before the preview,
+    // exactly as it does on the apply path.
+    const clientId = options.client ? parseClientId(options.client) : null;
+    const fullPlan = buildBatchPlan({
+      context,
+      credentials,
+      scope,
+      detectionDependencies: dependencies?.detectionDependencies,
+    });
+    const plan: BatchPlan = clientId
+      ? { ...fullPlan, entries: fullPlan.entries.filter((entry) => entry.clientId === clientId) }
+      : fullPlan;
+
+    const lines = [
+      'AgentTeams MCP install — dry run (no files were changed)',
+      `Plan: register "${MCP_SERVER_NAME}" at ${scope} scope for project ${plan.binding.projectId}, team ${plan.binding.teamId}`,
+      'The server entries contain no credentials or project binding; runtime resolution uses local configuration and the stored login.',
+      `Tool profile: ${toolProfile}${toolProfile === 'full' ? ' (default; all tools)' : ' (explicit limited catalog)'}.`,
+      describeRuntime(spec, scope),
+      '',
+    ];
+
+    for (const entry of plan.entries) {
+      lines.push(`- ${entry.clientId} [${entry.applicable ? 'will apply' : 'skip'}] ${formatDetectionEvidence(entry)}`);
+      lines.push(`    target: ${entry.targetPath} via ${entry.strategy}`);
+      if (entry.reason) lines.push(`    reason: ${entry.reason}`);
+    }
+
+    lines.push('');
+    lines.push(
+      scope === 'user'
+        ? 'Re-run with --scope user --yes to apply, or use `agentteams mcp config --scope user` for manual snippets.'
+        : 'Re-run without --dry-run to apply, or use `agentteams mcp config` for manual snippets.',
+    );
+
+    return { text: lines.join('\n'), json: { scope, toolProfile, server: spec, dryRun: true, plan }, exitCode: 0 };
+  }
 
   if (options.client) {
     const client = findClient(parseClientId(options.client));
@@ -281,7 +403,7 @@ export function runMcpInstallCommand(
       `Project ${credentials.projectId}, team ${credentials.teamId}`,
       'The server entry contains no credentials or project binding; runtime resolution uses local configuration and the stored login.',
       `Tool profile: ${toolProfile}${toolProfile === 'full' ? ' (default; all tools)' : ' (explicit limited catalog)'}.`,
-      describeRuntime(spec),
+      describeRuntime(spec, scope),
     ];
     lines.push(renderResultLine(result));
     if (result.backupPath) lines.push(`Backup: ${result.backupPath}`);
@@ -297,13 +419,18 @@ export function runMcpInstallCommand(
     };
   }
 
-  if (scope === 'project' && options.yes) {
-    throw new Error(
-      'Batch install does not support --scope project: project files are repository state and must be chosen per client. Re-run with --client <id> --scope project.',
-    );
-  }
-
-  if (!options.yes) {
+  // Two batch runs still stop at a preview until `--yes` approves them:
+  //  - `--scope user`, because it writes machine-wide client configs.
+  //  - `--json`, because that output exists for another program. `agentteams mcp
+  //    install --scope project --json` is the argv the desktop app's MCP panel has
+  //    always used as its detection-plan call, and CLI and desktop ship
+  //    independently, so changing what it does would make an already-installed
+  //    desktop write files nobody asked for. A machine caller that does want the
+  //    apply says so with `--yes`.
+  // Interactive project scope needs no such gate: those files are repository state
+  // the person running the command already owns.
+  const batchNeedsApproval = scope === 'user' || options.json === true;
+  if (batchNeedsApproval && !options.yes) {
     const plan = buildBatchPlan({
       context,
       credentials,
@@ -312,11 +439,11 @@ export function runMcpInstallCommand(
     });
 
     const lines = [
-      'AgentTeams MCP install — dry run (no files were changed)',
+      'AgentTeams MCP install — preview (no files were changed)',
       `Plan: register "${MCP_SERVER_NAME}" at ${scope} scope for project ${plan.binding.projectId}, team ${plan.binding.teamId}`,
       'The server entries contain no credentials or project binding; runtime resolution uses local configuration and the stored login.',
       `Tool profile: ${toolProfile}${toolProfile === 'full' ? ' (default; all tools)' : ' (explicit limited catalog)'}.`,
-      describeRuntime(spec),
+      describeRuntime(spec, scope),
       '',
     ];
 
@@ -329,33 +456,38 @@ export function runMcpInstallCommand(
     lines.push('');
     lines.push(
       scope === 'user'
-        ? 'Re-run with --yes to apply, or use `agentteams mcp config --client <id> --scope user` for a manual snippet.'
-        : 'Choose one client and run `agentteams mcp install --client <id> --scope project`, or use `agentteams mcp config --client <id> --scope project` for a manual snippet.',
+        ? "User scope edits this machine's global client configuration. Re-run with --scope user --yes to apply, or use `agentteams mcp config --scope user` for manual snippets."
+        : '--json prints the plan only. Re-run with --yes to apply, or drop --json to apply from an interactive run.',
     );
 
     return { text: lines.join('\n'), json: { scope, toolProfile, server: spec, dryRun: true, plan }, exitCode: 0 };
   }
 
-  const { plan, results } = runBatchInstall({
-    context,
-    credentials,
-    scope,
-    serverEntry: options.serverEntry,
-    toolProfile,
-    explicitToolProfile,
-    vendorRunner: dependencies?.vendorRunner,
-    detectionDependencies: dependencies?.detectionDependencies,
-  });
+  const { plan, results, summary } = applyMcpBatchInstall(options, dependencies);
 
-  const summary = summarize(results);
   const lines = [
     `AgentTeams MCP install — applied at ${scope} scope for project ${plan.binding.projectId}, team ${plan.binding.teamId}`,
     `Tool profile: ${toolProfile}${toolProfile === 'full' ? ' (default; all tools)' : ' (explicit limited catalog)'}.`,
-    describeRuntime(spec),
+    describeRuntime(spec, scope),
     ...results.map(renderResultLine),
     '',
     `Summary: ${summary.applied} registered, ${summary.skipped} skipped, ${summary.failed} failed.`,
   ];
+
+  // A client this scope cannot write to — Codex project config, or one whose vendor CLI
+  // refused — is not a failure, but leaving the user with only the reason would strand
+  // them. The snippet each of those results carries is printed so the registration can
+  // still be finished by hand.
+  const manualFallbacks = results.filter((result) => result.manualSnippet);
+  if (manualFallbacks.length > 0) {
+    lines.push('');
+    lines.push('Manual configuration is still needed for:');
+    for (const result of manualFallbacks) {
+      lines.push('');
+      lines.push(`## ${result.clientId} — ${result.configPath}`);
+      lines.push(result.manualSnippet as string);
+    }
+  }
 
   return {
     text: lines.join('\n'),

@@ -138,6 +138,13 @@ export type InstallOutcome =
   | 'ALREADY_REGISTERED'
   | 'SKIPPED_CONFIG_ONLY'
   | 'SKIPPED_NOT_DETECTED'
+  /**
+   * The client is present — its config traces are on disk — but the scope registers
+   * through the client's own CLI and that executable is not on this PATH. Distinct
+   * from `SKIPPED_NOT_DETECTED` because installing the executable fixes it, and the
+   * output layer cannot suggest that if both states share one value.
+   */
+  | 'SKIPPED_NO_EXECUTABLE'
   | 'FAILED';
 
 export interface InstallResult {

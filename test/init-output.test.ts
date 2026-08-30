@@ -408,6 +408,127 @@ describe('printInitResult', () => {
     });
   });
 
+  describe('MCP 등록 (human format)', () => {
+    const mcpResult = (overrides: Record<string, unknown> = {}) => ({
+      scope: 'project' as const,
+      summary: { applied: 1, skipped: 9, failed: 1 },
+      clients: [
+        {
+          clientId: 'cursor-cli',
+          outcome: 'INSTALLED' as const,
+          detail: 'Added "agentteams" to /project/.cursor/mcp.json.',
+          configPath: '/project/.cursor/mcp.json',
+        },
+        {
+          clientId: 'codex',
+          outcome: 'SKIPPED_CONFIG_ONLY' as const,
+          detail: 'Codex project config is TOML.',
+          configPath: '/project/.codex/config.toml',
+          manualSnippet: '[mcp_servers.agentteams]',
+        },
+        {
+          clientId: 'claude-code',
+          outcome: 'FAILED' as const,
+          detail: '`claude mcp add` exited with code 9',
+          configPath: '/project/.mcp.json',
+        },
+        {
+          clientId: 'amp',
+          outcome: 'SKIPPED_NOT_DETECTED' as const,
+          detail: 'Not detected on this machine.',
+          configPath: '/project/.vscode/settings.json',
+        },
+      ],
+      ...overrides,
+    });
+
+    // --mcp 없이 실행한 init은 클라이언트 설정을 쓰지 않으므로, 남는 것은 안내 한 줄뿐이다.
+    it('MCP 결과가 없으면 Next steps에서 mcp install을 안내한다', () => {
+      printInitResult(MOCK_INIT_RESULT, 'human');
+
+      const output = captureOutput(logSpy);
+      expect(output).toContain('agentteams mcp install');
+      expect(output).not.toContain('MCP registration (project scope):');
+    });
+
+    it('클라이언트별 성공·수동 설정·실패를 요약과 함께 출력한다', () => {
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        printInitResult({ ...MOCK_INIT_RESULT, mcp: mcpResult() }, 'human');
+
+        const output = `${captureOutput(logSpy)}\n${captureOutput(warnSpy)}`;
+        expect(output).toContain('MCP registration (project scope):');
+        expect(output).toContain('cursor-cli');
+        expect(output).toContain('codex');
+        expect(output).toContain('agentteams mcp config --client codex');
+        expect(output).toContain('claude-code');
+        expect(output).toContain('agentteams mcp install --client claude-code');
+        expect(output).toContain('1 registered, 9 skipped, 1 failed.');
+        // 감지되지 않은 클라이언트는 줄로 나열하지 않고 개수로만 알린다.
+        expect(output).not.toContain('amp:');
+        // 이미 실행된 뒤에 같은 명령을 다시 권하면 실패한 것처럼 읽힌다.
+        expect(output).not.toContain('4. Connect your AI tools');
+      } finally {
+        warnSpy.mockRestore();
+      }
+    });
+
+    // 설정 흔적은 있는데 CLI가 PATH에 없는 클라이언트를 "감지되지 않음"에 섞으면,
+    // 목록에서 사라진 채 개수에만 잡혀 사용자는 사실과 다른 문구만 보게 된다.
+    it('실행 파일이 없어 건너뛴 클라이언트를 개수가 아니라 줄로 안내한다', () => {
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        printInitResult(
+          {
+            ...MOCK_INIT_RESULT,
+            mcp: mcpResult({
+              clients: [
+                {
+                  clientId: 'claude-code',
+                  outcome: 'SKIPPED_NO_EXECUTABLE' as const,
+                  detail: 'Detected from configuration only; no `claude` executable was found.',
+                  configPath: '/project/.mcp.json',
+                },
+                {
+                  clientId: 'amp',
+                  outcome: 'SKIPPED_NOT_DETECTED' as const,
+                  detail: 'Not detected on this machine.',
+                  configPath: '/project/.vscode/settings.json',
+                },
+              ],
+            }),
+          },
+          'human',
+        );
+
+        const output = `${captureOutput(logSpy)}\n${captureOutput(warnSpy)}`;
+        expect(output).toContain('claude-code: Detected from configuration only');
+        expect(output).toContain('Put its CLI on PATH and re-run: agentteams mcp install --client claude-code');
+        // 진짜로 없는 클라이언트만 개수로 접힌다.
+        expect(output).toContain('1 supported client(s) were not detected in this environment.');
+      } finally {
+        warnSpy.mockRestore();
+      }
+    });
+
+    it('MCP 등록이 아예 실행되지 못해도 init 출력은 성공 경로를 유지한다', () => {
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        printInitResult(
+          { ...MOCK_INIT_RESULT, mcp: mcpResult({ clients: [], error: 'No AgentTeams configuration was found.' }) },
+          'human',
+        );
+
+        const output = `${captureOutput(logSpy)}\n${captureOutput(warnSpy)}`;
+        expect(output).toContain('Registration could not run: No AgentTeams configuration was found.');
+        expect(output).toContain('Retry: agentteams mcp install');
+        expect(output).toContain('Next steps:');
+      } finally {
+        warnSpy.mockRestore();
+      }
+    });
+  });
+
   describe('json format', () => {
     it('json 포맷이면 JSON 문자열을 출력한다', () => {
       printInitResult(MOCK_INIT_RESULT, 'json');
@@ -436,6 +557,27 @@ describe('printInitResult', () => {
     });
 
     // localAdapters는 추가 필드다. 기존 소비자가 읽던 키가 하나라도 사라지면 안 된다.
+    // MCP 결과가 human 전용이면 --format json 소비자는 무엇이 등록됐는지 알 수 없다.
+    it('MCP 등록 결과를 JSON 페이로드에도 포함한다', () => {
+      const mcp = {
+        scope: 'project',
+        summary: { applied: 1, skipped: 10, failed: 0 },
+        clients: [
+          {
+            clientId: 'cursor-cli',
+            outcome: 'INSTALLED',
+            detail: 'Added "agentteams" to /project/.cursor/mcp.json.',
+            configPath: '/project/.cursor/mcp.json',
+          },
+        ],
+      };
+
+      printInitResult({ ...MOCK_INIT_RESULT, mcp }, 'json');
+
+      const parsed = JSON.parse(captureOutput(logSpy)) as Record<string, unknown>;
+      expect(parsed.mcp).toEqual(mcp);
+    });
+
     it('어댑터 상태는 기존 필드를 건드리지 않고 추가만 한다', () => {
       const localAdapters = [
         { adapter: 'gitignore', status: 'READY', issues: [] },

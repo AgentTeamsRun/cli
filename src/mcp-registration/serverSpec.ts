@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
 import { delimiter, isAbsolute, join, resolve } from 'node:path';
 import type { ToolProfile } from '@agentteams/context-tools';
-import type { McpPathContext, McpServerSpec } from './types.js';
+import type { McpPathContext, McpScope, McpServerSpec } from './types.js';
 
 /** Server name registered in every client. Kept stable so re-runs update rather than duplicate. */
 export const MCP_SERVER_NAME = 'agentteams';
@@ -37,6 +37,12 @@ export interface BuildServerSpecOptions {
   fileExists?: (path: string) => boolean;
   /** `full` stays implicit for compatibility; limited profiles are explicit argv. */
   toolProfile?: ToolProfile;
+  /**
+   * Which scope the spec is written into. `project` is repository state that gets
+   * committed and read on other people's machines, so it never encodes what this
+   * machine happens to have on PATH.
+   */
+  scope?: McpScope;
 }
 
 function profileArgs(toolProfile: ToolProfile = 'full'): string[] {
@@ -72,6 +78,12 @@ export function hasGlobalExecutable(
  * a login shell. Those failures surface as an opaque "server failed to start" inside the
  * client, so when the executable is not resolvable the spec falls back to `npx`, which
  * works in both cases.
+ *
+ * Project scope skips that choice entirely and always uses `npx`. A project config is
+ * a file in the repository: whichever runtime this machine happens to have would be
+ * committed and then read on machines where it is wrong, and the failure surfaces
+ * inside the client as the same opaque "server failed to start". `npx` is the one
+ * value that is true on every machine.
  */
 export function buildServerSpec(options: BuildServerSpecOptions): McpServerSpec {
   const { serverEntry } = options;
@@ -83,7 +95,8 @@ export function buildServerSpec(options: BuildServerSpecOptions): McpServerSpec 
     return { command: 'node', args: [entryPath, 'mcp', ...args], env };
   }
 
-  if (options.context && !hasGlobalExecutable(options.context, options.fileExists)) {
+  const machineDependent = options.scope !== 'project';
+  if (!machineDependent || (options.context && !hasGlobalExecutable(options.context, options.fileExists))) {
     return { command: 'npx', args: ['-y', MCP_RUNTIME_PACKAGE, 'mcp', ...args], env };
   }
 

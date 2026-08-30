@@ -206,7 +206,9 @@ describe('mcp install', () => {
 
       const projectConfig = readFileSync(join(cwd, '.omp', 'mcp.json'), 'utf-8');
       expect(projectConfig).not.toContain(CANARY_API_KEY);
-      expect(JSON.parse(projectConfig).mcpServers.agentteams.command).toBe('agentteams');
+      // Project scope is committed repository state, so it never records this machine's
+      // global install — see the project-scope runtime test below.
+      expect(JSON.parse(projectConfig).mcpServers.agentteams.command).toBe('npx');
     });
 
     it('honours PI_CODING_AGENT_DIR for the Oh My Pi user scope', () => {
@@ -230,7 +232,7 @@ describe('mcp install', () => {
       const projectConfig = readFileSync(join(cwd, '.kiro', 'settings', 'mcp.json'), 'utf-8');
       expect(projectConfig).not.toContain(CANARY_API_KEY);
       expect(projectConfig).not.toContain('AGENTTEAMS_');
-      expect(JSON.parse(projectConfig).mcpServers.agentteams.command).toBe('agentteams');
+      expect(JSON.parse(projectConfig).mcpServers.agentteams.command).toBe('npx');
     });
 
     it('treats a zero-byte config as "create it" rather than as corruption', () => {
@@ -288,7 +290,7 @@ describe('mcp install', () => {
       expect(calls[0].args).not.toContain(`AGENTTEAMS_API_KEY=${CANARY_API_KEY}`);
       expect(calls[0].args.join(' ')).not.toContain('AGENTTEAMS_');
       expect(calls[0].args.slice(0, 5)).toEqual(['mcp', 'add', 'agentteams', '--scope', 'project']);
-      expect(calls[0].args.slice(-2)).toEqual(['agentteams', 'mcp']);
+      expect(calls[0].args.slice(-4)).toEqual(['npx', '-y', '@agentteams/cli', 'mcp']);
 
       expect(result.exitCode).toBe(0);
       expect(result.text).toContain('[INSTALLED]');
@@ -372,7 +374,40 @@ describe('mcp install', () => {
       expect(calls[0].args).toContain('--workspace');
       expect(calls[0].args.join(' ')).not.toContain('AGENTTEAMS_');
       expect(calls[0].args.join(' ')).not.toContain(CANARY_API_KEY);
-      expect(calls[0].args.slice(-2)).toEqual(['agentteams', 'mcp']);
+      expect(calls[0].args.slice(-4)).toEqual(['npx', '-y', '@agentteams/cli', 'mcp']);
+    });
+
+    it('delegates the Codex user scope to the detected Codex executable', () => {
+      const codexPath = join(bin, 'codex');
+      writeFileSync(codexPath, '#!/bin/sh\n', { mode: 0o755 });
+      const calls: { executable: string; args: string[] }[] = [];
+      const result = install(
+        { client: 'codex', scope: 'user' },
+        fakeRunner({ status: 0, stdout: "Added global MCP server 'agentteams'." }, calls),
+      );
+
+      expect(result.exitCode).toBe(0);
+      expect(result.text).toContain('[INSTALLED]');
+      expect(calls).toHaveLength(1);
+      // The detected absolute path, not a bare name re-resolved by the child process.
+      expect(calls[0].executable).toBe(codexPath);
+      expect(calls[0].args).toEqual(['mcp', 'add', 'agentteams', '--', 'agentteams', 'mcp']);
+      expect(calls[0].args.join(' ')).not.toContain('AGENTTEAMS_');
+      expect(calls[0].args.join(' ')).not.toContain(CANARY_API_KEY);
+      // Codex owns its TOML: this CLI must not have written the file itself.
+      expect(existsSync(join(home, '.codex', 'config.toml'))).toBe(false);
+    });
+
+    it('reports a repeated Codex user registration as an in-place update, not a conflict', () => {
+      const runner = fakeRunner({ status: 0, stdout: "Added global MCP server 'agentteams'." });
+      const first = install({ client: 'codex', scope: 'user' }, runner);
+      const second = install({ client: 'codex', scope: 'user' }, runner);
+
+      for (const result of [first, second]) {
+        expect(result.exitCode).toBe(0);
+        expect(result.text).toContain('[INSTALLED]');
+        expect(result.text).toContain('updates the entry in place');
+      }
     });
   });
 
@@ -385,16 +420,6 @@ describe('mcp install', () => {
       expect(result.text).toContain('comment-preserving TOML editor');
       expect(result.text).toContain('[mcp_servers.agentteams]');
       expect(existsSync(join(cwd, '.codex', 'config.toml'))).toBe(false);
-    });
-
-    it('keeps Codex user install config-only so no API key enters argv', () => {
-      const calls: { executable: string; args: string[] }[] = [];
-      const result = install({ client: 'codex', scope: 'user' }, fakeRunner({ status: 0 }, calls));
-
-      expect(result.exitCode).toBe(0);
-      expect(result.text).toContain('[SKIPPED_CONFIG_ONLY]');
-      expect(result.text).not.toContain('AGENTTEAMS_API_KEY');
-      expect(calls).toHaveLength(0);
     });
   });
 

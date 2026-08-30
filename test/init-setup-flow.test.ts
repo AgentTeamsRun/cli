@@ -851,6 +851,111 @@ describe('init configured-project fast path', () => {
     expect(existsSync(join(cwd, '.git', 'hooks', 'post-checkout'))).toBe(true);
     expect(result.localAdapters.find((adapter) => adapter.adapter === 'post-checkout-hook')?.status).toBe('READY');
   });
+
+  /**
+   * `--mcp`는 init이 클라이언트 설정을 건드려도 되는 유일한 통로다. 여기서 고정하는 것은
+   * 세 가지다: 플래그가 없으면 아무 파일도 쓰지 않는다, 있으면 `mcp install`과 같은
+   * 일괄 경로를 쓴다, 그리고 클라이언트 한 곳이 실패해도 init 자체는 성공으로 남는다.
+   *
+   * 감지 컨텍스트(HOME/PATH)와 vendor 실행은 전부 주입한다. 실제 개발 머신의 MCP 설정을
+   * 건드리는 순간 이 테스트는 회귀 감시가 아니라 사고가 된다.
+   */
+  describe('--mcp opt-in', () => {
+    type McpCapableResult = {
+      success: true;
+      mcp?: {
+        scope: string;
+        summary: { applied: number; skipped: number; failed: number };
+        clients: { clientId: string; outcome: string; detail: string; manualSnippet?: string }[];
+      };
+    };
+
+    function createClientFixture(executables: string[]): {
+      homeDir: string;
+      binDir: string;
+      dependencies: Record<string, unknown>;
+      calls: { executable: string; args: string[] }[];
+    } {
+      const homeDir = createTempProject();
+      const binDir = createTempProject();
+      for (const executable of executables) {
+        writeFileSync(join(binDir, executable), '#!/bin/sh\n', { mode: 0o755 });
+      }
+      const calls: { executable: string; args: string[] }[] = [];
+      return {
+        homeDir,
+        binDir,
+        calls,
+        dependencies: {
+          context: { homeDir, env: { PATH: binDir } },
+          credentials: { projectId: 'project-1', teamId: 'team-1', apiUrl: API_URL },
+          vendorRunner: (executable: string, args: string[]) => {
+            calls.push({ executable, args });
+            return executable.endsWith('claude')
+              ? { status: 9, stdout: '', stderr: 'claude blew up' }
+              : { status: 0, stdout: 'added', stderr: '' };
+          },
+        },
+      };
+    }
+
+    test('writes no client configuration and points at the command when the flag is absent', async () => {
+      const { axios, executeInitCommand } = await loadInitModules();
+      const cwd = createConfiguredProject();
+      const fixture = createClientFixture(['cursor-agent']);
+      mockConventionEndpoints(axios);
+
+      const result = (await executeInitCommand({ cwd, mcpDependencies: fixture.dependencies })) as McpCapableResult;
+
+      expect(result.mcp).toBeUndefined();
+      expect(fixture.calls).toHaveLength(0);
+      expect(existsSync(join(cwd, '.cursor', 'mcp.json'))).toBe(false);
+      expect(existsSync(join(cwd, '.mcp.json'))).toBe(false);
+      expect(existsSync(join(fixture.homeDir, '.cursor'))).toBe(false);
+    });
+
+    test('registers the detected clients at project scope through the shared batch path', async () => {
+      const { axios, executeInitCommand } = await loadInitModules();
+      const cwd = createConfiguredProject();
+      const fixture = createClientFixture(['cursor-agent']);
+      mockConventionEndpoints(axios);
+
+      const result = (await executeInitCommand({
+        cwd,
+        mcp: true,
+        mcpDependencies: fixture.dependencies,
+      })) as McpCapableResult;
+
+      expect(result.success).toBe(true);
+      expect(result.mcp?.scope).toBe('project');
+      expect(result.mcp?.summary.applied).toBe(1);
+      expect(result.mcp?.clients.find((client) => client.clientId === 'cursor-cli')?.outcome).toBe('INSTALLED');
+      // 프로젝트 스코프는 저장소 안에만 쓴다. 머신 전역 설정은 init이 고를 수 없다.
+      expect(existsSync(join(cwd, '.cursor', 'mcp.json'))).toBe(true);
+      expect(existsSync(join(fixture.homeDir, '.cursor'))).toBe(false);
+    });
+
+    test('keeps init successful when one client registration fails', async () => {
+      const { axios, executeInitCommand } = await loadInitModules();
+      const cwd = createConfiguredProject();
+      const fixture = createClientFixture(['cursor-agent', 'claude']);
+      mockConventionEndpoints(axios);
+
+      const result = (await executeInitCommand({
+        cwd,
+        mcp: true,
+        mcpDependencies: fixture.dependencies,
+      })) as McpCapableResult;
+
+      expect(result.success).toBe(true);
+      expect(result.mcp?.summary.failed).toBe(1);
+      const failed = result.mcp?.clients.find((client) => client.clientId === 'claude-code');
+      expect(failed?.outcome).toBe('FAILED');
+      expect(failed?.detail).toContain('exited with code 9');
+      // 실패한 클라이언트 뒤에 있는 클라이언트도 계속 등록된다.
+      expect(result.mcp?.clients.find((client) => client.clientId === 'cursor-cli')?.outcome).toBe('INSTALLED');
+    });
+  });
 });
 
 describe('init unified setup failure paths', () => {

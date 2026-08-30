@@ -11,7 +11,7 @@ import {
 } from './shared.js';
 
 /**
- * 액션 인벤토리: 액션: start. 실사용 옵션: authMode, agentFiles, agentFilesExample, installWorktreeHook, deviceAuth, setDefault. 별칭/도움말 불일치: 없음.
+ * 액션 인벤토리: 액션: start. 실사용 옵션: authMode, agentFiles, agentFilesExample, installWorktreeHook, mcp, deviceAuth, setDefault. 별칭/도움말 불일치: 없음.
  */
 export function registerInitCommand(program: Command): void {
   program
@@ -47,6 +47,13 @@ export function registerInitCommand(program: Command): void {
       "Install the managed git post-checkout hook even if this repository has no linked worktrees yet. By default the hook is installed only when linked worktrees exist; 'agentteams doctor' can install it later.",
       false,
     )
+    // Opt-in only, and project scope only. A plain `agentteams init` must not edit an
+    // AI client's configuration; without this flag the run just prints the command.
+    .option(
+      '--mcp',
+      'Register AgentTeams with the MCP clients detected in this folder (project scope). Without this flag no client configuration is written.',
+      false,
+    )
     // Explicit opt-in only. There is deliberately no `--no-device-auth`: the default
     // already is the browser callback, so the way to turn this off is not to pass it.
     .option('--device-auth', DEVICE_AUTH_OPTION_DESCRIPTION, false)
@@ -64,6 +71,7 @@ export function registerInitCommand(program: Command): void {
           installWorktreeHook: options.installWorktreeHook === true,
           deviceAuth: options.deviceAuth === true,
           setDefault: options.setDefault === true,
+          mcp: options.mcp === true,
         });
         const format = normalizeInteractiveFormat(options.format);
 

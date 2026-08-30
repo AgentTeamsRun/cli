@@ -124,7 +124,7 @@ export const MCP_CLIENTS: McpClientDefinition[] = [
     executables: ['codex'],
     configSignals: (context) => [join(codexHome(context), 'config.toml'), codexHome(context)],
     docsUrl: 'https://developers.openai.com/codex/mcp',
-    verifiedAt: '2026-07-25',
+    verifiedAt: '2026-08-30',
     nativeDiscovery: {
       status: 'unknown',
       verifiedAt: '2026-08-02',
@@ -133,12 +133,23 @@ export const MCP_CLIENTS: McpClientDefinition[] = [
       reason: 'The official Codex MCP feature list does not document host-side progressive tool discovery.',
     },
     scopes: {
+      // Verified 0.151.0: `codex mcp add <name> --env K=V -- <command>` registers a stdio
+      // server non-interactively into `$CODEX_HOME/config.toml`, and a two-run check in an
+      // isolated `CODEX_HOME` produced the same enabled entry twice with exit code 0 — an
+      // upsert, so `rerunBehavior` is `update` and there is no refusal to classify.
+      //
+      // Codex writes that file itself, which is the whole point: this CLI still has no
+      // comment-preserving TOML editor, so the user config is delegated rather than rewritten.
+      // `codex mcp add` has no project-scope option (`--url`/`--env`/OAuth flags only), so the
+      // project scope below stays `configOnly` and prints the snippet instead.
       user: {
         configPath: (context) => join(codexHome(context), 'config.toml'),
         format: 'toml',
-        strategy: 'configOnly',
-        configOnlyReason:
-          'Codex user config is TOML. The CLI prints a complete snippet instead of rewriting that user-owned file and dropping comments or key order.',
+        strategy: 'vendorCommand',
+        vendor: {
+          buildArgs: (spec, name) => ['mcp', 'add', name, ...envFlags(spec, '--env'), '--', spec.command, ...spec.args],
+          rerunBehavior: 'update',
+        },
       },
       project: {
         configPath: (context) => join(context.cwd, '.codex', 'config.toml'),

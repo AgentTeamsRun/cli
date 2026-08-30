@@ -50,6 +50,7 @@ import {
   type AgentEntryPointValue,
 } from '../utils/agentEntryPoints.js';
 import { bootstrapLinkedWorktree, resolveLinkedWorktreeSource, type WorktreeInitResult } from './initWorktree.js';
+import type { InstallOutcome, McpRegistrationDependencies } from '../mcp-registration/index.js';
 import {
   DEFAULT_CONVENTION_REFERENCE,
   upgradeLegacyConventionReference,
@@ -99,6 +100,34 @@ type InitOptions = {
   deviceAuth?: boolean;
   /** Persist the device-code flow as this machine's default in `~/.agentteams/config.json`. */
   setDefault?: boolean;
+  /**
+   * Opt-in: register AgentTeams with the MCP clients detected for this project.
+   * Absent means init writes no client configuration at all.
+   */
+  mcp?: boolean;
+  /** Injection seam so tests drive a temporary HOME/PATH and a fake vendor CLI. */
+  mcpDependencies?: McpRegistrationDependencies;
+};
+
+/** One client's registration outcome, as reported by `agentteams mcp install`. */
+export type InitMcpClientOutcome = {
+  clientId: string;
+  outcome: InstallOutcome;
+  detail: string;
+  configPath: string;
+  manualSnippet?: string;
+};
+
+/**
+ * What `--mcp` did. Present only when the flag was passed, so its absence is the
+ * proof that a plain `agentteams init` touched no client configuration.
+ */
+export type InitMcpResult = {
+  scope: 'project';
+  summary: { applied: number; skipped: number; failed: number };
+  clients: InitMcpClientOutcome[];
+  /** Set when the batch could not run at all. Init itself still succeeds. */
+  error?: string;
 };
 
 export type InitReadinessStatus = 'READY' | 'DEGRADED' | 'SKIPPED';
@@ -167,6 +196,8 @@ type OAuthInitResult = {
   readiness: InitReadinessStep[];
   /** Per-adapter detail behind the `local-adapters` readiness step. Additive. */
   localAdapters: InitAdapterOutcome[];
+  /** Present only when `--mcp` was passed. Additive. */
+  mcp?: InitMcpResult;
 };
 
 export type ConfiguredProjectInitResult = {
@@ -188,6 +219,8 @@ export type ConfiguredProjectInitResult = {
   /** Per-adapter detail behind the `local-adapters` readiness step. Additive. */
   localAdapters: InitAdapterOutcome[];
   postCheckoutHook?: EnsurePostCheckoutHookResult;
+  /** Present only when `--mcp` was passed. Additive. */
+  mcp?: InitMcpResult;
 };
 
 type InitResult = OAuthInitResult | WorktreeInitResult | ConfiguredProjectInitResult;
@@ -964,10 +997,52 @@ async function runLegacyApiKeySetup(context: SetupContext): Promise<SetupOutcome
   }
 }
 
+/**
+ * Register AgentTeams with the MCP clients detected for this project.
+ *
+ * This calls the same batch path `agentteams mcp install` uses, so detection,
+ * per-client strategy, atomic writes and partial-failure isolation have exactly one
+ * implementation. Init only decides *when* it runs and how the result is reported:
+ * a client that fails to register is a degraded detail, never a failed init.
+ *
+ * The module is imported lazily so a run without `--mcp` never loads the client
+ * registry, and the scope is pinned to `project` — init may not choose the
+ * machine-wide scope on the user's behalf.
+ */
+async function runMcpRegistrationStep(cwd: string, dependencies?: McpRegistrationDependencies): Promise<InitMcpResult> {
+  try {
+    const { applyMcpBatchInstall } = await import('../mcp-registration/index.js');
+    const outcome = applyMcpBatchInstall(
+      { scope: 'project' },
+      { ...dependencies, context: { cwd, ...(dependencies?.context ?? {}) } },
+    );
+
+    return {
+      scope: 'project',
+      summary: outcome.summary,
+      clients: outcome.results.map((result) => ({
+        clientId: result.clientId,
+        outcome: result.outcome,
+        detail: result.detail,
+        configPath: result.configPath,
+        ...(result.manualSnippet ? { manualSnippet: result.manualSnippet } : {}),
+      })),
+    };
+  } catch (error) {
+    return {
+      scope: 'project',
+      summary: { applied: 0, skipped: 0, failed: 0 },
+      clients: [],
+      error: toErrorMessage(error),
+    };
+  }
+}
+
 async function runConfiguredProjectInit(
   cwd: string,
   executionContext: InitExecutionContext,
   adapterOptions: LocalAdapterPassOptions,
+  mcpOptions: { requested: boolean; dependencies?: McpRegistrationDependencies },
 ): Promise<ConfiguredProjectInitResult> {
   const configPath = executionContext.configPath;
   const projectConfig = executionContext.config;
@@ -1025,6 +1100,10 @@ async function runConfiguredProjectInit(
   // the user to do — verified the binding and changed nothing else.
   const adapterPass = await runLocalAdapterPass(cwd, adapterOptions);
 
+  // Registration runs after the binding and the credential are verified, because the
+  // entry it writes is only useful once `agentteams mcp` can resolve this project.
+  const mcp = mcpOptions.requested ? await runMcpRegistrationStep(cwd, mcpOptions.dependencies) : undefined;
+
   const doctor = await executeDoctorCommand({ cwd, installWorktreeHook: adapterOptions.installWorktreeHook });
   const configuredAuthMode: AuthMode =
     runtimeConfig.credentialSource === 'personal-token' ? 'personal-token' : 'api-key';
@@ -1047,6 +1126,7 @@ async function runConfiguredProjectInit(
     agentFiles: adapterPass.agentFiles,
     localAdapters: adapterPass.adapters,
     ...(adapterPass.postCheckoutHook ? { postCheckoutHook: adapterPass.postCheckoutHook } : {}),
+    ...(mcp ? { mcp } : {}),
   };
 }
 
@@ -1372,7 +1452,12 @@ async function executeInitCommandWithContext(options?: InitOptions): Promise<Ini
   }
   if (executionContext.kind === 'configured-project') {
     try {
-      return await runConfiguredProjectInit(cwd, executionContext, { ...adapterOptions, allowPrompt: false });
+      return await runConfiguredProjectInit(
+        cwd,
+        executionContext,
+        { ...adapterOptions, allowPrompt: false },
+        { requested: options?.mcp === true, dependencies: options?.mcpDependencies },
+      );
     } catch (error) {
       throw new Error(`Initialization failed: ${toErrorMessage(error)}`);
     }
@@ -1418,6 +1503,8 @@ async function executeInitCommandWithContext(options?: InitOptions): Promise<Ini
   // none of it may fail the init. Each adapter reports itself.
   const { adapters: localAdapters, agentFiles, postCheckoutHook } = await runLocalAdapterPass(cwd, adapterOptions);
 
+  const mcp = options?.mcp === true ? await runMcpRegistrationStep(cwd, options?.mcpDependencies) : undefined;
+
   const seedPlanId = setup.seedPlanId;
   const seedPlanWebUrl = seedPlanId ? `${AUTH_BASE_URL.replace(/\/+$/, '')}/go?type=plan&id=${seedPlanId}` : null;
 
@@ -1437,5 +1524,6 @@ async function executeInitCommandWithContext(options?: InitOptions): Promise<Ini
     readiness: buildNewProjectReadiness(localAdapters),
     localAdapters,
     ...(setup.personalLogin ? { personalLogin: setup.personalLogin } : {}),
+    ...(mcp ? { mcp } : {}),
   };
 }
