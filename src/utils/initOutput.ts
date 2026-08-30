@@ -314,15 +314,43 @@ export function printInitResult(result: unknown, format: InitOutputFormat): void
   // Pointing at "the generated agent files" when the run generated none sent
   // users looking for a CLAUDE.md that was never written. The readiness list
   // above already says why it was skipped; this line offers the way to get one.
-  const writtenAgentFiles = (result.agentFiles ?? []).filter((file) => file.type !== 'skipped');
+  const agentFiles = result.agentFiles ?? [];
+  const writtenAgentFiles = agentFiles.filter((file) => file.type !== 'skipped');
+  const skippedAgentFiles = agentFiles.filter((file) => file.type === 'skipped');
+  const exampleAgentFiles = agentFiles.filter((file) => file.type === 'example');
+  const skippedPaths = skippedAgentFiles.map((file) => file.relativePath).join(', ');
+
   if (writtenAgentFiles.length > 0) {
     console.log(`  1. Check the generated agent files (${writtenAgentFiles.map((f) => f.relativePath).join(', ')})`);
-    console.log('     If a -example file was created, merge it into your existing file.');
+    // Conditional on an -example file actually being on disk. The merge advice
+    // used to print on every run that wrote anything, but without
+    // --agent-files-example no -example file is ever created — so on the default
+    // path it named a file that did not exist.
+    if (exampleAgentFiles.length > 0) {
+      console.log(
+        `     Merge each -example file into the file it sits next to (${exampleAgentFiles
+          .map((f) => f.relativePath)
+          .join(', ')}).`,
+      );
+    }
+  } else if (skippedAgentFiles.length > 0) {
+    console.log(`  1. Every agent entry point already existed and was left untouched (${skippedPaths}).`);
   } else {
     console.log('  1. No agent entry point file was created in this run.');
     console.log(
       "     Create one with 'agentteams init --agent-files CLAUDE.md' so agents load .agentteams/convention.md.",
     );
+  }
+
+  // An existing entry point is never overwritten, so until the user adds the
+  // reference themselves nothing in that file points at the conventions — the
+  // one thing an entry point exists to provide. "Left untouched" is a status;
+  // this is what turns it into an instruction, and it names the files so the
+  // instruction has a target.
+  if (skippedAgentFiles.length > 0) {
+    console.log(`     Nothing in ${skippedPaths} points at the conventions yet.`);
+    console.log('     Add a line telling the agent to read .agentteams/convention.md, or re-run init');
+    console.log(`     with ${chalk.cyan('--agent-files-example')} to get a -example copy of that block to merge.`);
   }
 
   if (result.seedPlanId) {

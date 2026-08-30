@@ -205,6 +205,62 @@ describe('printInitResult', () => {
       expect(output).not.toContain('Check the generated agent files');
     });
 
+    // 기존 파일이 있어 건너뛴 경우, 그 파일에는 컨벤션을 가리키는 줄이 아직 없다.
+    // "left untouched"는 상태일 뿐이고, 사용자가 무엇을 해야 하는지가 남아야 한다.
+    it('건너뛴 진입점이 있으면 파일 경로와 직접 추가 안내를 출력한다', () => {
+      printInitResult(
+        { ...MOCK_INIT_RESULT, agentFiles: [{ relativePath: 'CLAUDE.md', type: 'skipped' as const }] },
+        'human',
+      );
+
+      const output = captureOutput(logSpy);
+      expect(output).toContain('already existed and was left untouched (CLAUDE.md)');
+      expect(output).toContain('Nothing in CLAUDE.md points at the conventions yet.');
+      expect(output).toContain('.agentteams/convention.md');
+      expect(output).toContain('--agent-files-example');
+      // 파일은 이미 있다. 같은 명령을 다시 돌리라는 안내는 같은 skip을 반복시킬 뿐이다.
+      expect(output).not.toContain('No agent entry point file was created in this run.');
+      expect(output).not.toContain('Check the generated agent files');
+    });
+
+    // 만들지도 않은 -example 파일을 병합하라고 하면 사용자는 없는 파일을 찾는다.
+    // `--agent-files-example` 없이는 그 파일이 애초에 생성되지 않는다.
+    it('example 파일이 없으면 병합 안내를 출력하지 않는다', () => {
+      printInitResult(
+        { ...MOCK_INIT_RESULT, agentFiles: [{ relativePath: 'CLAUDE.md', type: 'created' as const }] },
+        'human',
+      );
+
+      const output = captureOutput(logSpy);
+      expect(output).toContain('Check the generated agent files (CLAUDE.md)');
+      expect(output).not.toContain('Merge each -example file');
+    });
+
+    it('example 파일이 실제로 생성되면 병합 안내가 그 파일을 지목한다', () => {
+      printInitResult(MOCK_INIT_RESULT, 'human');
+
+      const output = captureOutput(logSpy);
+      expect(output).toContain('Merge each -example file into the file it sits next to (AGENTS-example.md).');
+    });
+
+    // 쓴 파일과 건너뛴 파일이 함께 나온 실행에서는 둘 다 안내가 남아야 한다.
+    it('일부만 건너뛴 경우 생성 안내와 건너뜀 안내를 함께 출력한다', () => {
+      printInitResult(
+        {
+          ...MOCK_INIT_RESULT,
+          agentFiles: [
+            { relativePath: 'AGENTS.md', type: 'created' as const },
+            { relativePath: 'CLAUDE.md', type: 'skipped' as const },
+          ],
+        },
+        'human',
+      );
+
+      const output = captureOutput(logSpy);
+      expect(output).toContain('Check the generated agent files (AGENTS.md)');
+      expect(output).toContain('Nothing in CLAUDE.md points at the conventions yet.');
+    });
+
     it('post-checkout 훅 필드가 없으면 훅 관련 출력을 하지 않는다', () => {
       printInitResult(MOCK_INIT_RESULT, 'human');
 

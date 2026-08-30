@@ -82,13 +82,20 @@ type InitOptions = {
   /** Personal login is the default; `api-key` is the explicit compatibility path. */
   authMode?: AuthMode;
   /**
-   * Raw `--agent-files` value. Absent means "decide from detection or the
-   * interactive prompt"; `none` means "create nothing" — the two are different
-   * answers, so this stays a string rather than a pre-parsed list.
+   * Raw `--agent-files` value. Absent means "decide from detection, or from the
+   * prompt when `--interactive` asked for it"; `none` means "create nothing" —
+   * the two are different answers, so this stays a string rather than a
+   * pre-parsed list.
    */
   agentFiles?: unknown;
   /** Restore the legacy `<name>-example` write when an entry point already exists. */
   agentFilesExample?: boolean;
+  /**
+   * Opt-in to the entry point multiselect. Absent means init asks nothing and
+   * applies detection — see `resolveAgentFileSelection` for why the prompt is no
+   * longer the default.
+   */
+  interactive?: boolean;
   /** Install the managed post-checkout hook even without a linked worktree. */
   installWorktreeHook?: boolean;
   /**
@@ -450,11 +457,19 @@ async function fetchConventionTemplate(
 /**
  * Which entry point files this run may write.
  *
- * The order is deliberate: an explicit `--agent-files` wins over everything, a
- * TTY still gets the multiselect (now seeded with what was detected instead of
- * everything), and a non-TTY run gets the detection result alone. The old
- * non-TTY branch returned the full catalog, so every automated re-run wrote all
- * four files — and an `-example` sibling for each one that already existed.
+ * The order is deliberate: an explicit `--agent-files` wins over everything, an
+ * explicit `--interactive` on a TTY gets the multiselect, and everything else —
+ * the default run included — takes the detection result alone. The old non-TTY
+ * branch returned the full catalog, so every automated re-run wrote all four
+ * files, and an `-example` sibling for each one that already existed.
+ *
+ * The prompt is opt-in rather than the default because its `initialValues` are
+ * already the detection result: a plain `agentteams init` showed the user a list
+ * with the right answer pre-filled and then required a keystroke to confirm it.
+ * That is a question with no decision in it, standing in the middle of the one
+ * flow a new user has to get through. `--interactive` keeps the choice available
+ * for the case where detection is not what the user wants, without charging
+ * everyone else for it.
  */
 /**
  * `allowPrompt` is false on the configured-project repair pass: that path exists
@@ -462,18 +477,22 @@ async function fetchConventionTemplate(
  * and a fast path that stops to ask a question is no longer a fast path.
  * Detection still runs there, so a missing entry point is created and an
  * existing one is reported as untouched.
+ *
+ * `allowPrompt` and `interactive` are separate gates on purpose: the first is a
+ * property of the code path, the second is a property of the invocation, and
+ * `--interactive` must not re-open the prompt on the fast path.
  */
 async function resolveAgentFileSelection(
   cwd: string,
   explicitFiles: AgentEntryPointValue[] | null,
-  options?: { allowPrompt?: boolean },
+  options?: { allowPrompt?: boolean; interactive?: boolean },
 ): Promise<AgentEntryPointValue[]> {
   if (explicitFiles) {
     return explicitFiles;
   }
 
   const detected = detectAgentEntryPointFiles(cwd);
-  if (options?.allowPrompt === false || !process.stdin.isTTY) {
+  if (options?.allowPrompt === false || options?.interactive !== true || !process.stdin.isTTY) {
     return detected;
   }
 
@@ -1263,6 +1282,8 @@ type LocalAdapterPassOptions = {
   installWorktreeHook: boolean;
   /** Only the new-project path may stop and ask which entry points to write. */
   allowPrompt: boolean;
+  /** And even there, only when the caller asked for the prompt with `--interactive`. */
+  interactive: boolean;
 };
 
 type LocalAdapterPassResult = {
@@ -1302,6 +1323,7 @@ async function runLocalAdapterPass(cwd: string, options: LocalAdapterPassOptions
     await runLocalAdapter('agent-entry-points', 'agentteams init --agent-files <list>', async () => {
       selectedFiles = await resolveAgentFileSelection(cwd, options.explicitAgentFiles, {
         allowPrompt: options.allowPrompt,
+        interactive: options.interactive,
       });
       if (selectedFiles.length === 0) {
         return {
@@ -1444,6 +1466,7 @@ async function executeInitCommandWithContext(options?: InitOptions): Promise<Ini
     installWorktreeHook: options?.installWorktreeHook === true,
     // Overridden per path below: only a first-time setup may prompt.
     allowPrompt: true,
+    interactive: options?.interactive === true,
   };
   const executionContext = detectInitExecutionContext(cwd, options?.authMode);
   if (executionContext.kind === 'linked-worktree') {
