@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from '@jest/globals';
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { detectClients } from '../src/mcp-registration/detect.js';
@@ -197,7 +197,7 @@ describe('mcp client detection', () => {
       const result = run({ scope: 'user' });
 
       expect(result.exitCode).toBe(0);
-      expect(result.text).toContain('dry run (no files were changed)');
+      expect(result.text).toContain('preview (no files were changed)');
       expect(result.text).toContain('claude-code [will apply] executable');
       expect(result.text).toContain('cursor-cli [will apply] executable');
       expect(result.text).toContain('amp [skip] not detected');
@@ -264,30 +264,252 @@ describe('mcp client detection', () => {
 
       expect(result.exitCode).toBe(1);
       expect(result.text).toContain('claude-code [FAILED]');
-      expect(result.text).toContain('codex [SKIPPED_CONFIG_ONLY]');
+      // Both clients listed after the failure are still attempted and still registered.
+      expect(result.text).toContain('codex [INSTALLED]');
       expect(result.text).toContain('cursor-cli [INSTALLED]');
-      expect(result.text).toContain('Summary: 1 registered, 9 skipped, 1 failed.');
+      expect(result.text).toContain('Summary: 2 registered, 8 skipped, 1 failed.');
     });
 
-    it('plans --scope project in batch mode without touching anything and refuses --yes', () => {
-      const before = { ...snapshotTree(home), ...snapshotTree(cwd) };
-
-      expect(() => run({ yes: true, scope: 'project' })).toThrow(/does not support --scope project/);
-      const result = run({ scope: 'project' }) as {
+    /**
+     * The command is named `install`, so the argument-free project-scope run is the
+     * one that registers every detected client. Nothing extra is asked for: project
+     * files are repository state the caller already owns.
+     */
+    it('applies every detected client at project scope with no extra approval', () => {
+      const result = run({}, () => ({ status: 0, stdout: 'added', stderr: '' })) as {
         text: string;
-        json: { scope: string; dryRun: boolean; plan: { entries: { scope: string }[] } };
+        exitCode: number;
+        json: { scope: string; dryRun: boolean; summary: { applied: number } };
       };
 
+      expect(result.exitCode).toBe(0);
+      expect(result.json.scope).toBe('project');
+      expect(result.json.dryRun).toBe(false);
+      expect(result.text).toContain('applied at project scope');
+      // claude-code registers through its own CLI, cursor-cli through a JSON merge —
+      // both detected here, so both must be handled by the single command.
+      expect(result.text).toContain('claude-code [INSTALLED]');
+      expect(result.text).toContain('cursor-cli [INSTALLED]');
+      expect(result.text).toContain('amp [SKIPPED_NOT_DETECTED]');
+      expect(result.json.summary.applied).toBe(2);
+      expect(existsSync(join(cwd, '.cursor', 'mcp.json'))).toBe(true);
+      // Project scope writes into the repository, never into the machine-wide config.
+      expect(existsSync(join(home, '.cursor', 'mcp.json'))).toBe(false);
+    });
+
+    it('previews the same project targets under --dry-run without writing or spawning anything', () => {
+      writeFileSync(join(cwd, 'seed.txt'), 'seed\n');
+      const before = { ...snapshotTree(home), ...snapshotTree(cwd) };
+      const calls: { executable: string; args: string[] }[] = [];
+
+      const result = run({ dryRun: true }, (executable, args) => {
+        calls.push({ executable, args });
+        return { status: 0, stdout: 'added', stderr: '' };
+      }) as {
+        text: string;
+        exitCode: number;
+        json: { scope: string; dryRun: boolean; plan: { entries: { scope: string; targetPath: string }[] } };
+      };
+
+      expect(result.exitCode).toBe(0);
       expect(result.json.scope).toBe('project');
       expect(result.json.dryRun).toBe(true);
+      expect(result.text).toContain('dry run (no files were changed)');
+      expect(result.text).toContain('claude-code [will apply]');
+      expect(result.text).toContain('cursor-cli [will apply]');
+      expect(result.text).toContain(`target: ${join(cwd, '.cursor', 'mcp.json')}`);
       expect(result.json.plan.entries.every((entry) => entry.scope === 'project')).toBe(true);
-      expect(result.text).toContain('project scope');
-      expect(result.text).toContain('no files were changed');
+      expect(calls).toHaveLength(0);
       expect({ ...snapshotTree(home), ...snapshotTree(cwd) }).toEqual(before);
     });
 
+    /**
+     * 데스크탑 앱과의 계약 테스트.
+     *
+     * `desktop/src/main/localAgent/mcpCli.ts`의 `planInstall()`은 이 argv를 그대로
+     * 실행하고 응답의 `dryRun === true`를 요구한다. CLI와 desktop은 따로 배포되므로,
+     * 이 argv가 적용으로 바뀌면 이미 설치된 데스크탑이 동의 없이 파일을 쓴다.
+     * desktop 테스트는 가짜 CLI 스텁만 상대하므로 그 회귀는 이쪽에서만 잡힌다.
+     */
+    it('keeps the desktop planInstall argv a preview: --scope project --json writes nothing', () => {
+      writeFileSync(join(cwd, 'seed.txt'), 'seed\n');
+      const before = { ...snapshotTree(home), ...snapshotTree(cwd) };
+      const calls: { executable: string; args: string[] }[] = [];
+
+      const result = run({ scope: 'project', json: true }, (executable, args) => {
+        calls.push({ executable, args });
+        return { status: 0, stdout: 'added', stderr: '' };
+      }) as {
+        text: string;
+        exitCode: number;
+        json: { scope: string; dryRun: boolean; plan: { entries: { clientId: string }[] } };
+      };
+
+      expect(result.exitCode).toBe(0);
+      expect(result.json.scope).toBe('project');
+      expect(result.json.dryRun).toBe(true);
+      expect(result.json.plan.entries.length).toBeGreaterThan(0);
+      expect(calls).toHaveLength(0);
+      expect({ ...snapshotTree(home), ...snapshotTree(cwd) }).toEqual(before);
+    });
+
+    it('applies the same --json batch once --yes says so explicitly', () => {
+      const result = run({ scope: 'project', json: true, yes: true }, () => ({
+        status: 0,
+        stdout: 'added',
+        stderr: '',
+      })) as { text: string; json: { dryRun: boolean; summary: { applied: number } } };
+
+      expect(result.json.dryRun).toBe(false);
+      expect(result.json.summary.applied).toBeGreaterThan(0);
+      expect(existsSync(join(cwd, '.cursor', 'mcp.json'))).toBe(true);
+    });
+
+    /**
+     * `claude-code`와 `copilot-cli`는 project 스코프에서 같은 `.mcp.json`을 대상으로
+     * 하되 전략이 다르다(vendorCommand / jsonMerge). 한 번의 배치가 같은 파일을 두 번
+     * 쓰면 뒤 전략이 앞 결과를 덮고 백업까지 만들며, 파일 하나가 등록 둘로 집계된다.
+     */
+    it('writes a shared .mcp.json once when two clients target it', () => {
+      mkdirSync(join(home, '.copilot'), { recursive: true });
+      writeFileSync(join(home, '.copilot', 'mcp-config.json'), '{}\n');
+      const calls: { executable: string; args: string[] }[] = [];
+
+      const result = run({ yes: true }, (executable, args) => {
+        calls.push({ executable, args });
+        return { status: 0, stdout: 'added', stderr: '' };
+      }) as {
+        text: string;
+        json: { results: { clientId: string; outcome: string; configPath: string; detail: string }[] };
+      };
+
+      const byClient = Object.fromEntries(result.json.results.map((entry) => [entry.clientId, entry]));
+      expect(byClient['claude-code'].outcome).toBe('INSTALLED');
+      expect(byClient['copilot-cli'].outcome).toBe('ALREADY_REGISTERED');
+      expect(byClient['copilot-cli'].configPath).toBe(join(cwd, '.mcp.json'));
+      expect(byClient['copilot-cli'].detail).toContain('Claude Code');
+      // The vendor CLI is the only writer of that path, so the merge pass left no file.
+      expect(existsSync(join(cwd, '.mcp.json'))).toBe(false);
+      expect(calls.filter((call) => call.executable.endsWith('claude'))).toHaveLength(1);
+    });
+
+    /**
+     * 설정 흔적은 있는데 실행 파일이 없는 클라이언트를 "감지되지 않음"으로 접으면,
+     * 실행 파일을 설치하면 해결된다는 단서가 출력에서 통째로 사라진다.
+     */
+    it('separates a configured client whose CLI is missing from one that is absent', () => {
+      writeFileSync(join(home, '.claude.json'), '{}\n');
+      rmSync(join(binDir, 'claude'));
+
+      const result = run({ yes: true }, () => ({ status: 0, stdout: 'added', stderr: '' })) as {
+        text: string;
+        json: { results: { clientId: string; outcome: string }[] };
+      };
+
+      const byClient = Object.fromEntries(result.json.results.map((entry) => [entry.clientId, entry]));
+      expect(byClient['claude-code'].outcome).toBe('SKIPPED_NO_EXECUTABLE');
+      expect(byClient['amp'].outcome).toBe('SKIPPED_NOT_DETECTED');
+      expect(result.text).toContain('claude-code [SKIPPED_NO_EXECUTABLE]');
+    });
+
+    /**
+     * project 스코프 파일은 커밋돼 남의 머신에서 읽힌다. 등록한 머신에 전역
+     * `agentteams`가 있었는지가 그 파일에 들어가면 안 된다.
+     */
+    it('records a machine-independent runtime for project scope and the fast one for user scope', () => {
+      fakeExecutable('agentteams');
+
+      const project = run({ yes: true }, () => ({ status: 0, stdout: 'added', stderr: '' })) as {
+        text: string;
+        json: { server: { command: string; args: string[] } };
+      };
+      expect(project.json.server.command).toBe('npx');
+      expect(project.json.server.args).toEqual(['-y', '@agentteams/cli', 'mcp']);
+      expect(JSON.parse(readFileSync(join(cwd, '.cursor', 'mcp.json'), 'utf-8')).mcpServers.agentteams.command).toBe(
+        'npx',
+      );
+
+      const user = run({ scope: 'user', yes: true }, () => ({ status: 0, stdout: 'added', stderr: '' })) as {
+        json: { server: { command: string } };
+      };
+      expect(user.json.server.command).toBe('agentteams');
+    });
+
+    // --dry-run이 단일 클라이언트 경로로 새면 미리보기가 파일을 쓴다. 그 방향을 막는다.
+    it('previews a single client with --dry-run instead of installing it', () => {
+      const before = { ...snapshotTree(home), ...snapshotTree(cwd) };
+      const calls: { executable: string; args: string[] }[] = [];
+
+      const result = run({ client: 'cursor-cli', dryRun: true }, (executable, args) => {
+        calls.push({ executable, args });
+        return { status: 0, stdout: 'added', stderr: '' };
+      }) as { text: string; json: { dryRun: boolean; plan: { entries: { clientId: string }[] } } };
+
+      expect(result.json.dryRun).toBe(true);
+      expect(result.json.plan.entries.map((entry) => entry.clientId)).toEqual(['cursor-cli']);
+      expect(result.text).toContain('cursor-cli [will apply]');
+      expect(calls).toHaveLength(0);
+      expect(existsSync(join(cwd, '.cursor', 'mcp.json'))).toBe(false);
+      expect({ ...snapshotTree(home), ...snapshotTree(cwd) }).toEqual(before);
+    });
+
+    it('still rejects an unknown --client under --dry-run', () => {
+      expect(() => run({ client: 'orca', dryRun: true })).toThrow(/Unknown client: orca/);
+    });
+
+    it('refuses --dry-run together with --yes and leaves the tree untouched', () => {
+      const before = { ...snapshotTree(home), ...snapshotTree(cwd) };
+
+      expect(() => run({ dryRun: true, yes: true })).toThrow(/--dry-run cannot be combined with --yes/);
+      expect(() => run({ dryRun: true, yes: true, scope: 'user' })).toThrow(/--dry-run cannot be combined with --yes/);
+
+      expect({ ...snapshotTree(home), ...snapshotTree(cwd) }).toEqual(before);
+    });
+
+    it('keeps the user scope behind --yes and applies it only when approved', () => {
+      const before = { ...snapshotTree(home), ...snapshotTree(cwd) };
+
+      const preview = run({ scope: 'user' });
+      expect(preview.text).toContain('preview (no files were changed)');
+      expect({ ...snapshotTree(home), ...snapshotTree(cwd) }).toEqual(before);
+
+      const applied = run({ scope: 'user', yes: true }, () => ({ status: 0, stdout: 'added', stderr: '' }));
+      expect(applied.text).toContain('applied at user scope');
+      expect(existsSync(join(home, '.cursor', 'mcp.json'))).toBe(true);
+    });
+
+    it('registers Codex through its own CLI at user scope and prints the manual TOML for the project scope', () => {
+      const codexPath = join(binDir, 'codex');
+      fakeExecutable('codex');
+      const calls: { executable: string; args: string[] }[] = [];
+      const runner: VendorRunner = (executable, args) => {
+        calls.push({ executable, args });
+        return { status: 0, stdout: "Added global MCP server 'agentteams'.", stderr: '' };
+      };
+
+      const user = run({ scope: 'user', yes: true }, runner);
+      expect(user.text).toContain('codex [INSTALLED]');
+      const codexCall = calls.find((call) => call.executable === codexPath);
+      expect(codexCall?.args).toEqual(['mcp', 'add', 'agentteams', '--', 'npx', '-y', '@agentteams/cli', 'mcp']);
+      // Codex CLI owns that file; we never rewrite the user TOML ourselves.
+      expect(existsSync(join(home, '.codex', 'config.toml'))).toBe(false);
+
+      const project = run({}, runner) as {
+        exitCode: number;
+        text: string;
+        json: { results: { clientId: string; manualSnippet?: string }[] };
+      };
+      expect(project.exitCode).toBe(0);
+      expect(project.text).toContain('codex [SKIPPED_CONFIG_ONLY]');
+      expect(project.text).toContain('Manual configuration is still needed for:');
+      expect(project.text).toContain('[mcp_servers.agentteams]');
+      const codexResult = project.json.results.find((result) => result.clientId === 'codex');
+      expect(codexResult?.manualSnippet).toContain('[mcp_servers.agentteams]');
+      expect(existsSync(join(cwd, '.codex', 'config.toml'))).toBe(false);
+    });
+
     it('never prints key material in a plan or an applied summary', () => {
-      const plan = run({});
+      const plan = run({ dryRun: true });
       // Even if a vendor CLI echoes a key from the user's own environment, it must not
       // survive into the summary — registration itself passes no credential at all.
       const applied = run({ yes: true, scope: 'user' }, () => ({

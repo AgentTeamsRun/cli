@@ -133,4 +133,20 @@ describe('agentteams init CLI wiring', () => {
     expect(options.agentFilesExample).toBe(true);
     expect(options.installWorktreeHook).toBe(true);
   });
+
+  // 배선이 끊기면 --mcp를 쳐도 아무 일이 없다.
+  test('--mcp가 init 페이로드로 전달된다', async () => {
+    await runCli(['init', '--mcp']);
+
+    const [, , options] = executeCommand.mock.calls[0] as [string, string, Record<string, unknown>];
+    expect(options.mcp).toBe(true);
+  });
+
+  // 반대 방향이 더 위험하다: 기본 실행이 클라이언트 설정을 쓰면 옵트인이 아니게 된다.
+  test('--mcp가 없으면 false로 전달된다', async () => {
+    await runCli(['init']);
+
+    const [, , options] = executeCommand.mock.calls[0] as [string, string, Record<string, unknown>];
+    expect(options.mcp).toBe(false);
+  });
 });

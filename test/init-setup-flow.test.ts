@@ -117,6 +117,52 @@ jest.unstable_mockModule('../src/utils/updateCheck.js', () => ({
   writeCache: () => {},
 }));
 
+type MultiselectOptions = { message: string; initialValues?: unknown; options?: unknown; required?: boolean };
+
+/**
+ * "질문을 하는가"는 코드를 읽어서는 고정되지 않는 성질이라, 프롬프트 자체를 관찰한다.
+ *
+ * `@clack/prompts`를 쓰는 곳은 `commands/init.ts`의 엔트리포인트 선택 하나뿐이므로,
+ * 모듈 전체를 모킹해도 다른 경로의 동작을 바꾸지 않는다. 호출 횟수가 곧 "사용자가
+ * 마주하는 질문 수"다.
+ */
+const multiselect = jest.fn<(options: MultiselectOptions) => Promise<unknown>>(async () => []);
+
+jest.unstable_mockModule('@clack/prompts', () => ({
+  __esModule: true,
+  multiselect,
+  isCancel: (value: unknown) => typeof value === 'symbol',
+  cancel: () => {},
+}));
+
+/**
+ * 프롬프트 분기는 `process.stdin.isTTY`를 본다. Jest 러너의 stdin은 TTY가 아니라,
+ * TTY 조건을 테스트에서 직접 세워 줘야 프롬프트 경로에 들어간다.
+ *
+ * `setRawMode`까지 함께 세우는 이유: init은 콜백 대기 중 Ctrl-C를 잡으려고 TTY일 때만
+ * raw mode를 켠다(`commands/init.ts`). isTTY만 true로 바꾸면 stdin에 없는 메서드를
+ * 호출해 인증 단계에서 먼저 죽고, 정작 관찰하려는 프롬프트 분기까지 도달하지 못한다.
+ */
+function withTty(): () => void {
+  const stdin = process.stdin;
+  const originalIsTTY = Object.getOwnPropertyDescriptor(stdin, 'isTTY');
+  const originalSetRawMode = Object.getOwnPropertyDescriptor(stdin, 'setRawMode');
+
+  Object.defineProperty(stdin, 'isTTY', { value: true, configurable: true });
+  Object.defineProperty(stdin, 'setRawMode', {
+    value: () => stdin,
+    configurable: true,
+    writable: true,
+  });
+
+  return () => {
+    if (originalIsTTY) Object.defineProperty(stdin, 'isTTY', originalIsTTY);
+    else delete (stdin as unknown as { isTTY?: boolean }).isTTY;
+    if (originalSetRawMode) Object.defineProperty(stdin, 'setRawMode', originalSetRawMode);
+    else delete (stdin as unknown as { setRawMode?: unknown }).setRawMode;
+  };
+}
+
 function createTempProject(): string {
   const dir = mkdtempSync(join(tmpdir(), 'agentteams-init-setup-'));
   tempDirs.push(dir);
@@ -196,6 +242,7 @@ beforeEach(() => {
   // 테스트 러너에서 실제 브라우저가 열리지 않도록, init이 이미 아는 headless 경로를 탄다.
   process.env.SSH_CONNECTION = '127.0.0.1 0 127.0.0.1 0';
   exchangeAuthorizationCode.mockClear();
+  multiselect.mockClear();
   fakePersonalTokenClient.hasCredential.mockReturnValue(true);
   fakeClientState.connected = true;
   fakeClientState.reconnectRequired = false;
@@ -349,6 +396,93 @@ describe('init local adapters (new project path)', () => {
     expect(adapterOf(result, 'agent-entry-points')).toMatchObject({ status: 'READY' });
     // 연결 자체는 여전히 성공이다.
     expect(existsSync(join(cwd, '.agentteams', 'config.json'))).toBe(true);
+  }, 20000);
+
+  // 프롬프트의 initialValues는 언제나 감지 결과였다. 즉 기본 실행에서의 질문은
+  // "정답이 채워진 목록에 확인만 눌러 달라"는 요구였고, 결정이 없는 질문 하나가 신규
+  // 사용자가 반드시 통과하는 흐름 한가운데에 서 있었다. 그래서 기본값은 무질문이다.
+  test('asks nothing on a TTY and applies detection when --interactive is absent', async () => {
+    const cwd = createTempProject();
+    mkdirSync(join(cwd, '.claude'), { recursive: true });
+    const restoreTty = withTty();
+
+    try {
+      const result = await runNewProjectInit(cwd);
+
+      expect(multiselect).not.toHaveBeenCalled();
+      expect(result.agentFiles).toEqual([{ relativePath: 'CLAUDE.md', type: 'created' }]);
+    } finally {
+      restoreTty();
+    }
+  }, 20000);
+
+  // 신호가 하나도 없는 폴더에서도 무질문 경로가 0개로 끝나지 않는다는 것까지가
+  // 프롬프트 제거의 전제다. 폴백이 사라지면 기본 실행이 조용히 아무것도 만들지 않는다.
+  test('the silent default still falls back to CLAUDE.md in a folder with no signal', async () => {
+    const cwd = createTempProject();
+    const restoreTty = withTty();
+
+    try {
+      const result = await runNewProjectInit(cwd);
+
+      expect(multiselect).not.toHaveBeenCalled();
+      expect(result.agentFiles).toEqual([{ relativePath: 'CLAUDE.md', type: 'created' }]);
+      expect(existsSync(join(cwd, 'CLAUDE.md'))).toBe(true);
+    } finally {
+      restoreTty();
+    }
+  }, 20000);
+
+  // 옵트인 경로: 프롬프트는 사라진 게 아니라 요청해야 뜨는 것이 됐고, 감지 결과를
+  // 사용자가 손으로 뒤집을 수 있다는 것이 이 플래그의 존재 이유다.
+  test('--interactive brings the multiselect back, seeded with the detection result', async () => {
+    const cwd = createTempProject();
+    mkdirSync(join(cwd, '.claude'), { recursive: true });
+    multiselect.mockResolvedValueOnce(['AGENTS.md']);
+    const restoreTty = withTty();
+
+    try {
+      const result = await runNewProjectInit(cwd, { interactive: true });
+
+      expect(multiselect).toHaveBeenCalledTimes(1);
+      expect(multiselect.mock.calls[0]?.[0].initialValues).toEqual(['CLAUDE.md']);
+      // 선택 결과가 감지 결과를 이긴다.
+      expect(result.agentFiles).toEqual([{ relativePath: 'AGENTS.md', type: 'created' }]);
+      expect(existsSync(join(cwd, 'CLAUDE.md'))).toBe(false);
+    } finally {
+      restoreTty();
+    }
+  }, 20000);
+
+  // 명시 목록은 여전히 모든 것을 이긴다 — `--interactive`를 함께 줘도 질문하지 않는다.
+  test('--agent-files still wins over --interactive', async () => {
+    const cwd = createTempProject();
+    const restoreTty = withTty();
+
+    try {
+      const result = await runNewProjectInit(cwd, { interactive: true, agentFiles: 'AGENTS.md' });
+
+      expect(multiselect).not.toHaveBeenCalled();
+      expect(result.agentFiles).toEqual([{ relativePath: 'AGENTS.md', type: 'created' }]);
+    } finally {
+      restoreTty();
+    }
+  }, 20000);
+
+  test('--agent-files none still creates nothing, even on a TTY', async () => {
+    const cwd = createTempProject();
+    mkdirSync(join(cwd, '.claude'), { recursive: true });
+    const restoreTty = withTty();
+
+    try {
+      const result = await runNewProjectInit(cwd, { agentFiles: 'none' });
+
+      expect(multiselect).not.toHaveBeenCalled();
+      expect(result.agentFiles).toEqual([]);
+      expect(existsSync(join(cwd, 'CLAUDE.md'))).toBe(false);
+    } finally {
+      restoreTty();
+    }
   }, 20000);
 
   test('creates only the entry points of the detected clients', async () => {
@@ -805,8 +939,7 @@ describe('init configured-project fast path', () => {
     const { axios, executeInitCommand } = await loadInitModules();
     const cwd = createConfiguredProject();
     mockConventionEndpoints(axios);
-    const originalIsTTY = process.stdin.isTTY;
-    Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true });
+    const restoreTty = withTty();
 
     try {
       const result = await executeInitCommand({ cwd });
@@ -814,8 +947,11 @@ describe('init configured-project fast path', () => {
         throw new Error('Expected the configured-project fast path.');
       }
       expect(result.agentFiles).toEqual([{ relativePath: 'CLAUDE.md', type: 'skipped' }]);
+      // 결과만이 아니라 프롬프트 자체를 단언한다. `allowPrompt: false`가 풀리면
+      // 결과는 그대로여도 fast path가 질문을 시작한다.
+      expect(multiselect).not.toHaveBeenCalled();
     } finally {
-      Object.defineProperty(process.stdin, 'isTTY', { value: originalIsTTY, configurable: true });
+      restoreTty();
     }
   });
 
@@ -850,6 +986,111 @@ describe('init configured-project fast path', () => {
 
     expect(existsSync(join(cwd, '.git', 'hooks', 'post-checkout'))).toBe(true);
     expect(result.localAdapters.find((adapter) => adapter.adapter === 'post-checkout-hook')?.status).toBe('READY');
+  });
+
+  /**
+   * `--mcp`는 init이 클라이언트 설정을 건드려도 되는 유일한 통로다. 여기서 고정하는 것은
+   * 세 가지다: 플래그가 없으면 아무 파일도 쓰지 않는다, 있으면 `mcp install`과 같은
+   * 일괄 경로를 쓴다, 그리고 클라이언트 한 곳이 실패해도 init 자체는 성공으로 남는다.
+   *
+   * 감지 컨텍스트(HOME/PATH)와 vendor 실행은 전부 주입한다. 실제 개발 머신의 MCP 설정을
+   * 건드리는 순간 이 테스트는 회귀 감시가 아니라 사고가 된다.
+   */
+  describe('--mcp opt-in', () => {
+    type McpCapableResult = {
+      success: true;
+      mcp?: {
+        scope: string;
+        summary: { applied: number; skipped: number; failed: number };
+        clients: { clientId: string; outcome: string; detail: string; manualSnippet?: string }[];
+      };
+    };
+
+    function createClientFixture(executables: string[]): {
+      homeDir: string;
+      binDir: string;
+      dependencies: Record<string, unknown>;
+      calls: { executable: string; args: string[] }[];
+    } {
+      const homeDir = createTempProject();
+      const binDir = createTempProject();
+      for (const executable of executables) {
+        writeFileSync(join(binDir, executable), '#!/bin/sh\n', { mode: 0o755 });
+      }
+      const calls: { executable: string; args: string[] }[] = [];
+      return {
+        homeDir,
+        binDir,
+        calls,
+        dependencies: {
+          context: { homeDir, env: { PATH: binDir } },
+          credentials: { projectId: 'project-1', teamId: 'team-1', apiUrl: API_URL },
+          vendorRunner: (executable: string, args: string[]) => {
+            calls.push({ executable, args });
+            return executable.endsWith('claude')
+              ? { status: 9, stdout: '', stderr: 'claude blew up' }
+              : { status: 0, stdout: 'added', stderr: '' };
+          },
+        },
+      };
+    }
+
+    test('writes no client configuration and points at the command when the flag is absent', async () => {
+      const { axios, executeInitCommand } = await loadInitModules();
+      const cwd = createConfiguredProject();
+      const fixture = createClientFixture(['cursor-agent']);
+      mockConventionEndpoints(axios);
+
+      const result = (await executeInitCommand({ cwd, mcpDependencies: fixture.dependencies })) as McpCapableResult;
+
+      expect(result.mcp).toBeUndefined();
+      expect(fixture.calls).toHaveLength(0);
+      expect(existsSync(join(cwd, '.cursor', 'mcp.json'))).toBe(false);
+      expect(existsSync(join(cwd, '.mcp.json'))).toBe(false);
+      expect(existsSync(join(fixture.homeDir, '.cursor'))).toBe(false);
+    });
+
+    test('registers the detected clients at project scope through the shared batch path', async () => {
+      const { axios, executeInitCommand } = await loadInitModules();
+      const cwd = createConfiguredProject();
+      const fixture = createClientFixture(['cursor-agent']);
+      mockConventionEndpoints(axios);
+
+      const result = (await executeInitCommand({
+        cwd,
+        mcp: true,
+        mcpDependencies: fixture.dependencies,
+      })) as McpCapableResult;
+
+      expect(result.success).toBe(true);
+      expect(result.mcp?.scope).toBe('project');
+      expect(result.mcp?.summary.applied).toBe(1);
+      expect(result.mcp?.clients.find((client) => client.clientId === 'cursor-cli')?.outcome).toBe('INSTALLED');
+      // 프로젝트 스코프는 저장소 안에만 쓴다. 머신 전역 설정은 init이 고를 수 없다.
+      expect(existsSync(join(cwd, '.cursor', 'mcp.json'))).toBe(true);
+      expect(existsSync(join(fixture.homeDir, '.cursor'))).toBe(false);
+    });
+
+    test('keeps init successful when one client registration fails', async () => {
+      const { axios, executeInitCommand } = await loadInitModules();
+      const cwd = createConfiguredProject();
+      const fixture = createClientFixture(['cursor-agent', 'claude']);
+      mockConventionEndpoints(axios);
+
+      const result = (await executeInitCommand({
+        cwd,
+        mcp: true,
+        mcpDependencies: fixture.dependencies,
+      })) as McpCapableResult;
+
+      expect(result.success).toBe(true);
+      expect(result.mcp?.summary.failed).toBe(1);
+      const failed = result.mcp?.clients.find((client) => client.clientId === 'claude-code');
+      expect(failed?.outcome).toBe('FAILED');
+      expect(failed?.detail).toContain('exited with code 9');
+      // 실패한 클라이언트 뒤에 있는 클라이언트도 계속 등록된다.
+      expect(result.mcp?.clients.find((client) => client.clientId === 'cursor-cli')?.outcome).toBe('INSTALLED');
+    });
   });
 });
 

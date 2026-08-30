@@ -50,6 +50,7 @@ import {
   type AgentEntryPointValue,
 } from '../utils/agentEntryPoints.js';
 import { bootstrapLinkedWorktree, resolveLinkedWorktreeSource, type WorktreeInitResult } from './initWorktree.js';
+import type { InstallOutcome, McpRegistrationDependencies } from '../mcp-registration/index.js';
 import {
   DEFAULT_CONVENTION_REFERENCE,
   upgradeLegacyConventionReference,
@@ -81,13 +82,20 @@ type InitOptions = {
   /** Personal login is the default; `api-key` is the explicit compatibility path. */
   authMode?: AuthMode;
   /**
-   * Raw `--agent-files` value. Absent means "decide from detection or the
-   * interactive prompt"; `none` means "create nothing" — the two are different
-   * answers, so this stays a string rather than a pre-parsed list.
+   * Raw `--agent-files` value. Absent means "decide from detection, or from the
+   * prompt when `--interactive` asked for it"; `none` means "create nothing" —
+   * the two are different answers, so this stays a string rather than a
+   * pre-parsed list.
    */
   agentFiles?: unknown;
   /** Restore the legacy `<name>-example` write when an entry point already exists. */
   agentFilesExample?: boolean;
+  /**
+   * Opt-in to the entry point multiselect. Absent means init asks nothing and
+   * applies detection — see `resolveAgentFileSelection` for why the prompt is no
+   * longer the default.
+   */
+  interactive?: boolean;
   /** Install the managed post-checkout hook even without a linked worktree. */
   installWorktreeHook?: boolean;
   /**
@@ -99,6 +107,34 @@ type InitOptions = {
   deviceAuth?: boolean;
   /** Persist the device-code flow as this machine's default in `~/.agentteams/config.json`. */
   setDefault?: boolean;
+  /**
+   * Opt-in: register AgentTeams with the MCP clients detected for this project.
+   * Absent means init writes no client configuration at all.
+   */
+  mcp?: boolean;
+  /** Injection seam so tests drive a temporary HOME/PATH and a fake vendor CLI. */
+  mcpDependencies?: McpRegistrationDependencies;
+};
+
+/** One client's registration outcome, as reported by `agentteams mcp install`. */
+export type InitMcpClientOutcome = {
+  clientId: string;
+  outcome: InstallOutcome;
+  detail: string;
+  configPath: string;
+  manualSnippet?: string;
+};
+
+/**
+ * What `--mcp` did. Present only when the flag was passed, so its absence is the
+ * proof that a plain `agentteams init` touched no client configuration.
+ */
+export type InitMcpResult = {
+  scope: 'project';
+  summary: { applied: number; skipped: number; failed: number };
+  clients: InitMcpClientOutcome[];
+  /** Set when the batch could not run at all. Init itself still succeeds. */
+  error?: string;
 };
 
 export type InitReadinessStatus = 'READY' | 'DEGRADED' | 'SKIPPED';
@@ -167,6 +203,8 @@ type OAuthInitResult = {
   readiness: InitReadinessStep[];
   /** Per-adapter detail behind the `local-adapters` readiness step. Additive. */
   localAdapters: InitAdapterOutcome[];
+  /** Present only when `--mcp` was passed. Additive. */
+  mcp?: InitMcpResult;
 };
 
 export type ConfiguredProjectInitResult = {
@@ -188,6 +226,8 @@ export type ConfiguredProjectInitResult = {
   /** Per-adapter detail behind the `local-adapters` readiness step. Additive. */
   localAdapters: InitAdapterOutcome[];
   postCheckoutHook?: EnsurePostCheckoutHookResult;
+  /** Present only when `--mcp` was passed. Additive. */
+  mcp?: InitMcpResult;
 };
 
 type InitResult = OAuthInitResult | WorktreeInitResult | ConfiguredProjectInitResult;
@@ -417,11 +457,19 @@ async function fetchConventionTemplate(
 /**
  * Which entry point files this run may write.
  *
- * The order is deliberate: an explicit `--agent-files` wins over everything, a
- * TTY still gets the multiselect (now seeded with what was detected instead of
- * everything), and a non-TTY run gets the detection result alone. The old
- * non-TTY branch returned the full catalog, so every automated re-run wrote all
- * four files — and an `-example` sibling for each one that already existed.
+ * The order is deliberate: an explicit `--agent-files` wins over everything, an
+ * explicit `--interactive` on a TTY gets the multiselect, and everything else —
+ * the default run included — takes the detection result alone. The old non-TTY
+ * branch returned the full catalog, so every automated re-run wrote all four
+ * files, and an `-example` sibling for each one that already existed.
+ *
+ * The prompt is opt-in rather than the default because its `initialValues` are
+ * already the detection result: a plain `agentteams init` showed the user a list
+ * with the right answer pre-filled and then required a keystroke to confirm it.
+ * That is a question with no decision in it, standing in the middle of the one
+ * flow a new user has to get through. `--interactive` keeps the choice available
+ * for the case where detection is not what the user wants, without charging
+ * everyone else for it.
  */
 /**
  * `allowPrompt` is false on the configured-project repair pass: that path exists
@@ -429,18 +477,22 @@ async function fetchConventionTemplate(
  * and a fast path that stops to ask a question is no longer a fast path.
  * Detection still runs there, so a missing entry point is created and an
  * existing one is reported as untouched.
+ *
+ * `allowPrompt` and `interactive` are separate gates on purpose: the first is a
+ * property of the code path, the second is a property of the invocation, and
+ * `--interactive` must not re-open the prompt on the fast path.
  */
 async function resolveAgentFileSelection(
   cwd: string,
   explicitFiles: AgentEntryPointValue[] | null,
-  options?: { allowPrompt?: boolean },
+  options?: { allowPrompt?: boolean; interactive?: boolean },
 ): Promise<AgentEntryPointValue[]> {
   if (explicitFiles) {
     return explicitFiles;
   }
 
   const detected = detectAgentEntryPointFiles(cwd);
-  if (options?.allowPrompt === false || !process.stdin.isTTY) {
+  if (options?.allowPrompt === false || options?.interactive !== true || !process.stdin.isTTY) {
     return detected;
   }
 
@@ -964,10 +1016,52 @@ async function runLegacyApiKeySetup(context: SetupContext): Promise<SetupOutcome
   }
 }
 
+/**
+ * Register AgentTeams with the MCP clients detected for this project.
+ *
+ * This calls the same batch path `agentteams mcp install` uses, so detection,
+ * per-client strategy, atomic writes and partial-failure isolation have exactly one
+ * implementation. Init only decides *when* it runs and how the result is reported:
+ * a client that fails to register is a degraded detail, never a failed init.
+ *
+ * The module is imported lazily so a run without `--mcp` never loads the client
+ * registry, and the scope is pinned to `project` — init may not choose the
+ * machine-wide scope on the user's behalf.
+ */
+async function runMcpRegistrationStep(cwd: string, dependencies?: McpRegistrationDependencies): Promise<InitMcpResult> {
+  try {
+    const { applyMcpBatchInstall } = await import('../mcp-registration/index.js');
+    const outcome = applyMcpBatchInstall(
+      { scope: 'project' },
+      { ...dependencies, context: { cwd, ...(dependencies?.context ?? {}) } },
+    );
+
+    return {
+      scope: 'project',
+      summary: outcome.summary,
+      clients: outcome.results.map((result) => ({
+        clientId: result.clientId,
+        outcome: result.outcome,
+        detail: result.detail,
+        configPath: result.configPath,
+        ...(result.manualSnippet ? { manualSnippet: result.manualSnippet } : {}),
+      })),
+    };
+  } catch (error) {
+    return {
+      scope: 'project',
+      summary: { applied: 0, skipped: 0, failed: 0 },
+      clients: [],
+      error: toErrorMessage(error),
+    };
+  }
+}
+
 async function runConfiguredProjectInit(
   cwd: string,
   executionContext: InitExecutionContext,
   adapterOptions: LocalAdapterPassOptions,
+  mcpOptions: { requested: boolean; dependencies?: McpRegistrationDependencies },
 ): Promise<ConfiguredProjectInitResult> {
   const configPath = executionContext.configPath;
   const projectConfig = executionContext.config;
@@ -1025,6 +1119,10 @@ async function runConfiguredProjectInit(
   // the user to do — verified the binding and changed nothing else.
   const adapterPass = await runLocalAdapterPass(cwd, adapterOptions);
 
+  // Registration runs after the binding and the credential are verified, because the
+  // entry it writes is only useful once `agentteams mcp` can resolve this project.
+  const mcp = mcpOptions.requested ? await runMcpRegistrationStep(cwd, mcpOptions.dependencies) : undefined;
+
   const doctor = await executeDoctorCommand({ cwd, installWorktreeHook: adapterOptions.installWorktreeHook });
   const configuredAuthMode: AuthMode =
     runtimeConfig.credentialSource === 'personal-token' ? 'personal-token' : 'api-key';
@@ -1047,6 +1145,7 @@ async function runConfiguredProjectInit(
     agentFiles: adapterPass.agentFiles,
     localAdapters: adapterPass.adapters,
     ...(adapterPass.postCheckoutHook ? { postCheckoutHook: adapterPass.postCheckoutHook } : {}),
+    ...(mcp ? { mcp } : {}),
   };
 }
 
@@ -1183,6 +1282,8 @@ type LocalAdapterPassOptions = {
   installWorktreeHook: boolean;
   /** Only the new-project path may stop and ask which entry points to write. */
   allowPrompt: boolean;
+  /** And even there, only when the caller asked for the prompt with `--interactive`. */
+  interactive: boolean;
 };
 
 type LocalAdapterPassResult = {
@@ -1222,6 +1323,7 @@ async function runLocalAdapterPass(cwd: string, options: LocalAdapterPassOptions
     await runLocalAdapter('agent-entry-points', 'agentteams init --agent-files <list>', async () => {
       selectedFiles = await resolveAgentFileSelection(cwd, options.explicitAgentFiles, {
         allowPrompt: options.allowPrompt,
+        interactive: options.interactive,
       });
       if (selectedFiles.length === 0) {
         return {
@@ -1364,6 +1466,7 @@ async function executeInitCommandWithContext(options?: InitOptions): Promise<Ini
     installWorktreeHook: options?.installWorktreeHook === true,
     // Overridden per path below: only a first-time setup may prompt.
     allowPrompt: true,
+    interactive: options?.interactive === true,
   };
   const executionContext = detectInitExecutionContext(cwd, options?.authMode);
   if (executionContext.kind === 'linked-worktree') {
@@ -1372,7 +1475,12 @@ async function executeInitCommandWithContext(options?: InitOptions): Promise<Ini
   }
   if (executionContext.kind === 'configured-project') {
     try {
-      return await runConfiguredProjectInit(cwd, executionContext, { ...adapterOptions, allowPrompt: false });
+      return await runConfiguredProjectInit(
+        cwd,
+        executionContext,
+        { ...adapterOptions, allowPrompt: false },
+        { requested: options?.mcp === true, dependencies: options?.mcpDependencies },
+      );
     } catch (error) {
       throw new Error(`Initialization failed: ${toErrorMessage(error)}`);
     }
@@ -1418,6 +1526,8 @@ async function executeInitCommandWithContext(options?: InitOptions): Promise<Ini
   // none of it may fail the init. Each adapter reports itself.
   const { adapters: localAdapters, agentFiles, postCheckoutHook } = await runLocalAdapterPass(cwd, adapterOptions);
 
+  const mcp = options?.mcp === true ? await runMcpRegistrationStep(cwd, options?.mcpDependencies) : undefined;
+
   const seedPlanId = setup.seedPlanId;
   const seedPlanWebUrl = seedPlanId ? `${AUTH_BASE_URL.replace(/\/+$/, '')}/go?type=plan&id=${seedPlanId}` : null;
 
@@ -1437,5 +1547,6 @@ async function executeInitCommandWithContext(options?: InitOptions): Promise<Ini
     readiness: buildNewProjectReadiness(localAdapters),
     localAdapters,
     ...(setup.personalLogin ? { personalLogin: setup.personalLogin } : {}),
+    ...(mcp ? { mcp } : {}),
   };
 }

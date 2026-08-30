@@ -49,6 +49,7 @@ function installViaVendorCommand(
     serverEntry: options.serverEntry,
     context: options.context,
     toolProfile: options.toolProfile,
+    scope,
   });
 
   const executable = options.executablePath ?? client.executables[0];
@@ -128,6 +129,7 @@ function installViaJsonMerge(options: InstallClientOptions, configPath: string, 
     serverEntry: options.serverEntry,
     context: options.context,
     toolProfile: options.toolProfile,
+    scope,
   });
 
   let source = '';
@@ -225,6 +227,7 @@ function applyClient(options: InstallClientOptions): InstallResult {
     serverEntry: options.serverEntry,
     context: options.context,
     toolProfile: options.toolProfile,
+    scope,
   });
   const manualSnippet = renderConfigSnippet(client, scope, displaySpec, serverName);
 
@@ -256,6 +259,8 @@ export interface BatchPlanEntry {
   scope: McpScope;
   strategy: McpClientDefinition['scopes'][McpScope]['strategy'];
   targetPath: string;
+  /** The client is present on this machine, whatever the scope can do about it. */
+  detected: boolean;
   applicable: boolean;
   reason?: string;
 }
@@ -289,11 +294,18 @@ export function buildBatchPlan(options: BuildBatchPlanOptions): BatchPlan {
     const definition = client.scopes[scope];
     const detected = signal?.detected ?? false;
     const identityVerified = !client.executableIdentity || signal?.executablePath != null;
-    const applicable = detected && identityVerified && definition.strategy !== 'configOnly';
+    // A vendor-command scope has nothing to write itself: it shells out to the client's
+    // own CLI. Without a located executable the run would spawn a bare name that is not
+    // on this PATH and report FAILED for a client that is merely configured elsewhere —
+    // so it is skipped with a reason instead.
+    const runnableVendorCommand = definition.strategy !== 'vendorCommand' || signal?.executablePath != null;
+    const applicable = detected && identityVerified && runnableVendorCommand && definition.strategy !== 'configOnly';
 
     let reason: string | undefined;
     if (!detected) reason = 'Not detected on this machine.';
     else if (!identityVerified) reason = `No executable verified as ${client.label} was found.`;
+    else if (!runnableVendorCommand)
+      reason = `Detected from configuration only; no \`${client.executables[0]}\` executable was found to run its registration command.`;
     else if (definition.strategy === 'configOnly') reason = definition.configOnlyReason;
 
     return {
@@ -305,6 +317,7 @@ export function buildBatchPlan(options: BuildBatchPlanOptions): BatchPlan {
       scope,
       strategy: definition.strategy,
       targetPath: definition.configPath(options.context),
+      detected,
       applicable,
       reason,
     };
@@ -334,37 +347,75 @@ export function runBatchInstall(options: RunBatchInstallOptions): { plan: BatchP
   const scope = options.scope ?? 'user';
   const plan = buildBatchPlan({ ...options, scope });
   const results: InstallResult[] = [];
+  // Distinct clients can share one config file — `claude-code` and `copilot-cli` both
+  // register into the project's `.mcp.json`, one through `claude mcp add` and one
+  // through a JSON merge. Writing it twice in a single batch makes the second strategy
+  // overwrite (and back up) what the first just wrote, and reports one file as two
+  // registrations. The first writer owns the file; the rest report the entry it left.
+  const writtenPaths = new Map<string, string>();
 
   for (const entry of plan.entries) {
     const client = findClient(entry.clientId);
     if (!client) continue;
 
-    if (!entry.applicable) {
+    // A detected config-only client still goes through `installClient`: it writes
+    // nothing either way, but that path returns the manual snippet the user needs to
+    // finish the registration by hand. Assembling the skip here instead dropped it.
+    const needsManualFallback = entry.detected && entry.strategy === 'configOnly';
+
+    if (!entry.applicable && !needsManualFallback) {
+      // A client that is configured on this machine but whose CLI is missing is not
+      // "not detected": installing that executable is the fix, and reporting both
+      // states with one outcome hides that from every caller — `init --mcp` counts
+      // the client as absent and says nothing at all about it.
+      const missingExecutable = entry.detected && entry.strategy === 'vendorCommand' && !entry.executablePath;
       results.push({
         clientId: entry.clientId,
         scope: entry.scope,
         strategy: entry.strategy,
         configPath: entry.targetPath,
-        outcome: entry.strategy === 'configOnly' ? 'SKIPPED_CONFIG_ONLY' : 'SKIPPED_NOT_DETECTED',
+        outcome: missingExecutable ? 'SKIPPED_NO_EXECUTABLE' : 'SKIPPED_NOT_DETECTED',
         detail: entry.reason ?? 'Skipped.',
       });
       continue;
     }
 
-    results.push(
-      installClient({
-        client,
+    // Checked only for entries that would really be written: a client that is not even
+    // installed must keep reporting why it was skipped, not inherit another client's
+    // registration just because they name the same file.
+    const owner = writtenPaths.get(entry.targetPath);
+    if (owner) {
+      results.push({
+        clientId: entry.clientId,
         scope: entry.scope,
-        credentials: options.credentials,
-        context: options.context,
-        serverEntry: options.serverEntry,
-        serverName: options.serverName,
-        vendorRunner: options.vendorRunner,
-        toolProfile: options.toolProfile,
-        explicitToolProfile: options.explicitToolProfile,
-        executablePath: entry.executablePath,
-      }),
-    );
+        strategy: entry.strategy,
+        configPath: entry.targetPath,
+        outcome: 'ALREADY_REGISTERED',
+        detail: `${entry.targetPath} was already registered in this run by ${owner}; ${client.label} reads the same file.`,
+      });
+      continue;
+    }
+
+    const result = installClient({
+      client,
+      scope: entry.scope,
+      credentials: options.credentials,
+      context: options.context,
+      serverEntry: options.serverEntry,
+      serverName: options.serverName,
+      vendorRunner: options.vendorRunner,
+      toolProfile: options.toolProfile,
+      explicitToolProfile: options.explicitToolProfile,
+      executablePath: entry.executablePath,
+    });
+    results.push(result);
+
+    // Only an outcome that means "this file now holds the entry" claims the path. A
+    // config-only skip wrote nothing, so the next client targeting the same file must
+    // still get its turn.
+    if (result.outcome === 'INSTALLED' || result.outcome === 'ALREADY_REGISTERED') {
+      writtenPaths.set(entry.targetPath, client.label);
+    }
   }
 
   return { plan, results };

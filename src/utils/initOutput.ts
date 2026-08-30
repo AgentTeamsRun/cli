@@ -3,6 +3,7 @@ import { formatOutput } from './formatter.js';
 import type {
   AgentFileEntry,
   ConfiguredProjectInitResult,
+  InitMcpResult,
   InitReadinessStep,
   WorktreeInitResult,
 } from '../commands/init.js';
@@ -23,6 +24,7 @@ interface InitResultShape {
   personalLogin?: { email: string; nickname: string; persisted: boolean; storeBackend?: string };
   warning?: string;
   readiness?: InitReadinessStep[];
+  mcp?: InitMcpResult;
 }
 
 /** Mirrors AGENT_API_KEY_TTL_MS in api/src/services/agentApiKey.ts. */
@@ -112,6 +114,54 @@ function printReadiness(readiness: InitReadinessStep[]): void {
   }
 }
 
+/**
+ * What `--mcp` registered, client by client.
+ *
+ * Clients that are simply not installed are counted, not listed: a wall of eleven
+ * "not detected" lines buries the two entries the user actually cares about. A
+ * failure is a warning with its own retry command — it degrades the MCP step, not
+ * the initialization.
+ */
+function printMcpRegistration(mcp: InitMcpResult | undefined): void {
+  if (!mcp) return;
+
+  console.log('');
+  console.log('MCP registration (project scope):');
+
+  if (mcp.error) {
+    console.warn(`  ⚠ Registration could not run: ${mcp.error}`);
+    console.warn('    Retry: agentteams mcp install');
+    return;
+  }
+
+  const reported = mcp.clients.filter((client) => client.outcome !== 'SKIPPED_NOT_DETECTED');
+  const undetected = mcp.clients.length - reported.length;
+
+  for (const client of reported) {
+    if (client.outcome === 'INSTALLED' || client.outcome === 'ALREADY_REGISTERED') {
+      console.log(`  ✓ ${client.clientId}: ${client.detail}`);
+    } else if (client.outcome === 'FAILED') {
+      console.warn(`  ⚠ ${client.clientId}: ${client.detail}`);
+      console.warn(`    Retry: agentteams mcp install --client ${client.clientId}`);
+    } else if (client.outcome === 'SKIPPED_NO_EXECUTABLE') {
+      // The client is here, its CLI is not. Naming the fix matters: a snippet is the
+      // fallback, but putting the executable on PATH makes the normal path work.
+      console.log(`  - ${client.clientId}: ${client.detail}`);
+      console.log(`    Put its CLI on PATH and re-run: agentteams mcp install --client ${client.clientId}`);
+      console.log(`    Or apply it by hand: agentteams mcp config --client ${client.clientId}`);
+    } else {
+      console.log(`  - ${client.clientId}: ${client.detail}`);
+      console.log(`    Snippet: agentteams mcp config --client ${client.clientId}`);
+    }
+  }
+
+  const { applied, skipped, failed } = mcp.summary;
+  console.log(`  ${applied} registered, ${skipped} skipped, ${failed} failed.`);
+  if (undetected > 0) {
+    console.log(`  ${undetected} supported client(s) were not detected in this environment.`);
+  }
+}
+
 export function printInitResult(result: unknown, format: InitOutputFormat): void {
   if (format === 'json') {
     console.log(formatOutput(result));
@@ -184,6 +234,7 @@ export function printInitResult(result: unknown, format: InitOutputFormat): void
     // be visible here too — otherwise the only proof of the write is on disk.
     printAgentFiles(result.agentFiles);
     printReadiness(result.readiness);
+    printMcpRegistration(result.mcp);
     return;
   }
 
@@ -255,6 +306,7 @@ export function printInitResult(result: unknown, format: InitOutputFormat): void
   }
 
   printAgentFiles(result.agentFiles);
+  printMcpRegistration(result.mcp);
 
   console.log('');
   console.log('Next steps:');
@@ -262,15 +314,43 @@ export function printInitResult(result: unknown, format: InitOutputFormat): void
   // Pointing at "the generated agent files" when the run generated none sent
   // users looking for a CLAUDE.md that was never written. The readiness list
   // above already says why it was skipped; this line offers the way to get one.
-  const writtenAgentFiles = (result.agentFiles ?? []).filter((file) => file.type !== 'skipped');
+  const agentFiles = result.agentFiles ?? [];
+  const writtenAgentFiles = agentFiles.filter((file) => file.type !== 'skipped');
+  const skippedAgentFiles = agentFiles.filter((file) => file.type === 'skipped');
+  const exampleAgentFiles = agentFiles.filter((file) => file.type === 'example');
+  const skippedPaths = skippedAgentFiles.map((file) => file.relativePath).join(', ');
+
   if (writtenAgentFiles.length > 0) {
     console.log(`  1. Check the generated agent files (${writtenAgentFiles.map((f) => f.relativePath).join(', ')})`);
-    console.log('     If a -example file was created, merge it into your existing file.');
+    // Conditional on an -example file actually being on disk. The merge advice
+    // used to print on every run that wrote anything, but without
+    // --agent-files-example no -example file is ever created — so on the default
+    // path it named a file that did not exist.
+    if (exampleAgentFiles.length > 0) {
+      console.log(
+        `     Merge each -example file into the file it sits next to (${exampleAgentFiles
+          .map((f) => f.relativePath)
+          .join(', ')}).`,
+      );
+    }
+  } else if (skippedAgentFiles.length > 0) {
+    console.log(`  1. Every agent entry point already existed and was left untouched (${skippedPaths}).`);
   } else {
     console.log('  1. No agent entry point file was created in this run.');
     console.log(
       "     Create one with 'agentteams init --agent-files CLAUDE.md' so agents load .agentteams/convention.md.",
     );
+  }
+
+  // An existing entry point is never overwritten, so until the user adds the
+  // reference themselves nothing in that file points at the conventions — the
+  // one thing an entry point exists to provide. "Left untouched" is a status;
+  // this is what turns it into an instruction, and it names the files so the
+  // instruction has a target.
+  if (skippedAgentFiles.length > 0) {
+    console.log(`     Nothing in ${skippedPaths} points at the conventions yet.`);
+    console.log('     Add a line telling the agent to read .agentteams/convention.md, or re-run init');
+    console.log(`     with ${chalk.cyan('--agent-files-example')} to get a -example copy of that block to merge.`);
   }
 
   if (result.seedPlanId) {
@@ -291,4 +371,11 @@ export function printInitResult(result: unknown, format: InitOutputFormat): void
 
   console.log('  3. Or try other commands:');
   console.log(chalk.cyan('       Create a plan to improve test coverage for this project.'));
+
+  // Only when this run wrote nothing: repeating the command after it already ran
+  // would read as "it did not work".
+  if (!result.mcp) {
+    console.log('  4. Connect your AI tools to this project over MCP:');
+    console.log(chalk.cyan('       agentteams mcp install'));
+  }
 }

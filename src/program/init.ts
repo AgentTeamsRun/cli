@@ -11,7 +11,7 @@ import {
 } from './shared.js';
 
 /**
- * 액션 인벤토리: 액션: start. 실사용 옵션: authMode, agentFiles, agentFilesExample, installWorktreeHook, deviceAuth, setDefault. 별칭/도움말 불일치: 없음.
+ * 액션 인벤토리: 액션: start. 실사용 옵션: authMode, agentFiles, agentFilesExample, interactive, installWorktreeHook, mcp, deviceAuth, setDefault. 별칭/도움말 불일치: 없음.
  */
 export function registerInitCommand(program: Command): void {
   program
@@ -42,9 +42,25 @@ export function registerInitCommand(program: Command): void {
       'When a selected entry point file already exists, write a <name>-example file next to it instead of leaving it alone.',
       false,
     )
+    // Opt-in only. The multiselect used to run on every TTY run, seeded with the
+    // detection result — a question whose answer was already filled in. A plain
+    // `agentteams init` now asks nothing; this flag is for the caller who wants to
+    // override detection by hand instead of naming the files with --agent-files.
+    .option(
+      '--interactive',
+      'Choose the agent entry point files from a prompt instead of using the AI clients detected in this folder. Without this flag init asks nothing.',
+      false,
+    )
     .option(
       '--install-worktree-hook',
       "Install the managed git post-checkout hook even if this repository has no linked worktrees yet. By default the hook is installed only when linked worktrees exist; 'agentteams doctor' can install it later.",
+      false,
+    )
+    // Opt-in only, and project scope only. A plain `agentteams init` must not edit an
+    // AI client's configuration; without this flag the run just prints the command.
+    .option(
+      '--mcp',
+      'Register AgentTeams with the MCP clients detected in this folder (project scope). Without this flag no client configuration is written.',
       false,
     )
     // Explicit opt-in only. There is deliberately no `--no-device-auth`: the default
@@ -61,9 +77,11 @@ export function registerInitCommand(program: Command): void {
           authMode: options.auth,
           agentFiles: options.agentFiles,
           agentFilesExample: options.agentFilesExample === true,
+          interactive: options.interactive === true,
           installWorktreeHook: options.installWorktreeHook === true,
           deviceAuth: options.deviceAuth === true,
           setDefault: options.setDefault === true,
+          mcp: options.mcp === true,
         });
         const format = normalizeInteractiveFormat(options.format);
 

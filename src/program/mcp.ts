@@ -8,7 +8,7 @@ import {
 } from './shared.js';
 
 /**
- * 액션 인벤토리: 액션: server(부모), config/install/doctor. 등록 액션은 client/scope/toolProfile/serverEntry/json 및 접속 옵션, install만 yes, doctor는 yes/json. 별칭 없음.
+ * 액션 인벤토리: 액션: server(부모), config/install/doctor. 등록 액션은 client/scope/toolProfile/serverEntry/json 및 접속 옵션, install만 dryRun/yes, doctor는 yes/json. 별칭 없음.
  */
 export function registerMcpCommand(program: Command): void {
   const mcpCommand = program
@@ -100,10 +100,15 @@ export function registerMcpCommand(program: Command): void {
     mcpCommand
       .command('install')
       .description(
-        'Register AgentTeams with local MCP clients. Without --client it only prints a detection plan; batch apply requires --scope user --yes.',
+        'Register AgentTeams with the MCP clients detected on this machine. Without --client it applies to every detected client at project scope; --scope user writes machine-wide configs and needs --yes, as does --json at any scope.',
       ),
   )
-    .option('--yes', 'Apply an explicitly selected user-scope batch plan instead of only printing it', false)
+    .option(
+      '--dry-run',
+      "Print the detection plan without writing a file or running a registration command (detection may still run a client's own `--help` to confirm its identity)",
+      false,
+    )
+    .option('--yes', 'Approve applying the plan: required for --scope user, and for --json at any scope', false)
     .addHelpText('after', CONVENTION_HINT)
     .action((options, command: Command) => runMcpRegistration('install', options, command));
 
