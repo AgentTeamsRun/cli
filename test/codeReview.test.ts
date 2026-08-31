@@ -23,6 +23,7 @@ describe('code-review create with --findings-file', () => {
 
   const validFinding = {
     severity: 'P1',
+    impactArea: 'SECURITY',
     title: 'Missing permission check',
     filePath: 'api/src/routes/example.ts',
     lineStart: 42,
@@ -210,6 +211,35 @@ describe('code-review create with --findings-file', () => {
     expect(axiosPostSpy).not.toHaveBeenCalled();
   });
 
+  it('throws with the finding index when impactArea is missing', async () => {
+    const { impactArea: _omit, ...incomplete } = validFinding;
+    const findingsFile = writeFindings(JSON.stringify([incomplete]));
+
+    await expect(
+      executeCodeReviewCommand(apiUrl, projectId, headers, 'create', {
+        ...baseOptions,
+        findingsFile,
+      }),
+    ).rejects.toThrow(
+      /findings\[0\]\.impactArea is required and must be one of: UI, BUSINESS_RULE, CONTRACT, DATA, SECURITY, OPS, DOCS, TEST, OTHER \(see the code review guide's "Choosing impactArea"\)/,
+    );
+    expect(axiosPostSpy).not.toHaveBeenCalled();
+  });
+
+  it('throws with the finding index and allowed values when impactArea is invalid', async () => {
+    const findingsFile = writeFindings(JSON.stringify([{ ...validFinding, impactArea: 'BACKEND' }]));
+
+    await expect(
+      executeCodeReviewCommand(apiUrl, projectId, headers, 'create', {
+        ...baseOptions,
+        findingsFile,
+      }),
+    ).rejects.toThrow(
+      /findings\[0\]\.impactArea is required and must be one of: UI, BUSINESS_RULE, CONTRACT, DATA, SECURITY, OPS, DOCS, TEST, OTHER/,
+    );
+    expect(axiosPostSpy).not.toHaveBeenCalled();
+  });
+
   it('throws when the findings file does not exist', async () => {
     await expect(
       executeCodeReviewCommand(apiUrl, projectId, headers, 'create', {
@@ -218,6 +248,54 @@ describe('code-review create with --findings-file', () => {
       }),
     ).rejects.toThrow(/File not found/);
     expect(axiosPostSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe('code-review submit-result with --findings-file', () => {
+  const apiUrl = 'http://localhost:3001';
+  const projectId = 'project_1';
+  const headers = { 'X-API-Key': 'key_test123', 'Content-Type': 'application/json' };
+
+  let axiosPostSpy: jest.SpiedFunction<typeof axios.post>;
+  let tempDir: string;
+
+  beforeEach(() => {
+    jest.restoreAllMocks();
+    axiosPostSpy = jest.spyOn(axios, 'post');
+    tempDir = mkdtempSync(join(tmpdir(), 'cli-codereview-result-test-'));
+  });
+
+  afterEach(() => {
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it('forwards OTHER impactArea in submitted findings', async () => {
+    axiosPostSpy.mockResolvedValueOnce({
+      data: { data: { id: 'cdr_abc', status: 'COMPLETED' } },
+    } as any);
+    const finding = {
+      severity: 'P3',
+      impactArea: 'OTHER',
+      title: 'Unclassified maintainability issue',
+      filePath: 'src/legacy.ts',
+      problem: 'The issue does not fit a more specific impact area.',
+      impact: 'Future changes are harder to review.',
+      suggestion: 'Clarify the legacy boundary.',
+    };
+    const findingsFile = join(tempDir, 'findings.json');
+    writeFileSync(findingsFile, JSON.stringify([finding]), 'utf-8');
+
+    await executeCodeReviewCommand(apiUrl, projectId, headers, 'submit-result', {
+      id: 'cdr_abc',
+      status: 'COMPLETED',
+      findingsFile,
+    });
+
+    expect(axiosPostSpy).toHaveBeenCalledWith(
+      `${apiUrl}/api/projects/${projectId}/code-reviews/cdr_abc/result`,
+      { status: 'COMPLETED', findings: [finding] },
+      { headers },
+    );
   });
 });
 

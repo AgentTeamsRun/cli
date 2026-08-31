@@ -129,6 +129,18 @@ const CODE_REVIEW_TARGET_TYPE_VALUES = [
   'COMMIT_RANGE',
 ] as const;
 
+const CODE_REVIEW_FINDING_IMPACT_AREA_VALUES = [
+  'UI',
+  'BUSINESS_RULE',
+  'CONTRACT',
+  'DATA',
+  'SECURITY',
+  'OPS',
+  'DOCS',
+  'TEST',
+  'OTHER',
+] as const;
+
 const CODE_REVIEW_UPDATE_METADATA_FIELDS = [
   'title',
   'targetType',
@@ -880,6 +892,7 @@ const codeReviewCreateSpec: McpWriteToolSpec = {
       .array(
         z.strictObject({
           severity: z.enum(['P0', 'P1', 'P2', 'P3']).describe('Severity level (P0, P1, P2, P3).'),
+          impactArea: z.enum(CODE_REVIEW_FINDING_IMPACT_AREA_VALUES).describe('Primary impact area for this finding.'),
           title: z.string().min(1).max(255).describe('Finding title.'),
           filePath: z.string().min(1).describe('Relative file path.'),
           lineStart: z.number().int().positive().optional().describe('Starting line number.'),

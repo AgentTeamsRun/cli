@@ -38,6 +38,18 @@ const readOptionalFile = (file: unknown): string | undefined => {
   return readFileSync(filePath, 'utf-8');
 };
 
+const CODE_REVIEW_FINDING_IMPACT_AREA_VALUES = [
+  'UI',
+  'BUSINESS_RULE',
+  'CONTRACT',
+  'DATA',
+  'SECURITY',
+  'OPS',
+  'DOCS',
+  'TEST',
+  'OTHER',
+] as const;
+
 const FINDING_REQUIRED_FIELDS = ['severity', 'title', 'filePath', 'problem', 'impact', 'suggestion'] as const;
 
 const parseFindingsFile = (file: unknown): Array<Record<string, unknown>> | undefined => {
@@ -65,6 +77,17 @@ const parseFindingsFile = (file: unknown): Array<Record<string, unknown>> | unde
       if (value === undefined || value === null || value === '') {
         throw new Error(`findings[${index}] missing required field: ${field}`);
       }
+    }
+    const impactArea = (item as Record<string, unknown>).impactArea;
+    if (
+      typeof impactArea !== 'string' ||
+      !CODE_REVIEW_FINDING_IMPACT_AREA_VALUES.includes(
+        impactArea as (typeof CODE_REVIEW_FINDING_IMPACT_AREA_VALUES)[number],
+      )
+    ) {
+      throw new Error(
+        `findings[${index}].impactArea is required and must be one of: ${CODE_REVIEW_FINDING_IMPACT_AREA_VALUES.join(', ')} (see the code review guide's "Choosing impactArea")`,
+      );
     }
   });
 
