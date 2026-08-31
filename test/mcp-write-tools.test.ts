@@ -912,6 +912,7 @@ describe('mcp write tools', () => {
       findings: [
         {
           severity: 'P1',
+          impactArea: 'CONTRACT',
           title: 'Missing input validation',
           filePath: 'src/api.ts',
           lineStart: 10,
@@ -919,6 +920,15 @@ describe('mcp write tools', () => {
           problem: 'No validation on input',
           impact: 'Malformed input crashes service',
           suggestion: 'Add Zod schema',
+        },
+        {
+          severity: 'P3',
+          impactArea: 'OTHER',
+          title: 'Unclassified maintainability issue',
+          filePath: 'src/legacy.ts',
+          problem: 'The issue does not fit a more specific impact area',
+          impact: 'Future changes are harder to review',
+          suggestion: 'Clarify the legacy boundary',
         },
       ],
       guideHash: 'code-review-hash',
@@ -937,6 +947,7 @@ describe('mcp write tools', () => {
         findings: [
           {
             severity: 'P1',
+            impactArea: 'CONTRACT',
             title: 'Missing input validation',
             filePath: 'src/api.ts',
             lineStart: 10,
@@ -944,6 +955,15 @@ describe('mcp write tools', () => {
             problem: 'No validation on input',
             impact: 'Malformed input crashes service',
             suggestion: 'Add Zod schema',
+          },
+          {
+            severity: 'P3',
+            impactArea: 'OTHER',
+            title: 'Unclassified maintainability issue',
+            filePath: 'src/legacy.ts',
+            problem: 'The issue does not fit a more specific impact area',
+            impact: 'Future changes are harder to review',
+            suggestion: 'Clarify the legacy boundary',
           },
         ],
         guideHash: 'code-review-hash',
@@ -958,6 +978,42 @@ describe('mcp write tools', () => {
         webUrl: 'https://agentteams.run/go?type=code-review&id=crv-1',
       },
     });
+  });
+
+  it('requires the code review finding impactArea enum in the MCP schema', async () => {
+    const { client, handle } = connect();
+    openHandle = handle;
+
+    await discover(client);
+    const response = await client.request('tools/list', { _meta: MODERN_META });
+    const tools = (response.result?.tools ?? []) as Array<{
+      name: string;
+      inputSchema?: {
+        properties?: {
+          findings?: {
+            items?: {
+              properties?: Record<string, { enum?: string[] }>;
+              required?: string[];
+            };
+          };
+        };
+      };
+    }>;
+    const findingSchema = tools.find((tool) => tool.name === 'agentteams_codereview_create')?.inputSchema?.properties
+      ?.findings?.items;
+
+    expect(findingSchema?.required).toContain('impactArea');
+    expect(findingSchema?.properties?.impactArea?.enum).toEqual([
+      'UI',
+      'BUSINESS_RULE',
+      'CONTRACT',
+      'DATA',
+      'SECURITY',
+      'OPS',
+      'DOCS',
+      'TEST',
+      'OTHER',
+    ]);
   });
 
   it('uses the API target type contract for code review create and update', async () => {
@@ -995,6 +1051,7 @@ describe('mcp write tools', () => {
       findings: [
         {
           severity: 'P1',
+          impactArea: 'CONTRACT',
           title: 'Finding',
           filePath: 'src/api.ts',
           problem: 'Problem',

@@ -517,7 +517,7 @@ describe('agentteams_resolve MCP tool', () => {
     // cheap in `full` and a 50% jump in `minimal` (3.4k), which is why `minimal`
     // does not carry it.
     expect(delta).toBe(1_762);
-    expect(withResolve.totalChars).toBe(66_504);
+    expect(withResolve.totalChars).toBe(66_689);
     process.stderr.write(`[agentteams_resolve budget] ${JSON.stringify({ delta, full: withResolve.totalChars })}\n`);
   });
 });
