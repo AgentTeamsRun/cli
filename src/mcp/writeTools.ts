@@ -163,6 +163,12 @@ const validateInitialCodeReviewFindings = (args: Record<string, unknown>) => {
   }
 };
 
+const validateInitialCodeReviewResultSummary = (args: Record<string, unknown>) => {
+  if (args.resultSummary !== undefined && args.findings === undefined) {
+    throw new Error('agentteams_codereview_create requires findings when resultSummary is provided.');
+  }
+};
+
 const validateCodeReviewCancellation = (args: Record<string, unknown>) => {
   if (args.status !== 'CANCELLED') return;
   const incompatibleFields = [...CODE_REVIEW_UPDATE_METADATA_FIELDS, 'expectedUpdatedAt'].filter(
@@ -888,6 +894,12 @@ const codeReviewCreateSpec: McpWriteToolSpec = {
     recommendationReason: z.string().optional().describe('Reason for recommending this code review.'),
     runnerType: z.enum(RUNNER_TYPE_VALUES).optional().describe('Runner type performing or requesting the review.'),
     model: z.string().min(1).optional().describe('Model snapshot used for the review.'),
+    resultSummary: z
+      .string()
+      .optional()
+      .describe(
+        'Review conclusion in the required three-block format: Verdict, What changes for people, and Remaining actions. Must be sent together with findings.',
+      ),
     findings: z
       .array(
         z.strictObject({
@@ -909,6 +921,7 @@ const codeReviewCreateSpec: McpWriteToolSpec = {
   }),
   handler: async (args, context) => {
     validateInitialCodeReviewFindings(args);
+    validateInitialCodeReviewResultSummary(args);
     return createCodeReview(
       context.apiUrl,
       context.projectId,
@@ -934,6 +947,7 @@ const codeReviewCreateSpec: McpWriteToolSpec = {
         recommendationReason: args.recommendationReason,
         runnerType: args.runnerType,
         model: args.model,
+        resultSummary: args.resultSummary,
         findings: args.findings,
         guideHash: args.guideHash,
         idempotencyKey: args.idempotencyKey,

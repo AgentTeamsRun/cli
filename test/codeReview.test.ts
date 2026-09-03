@@ -108,6 +108,69 @@ describe('code-review create with --findings-file', () => {
     });
   });
 
+  it('reads resultSummary from --result-summary-file into the create POST body', async () => {
+    axiosPostSpy.mockResolvedValueOnce({
+      data: { data: { id: 'cdr_abc', status: 'COMPLETED' } },
+    } as any);
+    const findingsFile = writeFindings(JSON.stringify([validFinding]));
+    const resultSummaryFile = join(tempDir, 'result-summary.md');
+    writeFileSync(resultSummaryFile, '## Summary\n\nThe review passed.', 'utf-8');
+
+    await executeCodeReviewCommand(apiUrl, projectId, headers, 'create', {
+      ...baseOptions,
+      findingsFile,
+      resultSummaryFile,
+    });
+
+    const [, body] = axiosPostSpy.mock.calls[0];
+    expect(body).toMatchObject({ resultSummary: '## Summary\n\nThe review passed.' });
+  });
+
+  it('prefers --result-summary over --result-summary-file for create', async () => {
+    axiosPostSpy.mockResolvedValueOnce({
+      data: { data: { id: 'cdr_abc', status: 'COMPLETED' } },
+    } as any);
+
+    await executeCodeReviewCommand(apiUrl, projectId, headers, 'create', {
+      ...baseOptions,
+      findingsFile: writeFindings(JSON.stringify([validFinding])),
+      resultSummary: 'Inline summary',
+      resultSummaryFile: join(tempDir, 'missing-summary.md'),
+    });
+
+    const [, body] = axiosPostSpy.mock.calls[0];
+    expect(body).toMatchObject({ resultSummary: 'Inline summary' });
+  });
+
+  it('drops a whitespace-only --result-summary-file instead of sending an empty summary', async () => {
+    axiosPostSpy.mockResolvedValueOnce({
+      data: { data: { id: 'cdr_abc', status: 'OPEN' } },
+    } as any);
+    const findingsFile = writeFindings(JSON.stringify([validFinding]));
+    const resultSummaryFile = join(tempDir, 'blank-summary.md');
+    writeFileSync(resultSummaryFile, '\n   \n', 'utf-8');
+
+    await executeCodeReviewCommand(apiUrl, projectId, headers, 'create', {
+      ...baseOptions,
+      findingsFile,
+      resultSummaryFile,
+    });
+
+    const [, body] = axiosPostSpy.mock.calls[0];
+    expect(body).not.toHaveProperty('resultSummary');
+  });
+
+  it('rejects a create resultSummary without findings before calling the API', async () => {
+    await expect(
+      executeCodeReviewCommand(apiUrl, projectId, headers, 'create', {
+        ...baseOptions,
+        resultSummary: 'Inline summary',
+      }),
+    ).rejects.toThrow(/--result-summary\/--result-summary-file requires --findings-file/);
+
+    expect(axiosPostSpy).not.toHaveBeenCalled();
+  });
+
   it('preserves automatic history match fields from the create response', async () => {
     const relatedHistories = [
       {
@@ -296,6 +359,58 @@ describe('code-review submit-result with --findings-file', () => {
       { status: 'COMPLETED', findings: [finding] },
       { headers },
     );
+  });
+
+  it('reads resultSummary from --result-summary-file into the result POST body', async () => {
+    axiosPostSpy.mockResolvedValueOnce({
+      data: { data: { id: 'cdr_abc', status: 'COMPLETED' } },
+    } as any);
+    const resultSummaryFile = join(tempDir, 'result-summary.md');
+    writeFileSync(resultSummaryFile, '## Summary\n\nNo blocking findings.', 'utf-8');
+
+    await executeCodeReviewCommand(apiUrl, projectId, headers, 'submit-result', {
+      id: 'cdr_abc',
+      status: 'COMPLETED',
+      resultSummaryFile,
+    });
+
+    expect(axiosPostSpy).toHaveBeenCalledWith(
+      `${apiUrl}/api/projects/${projectId}/code-reviews/cdr_abc/result`,
+      { status: 'COMPLETED', resultSummary: '## Summary\n\nNo blocking findings.' },
+      { headers },
+    );
+  });
+
+  it('drops a whitespace-only --result-summary-file for submit-result', async () => {
+    axiosPostSpy.mockResolvedValueOnce({
+      data: { data: { id: 'cdr_abc', status: 'COMPLETED' } },
+    } as any);
+    const resultSummaryFile = join(tempDir, 'blank-summary.md');
+    writeFileSync(resultSummaryFile, '   \n\t\n', 'utf-8');
+
+    await executeCodeReviewCommand(apiUrl, projectId, headers, 'submit-result', {
+      id: 'cdr_abc',
+      status: 'COMPLETED',
+      resultSummaryFile,
+    });
+
+    const [, body] = axiosPostSpy.mock.calls[0];
+    expect(body).toEqual({ status: 'COMPLETED' });
+  });
+
+  it('prefers --result-summary over --result-summary-file for submit-result', async () => {
+    axiosPostSpy.mockResolvedValueOnce({
+      data: { data: { id: 'cdr_abc', status: 'COMPLETED' } },
+    } as any);
+
+    await executeCodeReviewCommand(apiUrl, projectId, headers, 'submit-result', {
+      id: 'cdr_abc',
+      resultSummary: 'Inline summary',
+      resultSummaryFile: join(tempDir, 'missing-summary.md'),
+    });
+
+    const [, body] = axiosPostSpy.mock.calls[0];
+    expect(body).toEqual({ resultSummary: 'Inline summary' });
   });
 });
 

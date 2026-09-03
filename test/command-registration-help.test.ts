@@ -32,6 +32,25 @@ async function renderHelp(commandName: string): Promise<string> {
   return output;
 }
 
+async function renderNestedHelp(resource: string, action: string): Promise<string> {
+  const program = createProgram('0.0.0', CANONICAL_CLI_NAME);
+  let output = '';
+  program.configureOutput({ writeOut: (text) => (output += text) });
+  const configureExitOverride = (command: typeof program): void => {
+    command.exitOverride();
+    for (const subcommand of command.commands) configureExitOverride(subcommand);
+  };
+  configureExitOverride(program);
+
+  try {
+    await program.parseAsync(['node', 'agentteams', resource, action, '--help'], { from: 'node' });
+  } catch (error) {
+    if (!(error instanceof CommanderError) || error.code !== 'commander.helpDisplayed') throw error;
+  }
+
+  return output.replace(/\s+/g, ' ');
+}
+
 describe('커맨드 등록 모듈 분할', () => {
   it.each(Object.entries(BASELINE_HELP_SHA256))('%s 도움말을 바이트 단위로 보존한다', async (name, expected) => {
     const output = await renderHelp(name);
@@ -56,5 +75,18 @@ describe('커맨드 등록 모듈 분할', () => {
       'Choose the agent entry point files from a prompt instead of using the AI clients detected in this folder',
     );
     expect(output).toContain('Without this flag init asks nothing');
+  });
+
+  it('code-review create 도움말이 총평 텍스트·파일 옵션과 우선순위를 노출한다', async () => {
+    const output = await renderNestedHelp('code-review', 'create');
+    expect(output).toContain('--result-summary <text>');
+    expect(output).toContain('--result-summary-file <path>');
+    expect(output).toContain('takes precedence over --result-summary-file');
+  });
+
+  it('code-review submit-result 도움말이 총평 파일 옵션과 텍스트 우선순위를 노출한다', async () => {
+    const output = await renderNestedHelp('code-review', 'submit-result');
+    expect(output).toContain('--result-summary-file <path>');
+    expect(output).toContain('takes precedence over --result-summary-file');
   });
 });

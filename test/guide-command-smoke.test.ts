@@ -172,7 +172,7 @@ describe('액션별 도움말 크기와 오류 승격', () => {
     [['plan', 'get'], 660],
     [['plan', 'create'], 2400],
     [['report', 'create'], 2500],
-    [['code-review', 'create'], 2800],
+    [['code-review', 'create'], 3000],
     [['comment', 'reply-create'], 1300],
     [['document', 'create'], 1900],
     [['linear', 'issue', 'create'], 1600],

@@ -909,6 +909,8 @@ describe('mcp write tools', () => {
       sourcePlanId: 'agentteams_pln_p-1',
       runnerType: 'CODEX',
       model: 'gpt-5.6-sol',
+      resultSummary:
+        '**Mergeable after fixes** — P0 0 / P1 1 / P2 0 / P3 1.\n\nMalformed inputs can crash the service.\n\n- Add the missing input validation.\n- Clarify the legacy boundary.',
       findings: [
         {
           severity: 'P1',
@@ -944,6 +946,8 @@ describe('mcp write tools', () => {
         sourcePlanId: 'p-1',
         runnerType: 'CODEX',
         model: 'gpt-5.6-sol',
+        resultSummary:
+          '**Mergeable after fixes** — P0 0 / P1 1 / P2 0 / P3 1.\n\nMalformed inputs can crash the service.\n\n- Add the missing input validation.\n- Clarify the legacy boundary.',
         findings: [
           {
             severity: 'P1',
@@ -1063,6 +1067,21 @@ describe('mcp write tools', () => {
 
     expect(call.result?.isError).toBe(true);
     expect(call.result?.content[0].text).toMatch(/runnerType.*model|model.*runnerType/);
+    expect(postSpy).not.toHaveBeenCalled();
+  });
+
+  it('rejects an initial resultSummary without findings before calling the API', async () => {
+    const postSpy = jest.spyOn(axios, 'post');
+
+    const call = await callTool('agentteams_codereview_create', {
+      title: 'Summary without findings',
+      runnerType: 'CODEX',
+      model: 'gpt-5.6-sol',
+      resultSummary: '**Mergeable** — P0 0 / P1 0 / P2 0 / P3 0.',
+    });
+
+    expect(call.result?.isError).toBe(true);
+    expect(call.result?.content[0].text).toMatch(/requires findings when resultSummary is provided/);
     expect(postSpy).not.toHaveBeenCalled();
   });
 
