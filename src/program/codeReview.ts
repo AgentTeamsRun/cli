@@ -70,6 +70,8 @@ export function registerCodeReviewCommand(program: Command): void {
       .option('--diff-file <path>', 'Read diff summary from a local file')
       .option('--test-summary <text>', 'Verification summary text')
       .option('--test-file <path>', 'Read verification summary from a local file')
+      .option('--result-summary <text>', 'Review result summary (takes precedence over --result-summary-file)')
+      .option('--result-summary-file <path>', 'Read review result summary from a local file')
       .option('--reviewer-context <text>', 'Reviewer context or instructions')
       .option('--recommendation-reason <text>', 'Why this review is recommended')
       .option('--findings-file <path>', 'Read findings JSON array from a local file')
@@ -110,7 +112,8 @@ export function registerCodeReviewCommand(program: Command): void {
       .option('--id <id>', 'Code review ID')
       .option('--status <status>', 'Result status COMPLETED|FAILED')
       .option('--findings-file <path>', 'Read findings JSON array from a local file')
-      .option('--result-summary <text>', 'Review result summary')
+      .option('--result-summary <text>', 'Review result summary (takes precedence over --result-summary-file)')
+      .option('--result-summary-file <path>', 'Read review result summary from a local file')
       .option('--error-message <text>', 'Failure reason when status is FAILED'),
   );
   addLeaf('cancel', 'Cancel a code review', (command) =>

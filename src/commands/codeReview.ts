@@ -167,7 +167,14 @@ export async function executeCodeReviewCommand(
       const targetType = toNonEmptyString(options.targetType) ?? 'LOCAL_DIFF';
       const diffSummary = toNonEmptyString(options.diffSummary) ?? readOptionalFile(options.diffFile);
       const testSummary = toNonEmptyString(options.testSummary) ?? readOptionalFile(options.testFile);
+      const resultSummary =
+        toNonEmptyString(options.resultSummary) ?? toNonEmptyString(readOptionalFile(options.resultSummaryFile));
       const findings = parseFindingsFile(options.findingsFile);
+      // 총평은 결과가 있는 리뷰에만 붙는다. 서버도 400으로 막지만 어떤 필드가 문제인지 알려주지 않으므로,
+      // MCP 표면(validateInitialCodeReviewResultSummary)과 같은 문구로 API 호출 전에 거절한다.
+      if (resultSummary !== undefined && findings === undefined) {
+        throw new Error('--result-summary/--result-summary-file requires --findings-file for code-review create');
+      }
       const explicitRepositoryRemoteUrl = toNonEmptyString(options.repositoryRemoteUrl);
       const repositoryRemoteUrl =
         explicitRepositoryRemoteUrl ?? (options.git === false ? undefined : getGitRemoteOriginUrl());
@@ -191,6 +198,7 @@ export async function executeCodeReviewCommand(
       if (options.baseBranchName) body.baseBranchName = options.baseBranchName;
       if (diffSummary) body.diffSummary = diffSummary;
       if (testSummary) body.testSummary = testSummary;
+      if (resultSummary) body.resultSummary = resultSummary;
       if (options.reviewerContext) body.reviewerContext = options.reviewerContext;
       body.runnerType = runnerType;
       body.model = model;
@@ -276,7 +284,8 @@ export async function executeCodeReviewCommand(
         throw new Error('--status must be COMPLETED or FAILED for code-review submit-result');
       }
       const findings = parseFindingsFile(options.findingsFile);
-      const resultSummary = toNonEmptyString(options.resultSummary);
+      const resultSummary =
+        toNonEmptyString(options.resultSummary) ?? toNonEmptyString(readOptionalFile(options.resultSummaryFile));
       const errorMessage = toNonEmptyString(options.errorMessage);
 
       const body: Record<string, unknown> = {};
