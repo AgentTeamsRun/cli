@@ -1,5 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -154,13 +163,13 @@ describe('skill download bookkeeping', () => {
     await download();
 
     const manifest = JSON.parse(readFileSync(join(projectRoot, '.agentteams', 'skills.manifest.json'), 'utf-8'));
-    expect(manifest.version).toBe(1);
+    expect(manifest.version).toBe(2);
     expect(manifest.entries[0]).toMatchObject({ skillId: 'id-my-skill', slug: 'my-skill', version: 'v-my-skill' });
     expect(manifest.entries[0].mirrorPaths).toContain('.agents/skills/my-skill/SKILL.md');
     expect(JSON.parse(readFileSync(conventionManifest, 'utf-8'))).toEqual({ version: 1, entries: [] });
   });
 
-  it('cleans up mirrors it recorded when a skill disappears, and keeps user files', async () => {
+  it('로컬 추가 파일이 있으면 서버 삭제에서도 패키지 전체를 보존한다', async () => {
     stubServer([remoteSkill('my-skill', [{ relativePath: 'SKILL.md', content: entryContent('my-skill') }])]);
     await download();
 
@@ -170,10 +179,10 @@ describe('skill download bookkeeping', () => {
     stubServer([]);
     const result = (await download()) as { removed: string[] };
 
-    expect(result.removed).toEqual(['my-skill']);
-    expect(existsSync(join(mirrorDir, 'SKILL.md'))).toBe(false);
+    expect(result.removed).toEqual([]);
+    expect(existsSync(join(mirrorDir, 'SKILL.md'))).toBe(true);
     expect(readFileSync(join(mirrorDir, 'user-note.md'), 'utf-8')).toBe('mine');
-    expect(existsSync(join(projectRoot, '.agentteams', 'skills', 'my-skill'))).toBe(false);
+    expect(existsSync(join(projectRoot, '.agentteams', 'skills', 'my-skill'))).toBe(true);
   });
 
   it('adds mirror directories to .gitignore unless --commit-mirrors is given', async () => {
@@ -290,15 +299,272 @@ describe('skill download pagination and mirror target changes', () => {
     await download();
     expect(existsSync(join(projectRoot, '.claude', 'skills', 'my-skill', 'SKILL.md'))).toBe(true);
 
-    // 마커를 지우면 다음 실행부터 .claude는 대상이 아니다.
-    rmSync(join(projectRoot, '.claude', 'skills'), { recursive: true, force: true });
-    mkdirSync(join(projectRoot, '.claude'), { recursive: true });
-    await download();
+    // 미수정 미러만 명시적으로 대상에서 제외한다.
     await download({ skillTargets: 'none' });
 
     expect(existsSync(join(projectRoot, '.claude', 'skills', 'my-skill', 'SKILL.md'))).toBe(false);
     expect(existsSync(join(projectRoot, '.agents', 'skills', 'my-skill', 'SKILL.md'))).toBe(false);
     // SSOT 패키지는 그대로다.
     expect(existsSync(join(projectRoot, '.agentteams', 'skills', 'my-skill', 'SKILL.md'))).toBe(true);
+  });
+});
+
+describe('로컬 변경 보호 통합', () => {
+  const canonical = '.agentteams/skills/my-skill';
+  const mirror = '.agents/skills/my-skill';
+  const manifestPath = () => join(projectRoot, '.agentteams/skills.manifest.json');
+  const initial = () =>
+    remoteSkill('my-skill', [
+      { relativePath: 'SKILL.md', content: entryContent('my-skill') },
+      { relativePath: 'references/note.md', content: '원본 참고' },
+    ]);
+  const seed = async () => {
+    stubServer([initial()]);
+    await download();
+  };
+
+  it.each([canonical, mirror])('%s의 수정·추가·삭제가 업데이트와 manifest를 보존한다', async (root) => {
+    await seed();
+    const before = readFileSync(manifestPath(), 'utf8');
+    writeFileSync(join(projectRoot, root, 'SKILL.md'), '비공개 로컬 수정');
+    writeFileSync(join(projectRoot, root, 'local.bin'), Buffer.from([0, 255]));
+    rmSync(join(projectRoot, root, 'references/note.md'));
+    const remote = initial();
+    remote.version = 'v2';
+    remote.files[0].content = entryContent('my-skill', '서버 변경');
+    stubServer([remote]);
+    const result = await download();
+    expect(result.downloaded).toEqual([]);
+    expect(result.conflicts[0].paths).toEqual(
+      expect.arrayContaining([
+        { path: `${root}/SKILL.md`, reason: 'modified' },
+        { path: `${root}/local.bin`, reason: 'added' },
+        { path: `${root}/references/note.md`, reason: 'deleted' },
+      ]),
+    );
+    expect(JSON.stringify(result)).not.toContain('비공개 로컬 수정');
+    expect(readFileSync(manifestPath(), 'utf8')).toBe(before);
+    expect(readFileSync(join(projectRoot, root, 'SKILL.md'), 'utf8')).toBe('비공개 로컬 수정');
+    expect(existsSync(join(projectRoot, root, 'references/note.md'))).toBe(false);
+  });
+
+  it('원격 삭제·이름 변경·미러 축소도 수정된 미러가 있으면 보존한다', async () => {
+    await seed();
+    const before = readFileSync(manifestPath(), 'utf8');
+    writeFileSync(join(projectRoot, mirror, 'SKILL.md'), '사용자 편집');
+    stubServer([]);
+    expect((await download()).removed).toEqual([]);
+    const renamed = { ...initial(), slug: 'new-name' };
+    stubServer([renamed]);
+    expect((await download()).downloaded).toEqual([]);
+    expect(existsSync(join(projectRoot, '.agentteams/skills/new-name'))).toBe(false);
+    stubServer([initial()]);
+    expect((await download({ skillTargets: 'none' })).downloaded).toEqual([]);
+    expect(readFileSync(manifestPath(), 'utf8')).toBe(before);
+  });
+
+  it('미수정 패키지는 이름 변경 후 삭제할 수 있다', async () => {
+    await seed();
+    stubServer([{ ...initial(), slug: 'new-name', version: 'v2' }]);
+    expect((await download()).removed).toEqual(['my-skill']);
+    expect(existsSync(join(projectRoot, canonical))).toBe(false);
+    expect(existsSync(join(projectRoot, '.agentteams/skills/new-name/SKILL.md'))).toBe(true);
+    stubServer([]);
+    expect((await download()).removed).toEqual(['new-name']);
+    expect(readSkillEntries()).toEqual([]);
+  });
+
+  const readSkillEntries = () => JSON.parse(readFileSync(manifestPath(), 'utf8')).entries;
+
+  it('v1은 원본을 추정하지 않으며 다른 패키지 설치 후에도 기준 없이 유지한다', async () => {
+    await seed();
+    const manifest = JSON.parse(readFileSync(manifestPath(), 'utf8'));
+    manifest.version = 1;
+    delete manifest.entries[0].fileHashes;
+    writeFileSync(manifestPath(), JSON.stringify(manifest));
+    stubServer([initial(), remoteSkill('second', [{ relativePath: 'SKILL.md', content: entryContent('second') }])]);
+    const result = await download();
+    expect(result.downloaded.map((item: { slug: string }) => item.slug)).toEqual(['second']);
+    expect(result.conflicts[0].paths.some((item: { reason: string }) => item.reason === 'unknown')).toBe(true);
+    expect(readSkillEntries().find((entry: { slug: string }) => entry.slug === 'my-skill').fileHashes).toBeUndefined();
+  });
+
+  it('뒤 패키지 다운로드가 실패하면 앞 패키지와 manifest도 그대로다', async () => {
+    await seed();
+    const before = readFileSync(manifestPath(), 'utf8');
+    const updated = initial();
+    updated.files[0].content = entryContent('my-skill', '새 본문');
+    stubServer([updated, remoteSkill('broken', [{ relativePath: '../escape', content: '실패' }])]);
+    await expect(download()).rejects.toThrow();
+    expect(readFileSync(join(projectRoot, canonical, 'SKILL.md'), 'utf8')).toBe(entryContent('my-skill'));
+    expect(readFileSync(manifestPath(), 'utf8')).toBe(before);
+    stubServer([updated]);
+    expect((await download()).downloaded).toHaveLength(1);
+  });
+});
+
+describe('명시적으로 선택한 강제 다운로드', () => {
+  it('선택하지 않은 패키지와 서버 삭제 항목을 건드리지 않는다', async () => {
+    const packages = ['first', 'second', 'deleted'].map((slug) =>
+      remoteSkill(slug, [{ relativePath: 'SKILL.md', content: entryContent(slug) }]),
+    );
+    stubServer(packages);
+    await download();
+    for (const slug of ['first', 'second']) {
+      writeFileSync(join(projectRoot, '.agentteams/skills', slug, 'SKILL.md'), '로컬 변경');
+    }
+    stubServer(packages.slice(0, 2));
+    const result = await download({ id: 'id-first', force: true });
+    expect(result.downloaded.map((item: { slug: string }) => item.slug)).toEqual(['first']);
+    expect(result.removed).toEqual([]);
+    expect(readFileSync(join(projectRoot, '.agentteams/skills/second/SKILL.md'), 'utf8')).toBe('로컬 변경');
+    expect(existsSync(join(projectRoot, '.agentteams/skills/deleted/SKILL.md'))).toBe(true);
+  });
+
+  it('패키지 선택 없는 강제 실행은 거부한다', async () => {
+    stubServer([]);
+    await expect(download({ force: true })).rejects.toThrow('--force requires --id');
+  });
+
+  it('명시적 선택으로만 구형 manifest를 이행한다', async () => {
+    stubServer([remoteSkill('legacy', [{ relativePath: 'SKILL.md', content: entryContent('legacy') }])]);
+    await download();
+    const path = join(projectRoot, '.agentteams/skills.manifest.json');
+    const manifest = JSON.parse(readFileSync(path, 'utf8'));
+    manifest.version = 1;
+    delete manifest.entries[0].fileHashes;
+    writeFileSync(path, JSON.stringify(manifest));
+    const preserved = await download();
+    expect(preserved.message).toContain('.agentteams/skills/legacy/SKILL.md');
+    expect(preserved.message).toContain('agentteams skill download --id id-legacy --force');
+    await download({ id: 'id-legacy', force: true });
+    expect(JSON.parse(readFileSync(path, 'utf8')).version).toBe(2);
+    expect((await download()).conflicts).toEqual([]);
+  });
+});
+
+describe('기존 패키지 소유권 경계', () => {
+  it('선택한 ID와 다른 기존 소유자의 경로는 force로도 덮어쓰지 않는다', async () => {
+    stubServer([remoteSkill('shared-slug', [{ relativePath: 'SKILL.md', content: '기존 원본' }])]);
+    await download();
+    const manifestPath = join(projectRoot, '.agentteams/skills.manifest.json');
+    const before = readFileSync(manifestPath, 'utf8');
+    stubServer([
+      { ...remoteSkill('shared-slug', [{ relativePath: 'SKILL.md', content: '새 소유자' }]), id: 'different-id' },
+    ]);
+    expect((await download({ id: 'different-id', force: true })).conflicts[0].paths[0].reason).toBe('unsafe');
+    expect(readFileSync(manifestPath, 'utf8')).toBe(before);
+    expect(readFileSync(join(projectRoot, '.agentteams/skills/shared-slug/SKILL.md'), 'utf8')).toBe('기존 원본');
+  });
+});
+
+describe('잘못된 패키지 소유권 격리', () => {
+  it.each(['slug', 'mirror', 'duplicate'])('%s 오류가 다른 패키지를 차단하지 않는다', async (kind) => {
+    const packages = ['first', 'second', 'healthy'].map((slug) =>
+      remoteSkill(slug, [{ relativePath: 'SKILL.md', content: slug }]),
+    );
+    stubServer(packages);
+    await download();
+    const path = join(projectRoot, '.agentteams/skills.manifest.json');
+    const manifest = JSON.parse(readFileSync(path, 'utf8'));
+    if (kind === 'slug') manifest.entries[0].slug = '../invalid';
+    if (kind === 'mirror') manifest.entries[0].mirrorPaths = ['../outside'];
+    if (kind === 'duplicate') {
+      manifest.entries[0].slug = 'second';
+      manifest.entries[0].mirrorPaths = [];
+    }
+    writeFileSync(path, JSON.stringify(manifest));
+    packages[2].version = 'v2';
+    packages[2].files[0].content = '갱신';
+    const result = await download({ force: true, all: true });
+    expect(result.conflicts.length).toBeGreaterThan(0);
+    expect(result.downloaded.map((item: { slug: string }) => item.slug)).toContain('healthy');
+    expect(readFileSync(join(projectRoot, '.agentteams/skills/healthy/SKILL.md'), 'utf8')).toBe('갱신');
+    expect(readFileSync(join(projectRoot, '.agentteams/skills/first/SKILL.md'), 'utf8')).toBe('first');
+    expect(
+      JSON.parse(readFileSync(path, 'utf8')).entries.find(
+        (entry: { skillId: string }) => entry.skillId === packages[0].id,
+      ),
+    ).toEqual(manifest.entries[0]);
+  });
+
+  it('동일 경로를 요구하는 원격 패키지 모두를 보존하고 정상 패키지만 적용한다', async () => {
+    const first = remoteSkill('same-slug', [{ relativePath: 'SKILL.md', content: 'first' }]);
+    stubServer([
+      first,
+      { ...first, id: 'second-owner' },
+      remoteSkill('healthy', [{ relativePath: 'SKILL.md', content: '정상' }]),
+    ]);
+    const result = await download();
+    expect(result.conflicts).toHaveLength(2);
+    expect(result.downloaded.map((item: { slug: string }) => item.slug)).toEqual(['healthy']);
+    expect(existsSync(join(projectRoot, '.agentteams/skills/same-slug'))).toBe(false);
+  });
+});
+
+describe('구형 삭제와 링크 경계', () => {
+  it('v1에서 원본과 미러를 모두 지운 경우 자동 복원하지 않는다', async () => {
+    stubServer([remoteSkill('example', [{ relativePath: 'SKILL.md', content: '원본' }])]);
+    await download();
+    const path = join(projectRoot, '.agentteams/skills.manifest.json');
+    const manifest = JSON.parse(readFileSync(path, 'utf8'));
+    manifest.version = 1;
+    delete manifest.entries[0].fileHashes;
+    writeFileSync(path, JSON.stringify(manifest));
+    rmSync(join(projectRoot, '.agentteams/skills/example'), { recursive: true });
+    rmSync(join(projectRoot, '.agents/skills/example'), { recursive: true });
+    expect((await download()).conflicts).toHaveLength(1);
+    expect(existsSync(join(projectRoot, '.agentteams/skills/example'))).toBe(false);
+  });
+
+  it('force도 미러 상위 디렉터리 링크를 따라 쓰지 않는다', async () => {
+    stubServer([remoteSkill('example', [{ relativePath: 'SKILL.md', content: '원본' }])]);
+    const outside = join(projectRoot, 'outside');
+    mkdirSync(outside);
+    mkdirSync(join(projectRoot, '.agents'));
+    symlinkSync(outside, join(projectRoot, '.agents/skills'), 'junction');
+    const result = await download({ id: 'id-example', force: true });
+    expect(result.conflicts[0].paths).toContainEqual({ path: '.agents/skills', reason: 'unsafe' });
+    expect(readdirSync(outside)).toEqual([]);
+    expect(existsSync(join(projectRoot, '.agentteams/skills/example/SKILL.md'))).toBe(true);
+    const manifest = JSON.parse(readFileSync(join(projectRoot, '.agentteams/skills.manifest.json'), 'utf8'));
+    expect(manifest.entries[0].mirrorPaths).toEqual([]);
+  });
+  it('미러 루트 전체가 없어지면 원본을 갱신하고 선택한 미러를 다시 만든다', async () => {
+    const pkg = remoteSkill('example', [{ relativePath: 'SKILL.md', content: '원본' }]);
+    stubServer([pkg]);
+    await download({ skillTargets: 'agents,claude' });
+    rmSync(join(projectRoot, '.agents'), { recursive: true });
+    rmSync(join(projectRoot, '.claude'), { recursive: true });
+    pkg.version = 'v2';
+    pkg.files[0].content = '새 본문';
+    const result = await download({ skillTargets: 'agents,claude' });
+    expect(result.conflicts).toEqual([]);
+    for (const base of ['.agentteams', '.agents', '.claude']) {
+      expect(readFileSync(join(projectRoot, base, 'skills/example/SKILL.md'), 'utf8')).toBe('새 본문');
+    }
+  });
+
+  it('기존 미러가 링크로 바뀌어도 기준을 유지하며 안전한 원본은 갱신한다', async () => {
+    const pkg = remoteSkill('example', [{ relativePath: 'SKILL.md', content: '원본' }]);
+    stubServer([pkg]);
+    await download();
+    const manifestPath = join(projectRoot, '.agentteams/skills.manifest.json');
+    const before = JSON.parse(readFileSync(manifestPath, 'utf8')).entries[0];
+    rmSync(join(projectRoot, '.agents/skills'), { recursive: true });
+    const outside = join(projectRoot, 'outside');
+    mkdirSync(outside);
+    symlinkSync(outside, join(projectRoot, '.agents/skills'), 'junction');
+    pkg.version = 'v2';
+    pkg.files[0].content = '업데이트';
+    const result = await download();
+    expect(result.downloaded).toHaveLength(1);
+    expect(result.conflicts).toHaveLength(1);
+    expect(readdirSync(outside)).toEqual([]);
+    const after = JSON.parse(readFileSync(manifestPath, 'utf8')).entries[0];
+    expect(after.fileHashes['.agents/skills/example/SKILL.md']).toBe(
+      before.fileHashes['.agents/skills/example/SKILL.md'],
+    );
+    expect(readFileSync(join(projectRoot, '.agentteams/skills/example/SKILL.md'), 'utf8')).toBe('업데이트');
   });
 });

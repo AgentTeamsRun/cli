@@ -256,11 +256,38 @@ Common errors:
 
 ### `sync`
 
-Force-resync convention files and skill packages. No change check — skill packages are overwritten.
+컨벤션과 스킬 패키지를 동기화합니다. 로컬에서 수정·추가·삭제한 스킬 파일이 있으면 해당 패키지를 보존하고 충돌 경로를 안내합니다. `session sync`에도 같은 보호가 적용됩니다.
 
 ```bash
 agentteams sync
 ```
+
+### `skill download`
+
+스킬 패키지를 내려받고 도구별 미러를 갱신합니다. 원본 또는 미러에 로컬 변경이 있으면 해당 패키지의 다운로드와 정리 삭제를 적용하지 않습니다. 서버에서 삭제되거나 이름이 바뀐 스킬, 미러 대상 축소에도 같은 규칙이 적용됩니다. 충돌하지 않는 다른 패키지는 계속 동기화합니다.
+
+```bash
+agentteams skill download
+agentteams skill download --id <skill-id>
+agentteams skill download --skill-targets agents,claude
+agentteams skill download --skill-targets none
+```
+
+충돌 출력에는 적용되지 않은 패키지, 파일 경로와 사유가 표시됩니다. `modified`는 수정, `added`는 로컬 추가, `deleted`는 로컬 삭제, `unknown`은 배포 기준 없음, `unsafe`는 심볼릭 링크 등 자동 처리 불가를 뜻합니다. 파일 내용은 출력하지 않습니다. 구버전에서 받은 패키지는 원본 상태를 확인할 기준이 없어 내용이 같아도 충돌로 보존될 수 있습니다.
+
+로컬 변경을 유지하려면 파일을 백업하거나 필요한 내용을 서버 패키지에 반영한 뒤 다시 다운로드하세요. 서버 상태로 교체하기로 결정한 경우에는 패키지 ID를 지정해 강제 실행합니다.
+
+```bash
+agentteams skill download --id <skill-id> --force
+```
+
+이 명령은 선택한 패키지의 원본·미러와 이전 이름 경로에 있는 로컬 변경을 버립니다. 서버에서 삭제된 패키지를 선택하면 로컬 사본도 제거합니다. 다른 패키지는 변경하지 않으며, `--id` 또는 `--all` 없는 `--force`는 거부합니다. 미러 범위를 제한하려면 `--skill-targets`도 함께 지정하세요. 심볼릭 링크는 강제 실행으로 처리하지 않으므로 먼저 직접 정리해야 합니다.
+
+스킬 미러 루트 전체가 삭제되면 선택된 미러를 다시 만들며, 링크로 바뀐 미러는 해당 경로만 건너뛰고 같은 이름의 원본 갱신을 계속합니다. 미러 안의 개별 파일 편집·삭제·추가는 보호합니다. 건너뛴 미러는 배포 완료로 기록하지 않습니다.
+
+모든 구버전 패키지를 한 번에 이행하려면 로컬 편집을 백업한 뒤 `agentteams skill download --force --all`을 실행하세요. 이 명령은 모든 패키지와 미러의 로컬 변경을 서버 상태로 교체하고 서버에서 삭제된 패키지를 제거합니다. `--all`은 `--force`가 필요하며 `--id`와 함께 쓸 수 없습니다. 자동 동기화에서는 이 옵션을 전달하지 않습니다.
+
+구버전 패키지를 강제로 내려받은 뒤에는 새 배포 기준이 기록되어 다음 실행부터 변경 여부를 판별합니다. 일반적인 다운로드·적용 오류가 나면 기존 파일과 manifest를 보존하거나 복원하므로 원인을 해결한 뒤 같은 명령을 다시 실행할 수 있습니다. `Skill rollback failed`가 표시되면 안내된 복구 디렉터리를 보존하고 백업과 현재 파일을 확인하세요. `skills.sync.lock` 오류가 나면 다른 다운로드가 실행 중인지 확인하고, 강제 종료된 실행임과 남은 복구 디렉터리를 확인한 뒤 `agentteams skill download --release-lock`으로 잠금만 해제하고 다운로드를 재시도하세요. 잠금에는 PID와 획득 시각이 기록되며, 해제 명령은 실행 중인 PID의 잠금을 거부합니다. 다운로드 옵션과 해제 옵션은 함께 사용할 수 없습니다.
 
 ### `session`
 

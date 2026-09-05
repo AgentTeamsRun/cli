@@ -49,8 +49,16 @@ export function registerSkillCommand(program: Command): void {
 
   addLeaf('show', 'Show one skill', (command) => addCwd(command).option('--id <id>', 'Skill ID'));
 
-  addLeaf('download', 'Sync every skill package into .agentteams/skills/', (command) =>
+  addLeaf('download', 'Sync skill packages into .agentteams/skills/ while preserving local changes', (command) =>
     addCwd(command)
+      .option(
+        '--release-lock',
+        'Release an abandoned lock without downloading; check recovery directories first',
+        false,
+      )
+      .option('--id <id>', 'Sync only this skill (including its previous paths and mirrors)')
+      .option('--force', 'Replace local changes for --id or --all', false)
+      .option('--all', 'With --force, replace all skill packages and remove server-deleted packages', false)
       .option(
         '--skill-targets <targets>',
         "Mirror targets: comma-separated list of agents,claude,github or 'none' (default: detected from marker directories)",
