@@ -1,0 +1,68 @@
+type PlanRunbookTask = {
+    id: string;
+    title: string;
+    status: string;
+    orderIndex: number;
+    dependsOnTaskIds?: string[];
+};
+type PlanRunbookProgress = {
+    total: number;
+    todo: number;
+    inProgress: number;
+    done: number;
+    skipped: number;
+    blocked: number;
+    completed: number;
+    percent: number;
+};
+/**
+ * Which agent this run represents, for the lifecycle calls that record one.
+ *
+ * `AGENTTEAMS_AGENT_NAME` is the existing channel for this: the daemon has always
+ * exported it, and the CLI read it until the `--agent` flag was removed, which
+ * left the producer without a consumer. The rationale for preferring a proven
+ * identity over a declared one lives with the shared resolver.
+ */
+export declare function resolveAgentAssignee(options: Record<string, unknown>): string | undefined;
+export declare function assertComplexityReasonCanBeRecorded(complexityReason: unknown, nextComplexity: string | undefined, currentComplexity?: string | null): void;
+export declare const getPlanComplexityValues: () => readonly string[];
+export declare function buildFreshnessNoticeLines(freshness: {
+    platformGuidesChanged: boolean;
+    conventionChanges: Array<{
+        type: 'new' | 'updated' | 'deleted';
+        title?: string;
+        fileName?: string;
+        id: string;
+    }>;
+}): string[];
+export declare function buildUniquePlanRunbookFileName(title: string, planId: string, existingFileNames: string[]): string;
+export declare function buildPlanRunbookFrontmatter(plan: {
+    id: string;
+    title: string;
+    status: string;
+    priority: string;
+    webUrl?: string | null;
+    contentVersion?: string | null;
+    downloadedAt: string;
+}): string;
+export declare function buildPlanRunbookMarkdown(plan: {
+    contentVersion?: string | null;
+    contentMarkdown?: string | null;
+    progress?: PlanRunbookProgress | null;
+}): string;
+export declare function addTaskIdCommentsToPlanRunbook(markdown: string, tasks: PlanRunbookTask[], contentVersion?: string | null): string;
+export declare function buildPlanTaskSidecar(planId: string, tasks: PlanRunbookTask[]): {
+    planId: string;
+    tasks: {
+        id: string;
+        number: number;
+        title: string;
+        status: string;
+        dependsOnTaskIds: string[];
+        dependsOnTaskNumbers: number[];
+    }[];
+};
+export declare function buildQuickPlanResult(planId: string, createResult: unknown, finishResult: unknown): Record<string, unknown>;
+export declare function executePlanCommand(apiUrl: string, projectId: string, headers: any, action: string, options: any): Promise<any>;
+export {};
+//# sourceMappingURL=plan.d.ts.map
