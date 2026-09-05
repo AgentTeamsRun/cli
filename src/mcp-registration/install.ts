@@ -3,7 +3,7 @@ import type { ToolProfile } from '@agentteams/context-tools';
 import { PROJECT_SCOPE_FILE_MODE, USER_SCOPE_FILE_MODE, writeConfigFileAtomically } from './atomicWrite.js';
 import { findClient, MCP_CLIENTS } from './clients.js';
 import { detectClients, type DetectionDependencies } from './detect.js';
-import { McpConfigParseError, upsertContainerEntry } from './jsonc.js';
+import { ensureRootMember, McpConfigParseError, upsertContainerEntry } from './jsonc.js';
 import { buildEntryValue, redactKeyMaterial, renderConfigSnippet, renderVendorCommandLine } from './render.js';
 import { buildServerSpec, MCP_SERVER_NAME, type McpCredentials } from './serverSpec.js';
 import { resolveClientToolProfile } from './toolProfileSupport.js';
@@ -148,6 +148,21 @@ function installViaJsonMerge(options: InstallClientOptions, configPath: string, 
 
   let edited;
   try {
+    // Native settings (Muse `schema_version`) get their marker injected when it is missing —
+    // including a zero-byte file — and are only refused when the file already declares a
+    // different value, which means a schema this CLI does not know how to write.
+    for (const [key, value] of Object.entries(definition.requiredRootValues ?? {})) {
+      const ensured = ensureRootMember(source, key, value);
+      if (ensured.existed && ensured.existing !== value) {
+        return {
+          ...base,
+          outcome: 'FAILED',
+          detail: `${configPath} declares "${key}": ${JSON.stringify(ensured.existing)}, but this version of AgentTeams only knows how to write "${key}": ${JSON.stringify(value)}. The file was left unchanged — update AgentTeams or apply the snippet manually.`,
+          manualSnippet,
+        };
+      }
+      source = ensured.text;
+    }
     edited = upsertContainerEntry(source, {
       containerKey,
       entryKey: serverName,

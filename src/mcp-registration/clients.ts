@@ -587,6 +587,57 @@ export const MCP_CLIENTS: McpClientDefinition[] = [
       },
     },
   },
+  {
+    id: 'muse',
+    runnerType: 'MUSE_CODE',
+    label: 'Muse Code',
+    executables: ['muse'],
+    // install.sh 실측: MUSE_INSTALL_DIR 우선, 기본 ~/.local/bin. npm muse는 다른 도구다.
+    extraBinDirs: (context) => [
+      ...(context.env.MUSE_INSTALL_DIR ? [context.env.MUSE_INSTALL_DIR] : []),
+      join(context.homeDir, '.local', 'bin'),
+    ],
+    executableIdentity: {
+      args: ['--help'],
+      marker: 'muse — interactive terminal coding agent',
+      preferExtraBinDirs: true,
+    },
+    // XDG_CONFIG_HOME 격리 실측에서 MCP initialize/tools/list를 확인했다(2026-09-05).
+    configSignals: (context) => [
+      join(context.env.XDG_CONFIG_HOME || join(context.homeDir, '.config'), 'muse', 'settings.json'),
+    ],
+    docsUrl: 'https://dev.meta.ai/docs/muse-code/extending',
+    verifiedAt: '2026-09-05',
+    nativeDiscovery: {
+      status: 'unknown',
+      verifiedAt: '2026-09-05',
+      evidenceUrl: 'https://dev.meta.ai/docs/muse-code/extending',
+      reason: 'Host-side progressive tool definition loading has not been verified.',
+    },
+    scopes: {
+      user: {
+        configPath: (context) =>
+          join(context.env.XDG_CONFIG_HOME || join(context.homeDir, '.config'), 'muse', 'settings.json'),
+        format: 'json',
+        containerKey: 'mcp_servers',
+        entryShape: 'muse',
+        strategy: 'jsonMerge',
+        requiredRootValues: { schema_version: 1 },
+      },
+      // muse init은 AGENTS.md만 생성한다. 프로젝트 설정 경로는 확인되지 않아 기록하지 않는다.
+      project: {
+        configPath: (context) =>
+          join(context.env.XDG_CONFIG_HOME || join(context.homeDir, '.config'), 'muse', 'settings.json'),
+        format: 'json',
+        containerKey: 'mcp_servers',
+        entryShape: 'muse',
+        strategy: 'configOnly',
+        requiredRootValues: { schema_version: 1 },
+        configOnlyReason:
+          'Muse Code project-scope MCP settings have not been verified. Register with --scope user instead.',
+      },
+    },
+  },
 ];
 
 export function findClient(clientId: string): McpClientDefinition | undefined {

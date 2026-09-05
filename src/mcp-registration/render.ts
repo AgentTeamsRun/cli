@@ -13,6 +13,7 @@ export function buildEntryValue(shape: McpEntryShape, spec: McpServerSpec): Reco
 
   const entry: Record<string, unknown> = {};
   if (shape === 'stdio') entry.type = 'stdio';
+  if (shape === 'muse') entry.transport = 'stdio';
   entry.command = spec.command;
   entry.args = [...spec.args];
   entry.env = { ...spec.env };
@@ -61,7 +62,7 @@ export function renderConfigSnippet(
   const containerKey = definition.containerKey;
   const entry = buildEntryValue(definition.entryShape ?? 'plain', spec);
   const document = containerKey ? { [containerKey]: { [serverName]: entry } } : { [serverName]: entry };
-  return JSON.stringify(document, null, 2);
+  return JSON.stringify({ ...definition.requiredRootValues, ...document }, null, 2);
 }
 
 /** The equivalent vendor command, for users who prefer to run it themselves. */
