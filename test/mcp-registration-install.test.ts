@@ -61,6 +61,58 @@ describe('mcp install', () => {
   const install = (options: Record<string, unknown>, vendorRunner?: VendorRunner) =>
     runMcpInstallCommand(options, { credentials, context, vendorRunner });
 
+  it('creates valid Muse user settings and preserves existing fields on re-registration', () => {
+    context.env.XDG_CONFIG_HOME = join(home, 'xdg');
+    expect(install({ client: 'muse', scope: 'user' }).exitCode).toBe(0);
+    const path = join(home, 'xdg', 'muse', 'settings.json');
+    const first = JSON.parse(readFileSync(path, 'utf8'));
+    expect(first.schema_version).toBe(1);
+    expect(first.mcp_servers.agentteams.transport).toBe('stdio');
+    first.model = 'custom-model';
+    first.mcp_servers.other = { transport: 'stdio', command: 'other' };
+    writeFileSync(path, JSON.stringify(first));
+    expect(install({ client: 'muse', scope: 'user' }).exitCode).toBe(0);
+    expect(JSON.parse(readFileSync(path, 'utf8'))).toEqual(first);
+    const before = readFileSync(path, 'utf8');
+    const project = install({ client: 'muse', scope: 'project' });
+    expect(project.text).toContain('SKIPPED_CONFIG_ONLY');
+    expect(readFileSync(path, 'utf8')).toBe(before);
+  });
+
+  it('refuses an unsupported Muse schema version without rewriting user settings', () => {
+    const dir = join(home, '.config', 'muse');
+    mkdirSync(dir, { recursive: true });
+    const path = join(dir, 'settings.json');
+    writeFileSync(path, '{"schema_version":2}');
+    const result = install({ client: 'muse', scope: 'user' });
+    expect(result.exitCode).toBe(1);
+    expect(result.text).toContain('declares "schema_version": 2');
+    expect(result.text).not.toContain('could not be parsed');
+    expect(readFileSync(path, 'utf8')).toBe('{"schema_version":2}');
+  });
+
+  it('injects schema_version into Muse settings that exist without it, including a zero-byte file', () => {
+    const dir = join(home, '.config', 'muse');
+    mkdirSync(dir, { recursive: true });
+    const path = join(dir, 'settings.json');
+
+    writeFileSync(path, '', 'utf-8');
+    expect(install({ client: 'muse', scope: 'user' }).exitCode).toBe(0);
+    const seeded = JSON.parse(readFileSync(path, 'utf8'));
+    expect(seeded.schema_version).toBe(1);
+    expect(seeded.mcp_servers.agentteams.transport).toBe('stdio');
+
+    writeFileSync(path, '{\n  "model": "custom-model"\n}\n', 'utf-8');
+    expect(install({ client: 'muse', scope: 'user' }).exitCode).toBe(0);
+    const injected = JSON.parse(readFileSync(path, 'utf8'));
+    expect(injected).toEqual({
+      model: 'custom-model',
+      schema_version: 1,
+      mcp_servers: injected.mcp_servers,
+    });
+    expect(injected.mcp_servers.agentteams.transport).toBe('stdio');
+  });
+
   describe('file merge strategy', () => {
     const cursorUserConfig = () => join(home, '.cursor', 'mcp.json');
 

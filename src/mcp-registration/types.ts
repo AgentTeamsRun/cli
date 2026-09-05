@@ -13,6 +13,7 @@ export const MCP_CLIENT_IDS = [
   'kiro-cli',
   'grok-build',
   'omp',
+  'muse',
 ] as const;
 
 export type McpClientId = (typeof MCP_CLIENT_IDS)[number];
@@ -65,6 +66,8 @@ export type McpEntryShape =
   | 'stdio'
   /** `{ command, args, env }` */
   | 'plain'
+  /** Muse Code: { transport: 'stdio', command, args, env }. */
+  | 'muse'
   /** `{ type: "local", command: [...], environment, enabled }` */
   | 'opencode';
 
@@ -93,6 +96,8 @@ export interface McpScopeDefinition {
   containerKey?: string;
   entryShape?: McpEntryShape;
   strategy: McpInstallStrategy;
+  /** Required root fields for native settings; used for new files and validated before merge. */
+  requiredRootValues?: Record<string, string | number | boolean>;
   /** Present when `strategy === 'vendorCommand'`. */
   vendor?: {
     buildArgs: (spec: McpServerSpec, serverName: string) => string[];

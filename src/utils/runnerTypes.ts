@@ -21,6 +21,7 @@ export const RUNNER_TYPE_VALUES = [
   'KIRO_CLI',
   'GROK_BUILD',
   'OMP',
+  'MUSE_CODE',
 ] as const;
 
 /**

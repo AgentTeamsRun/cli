@@ -519,7 +519,8 @@ describe('agentteams_resolve MCP tool', () => {
     // cheap in `full` and a 50% jump in `minimal` (3.4k), which is why `minimal`
     // does not carry it.
     expect(delta).toBe(1_762);
-    expect(withResolve.totalChars).toBe(66_887);
+    // Muse Code 러너 타입이 create/update 스키마에 추가되어 24자가 증가했다.
+    expect(withResolve.totalChars).toBe(66_911);
     process.stderr.write(`[agentteams_resolve budget] ${JSON.stringify({ delta, full: withResolve.totalChars })}\n`);
   });
 });

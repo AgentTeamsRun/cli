@@ -53,6 +53,14 @@ describe('mcp client detection', () => {
 
   const fakeExecutable = (name: string) => writeFileSync(join(binDir, name), '#!/bin/sh\n', { mode: 0o755 });
 
+  it('detects Muse settings under the measured XDG config directory', () => {
+    context.env.XDG_CONFIG_HOME = join(home, 'xdg');
+    expect(byId(detectClients({ context })).muse.detected).toBe(false);
+    mkdirSync(join(home, 'xdg', 'muse'), { recursive: true });
+    writeFileSync(join(home, 'xdg', 'muse', 'settings.json'), '{"schema_version":1}');
+    expect(byId(detectClients({ context })).muse.evidence).toBe('configured');
+  });
+
   it('separates the four signal combinations with the evidence that produced them', () => {
     // configured only
     mkdirSync(join(home, '.cursor'), { recursive: true });
@@ -216,7 +224,7 @@ describe('mcp client detection', () => {
       expect(result.text).toContain('claude-code [INSTALLED]');
       expect(result.text).toContain('cursor-cli [INSTALLED]');
       expect(result.text).toContain('amp [SKIPPED_NOT_DETECTED]');
-      expect(result.text).toContain('Summary: 2 registered, 9 skipped, 0 failed.');
+      expect(result.text).toContain('Summary: 2 registered, 10 skipped, 0 failed.');
     });
 
     it('runs Grok registration through the verified absolute path in batch mode', () => {
@@ -267,7 +275,7 @@ describe('mcp client detection', () => {
       // Both clients listed after the failure are still attempted and still registered.
       expect(result.text).toContain('codex [INSTALLED]');
       expect(result.text).toContain('cursor-cli [INSTALLED]');
-      expect(result.text).toContain('Summary: 2 registered, 8 skipped, 1 failed.');
+      expect(result.text).toContain('Summary: 2 registered, 9 skipped, 1 failed.');
     });
 
     /**

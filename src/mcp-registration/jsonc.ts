@@ -301,6 +301,49 @@ export function upsertContainerEntry(source: string, options: UpsertContainerEnt
   };
 }
 
+export interface EnsureRootMemberResult {
+  text: string;
+  /** The key was already present; its value is returned untouched in `existing`. */
+  existed: boolean;
+  existing?: unknown;
+}
+
+/**
+ * Add a root-level scalar member when it is missing, without reformatting anything
+ * else. An existing member is never rewritten — callers decide whether its value is
+ * acceptable. Native settings files (Muse `schema_version`) need this so a file the
+ * client created without the marker can still be registered into instead of rejected.
+ *
+ * @throws {McpConfigParseError} when the document is not parseable or the root is
+ * not an object.
+ */
+export function ensureRootMember(
+  source: string,
+  key: string,
+  value: string | number | boolean,
+): EnsureRootMemberResult {
+  const indentUnit = detectIndentUnit(source);
+
+  if (source.trim().length === 0) {
+    return { text: `{\n${indentUnit}${JSON.stringify(key)}: ${JSON.stringify(value)}\n}\n`, existed: false };
+  }
+
+  const parsed = parseJsonc(source);
+  const rootStart = skipTrivia(source, 0);
+  if (source[rootStart] !== '{' || parsed === null || typeof parsed !== 'object') {
+    throw new McpConfigParseError('The top-level value must be an object');
+  }
+
+  const members = listMembers(source, rootStart);
+  if (members.some((member) => member.key === key)) {
+    return { text: source, existed: true, existing: (parsed as Record<string, unknown>)[key] };
+  }
+
+  const memberIndent = lineIndentOf(source, rootStart) + indentUnit;
+  const memberText = `${JSON.stringify(key)}: ${JSON.stringify(value)}`;
+  return { text: appendMember(source, rootStart, memberText, memberIndent), existed: false };
+}
+
 /** Read `containerKey.entryKey` from a parsed document, if present. */
 export function readContainerEntry(source: string, containerKey: string, entryKey: string): unknown {
   const parsed = parseJsonc(source);
