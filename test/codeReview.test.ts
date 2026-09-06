@@ -682,3 +682,41 @@ describe('code-review resolve', () => {
     expect(axiosPostSpy).not.toHaveBeenCalled();
   });
 });
+
+describe('code-review recommendation', () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('returns the server assessment unchanged and performs no write', async () => {
+    const data = {
+      recommended: false,
+      reasons: [],
+      riskAssessment: {
+        level: 'LOW',
+        intensity: 'STANDARD',
+        reasons: ['NO_ELEVATED_SIGNAL'],
+        ruleVersion: '1',
+        evaluatedAt: '2026-09-06T00:00:00.000Z',
+      },
+    };
+    const get = jest.spyOn(axios, 'get').mockResolvedValueOnce({ data: { data } });
+    const post = jest.spyOn(axios, 'post');
+    expect(
+      await executeCodeReviewCommand('http://localhost:3001', 'project', {}, 'recommendation', {
+        sourceCompletionReportId: 'report/id',
+      }),
+    ).toEqual({ data });
+    expect(get).toHaveBeenCalledWith(
+      'http://localhost:3001/api/projects/project/completion-reports/report%2Fid/code-review-recommendation',
+      { headers: {} },
+    );
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it('requires a source report', async () => {
+    await expect(
+      executeCodeReviewCommand('http://localhost:3001', 'project', {}, 'recommendation', {}),
+    ).rejects.toThrow('--source-completion-report-id');
+  });
+});

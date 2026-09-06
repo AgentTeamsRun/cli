@@ -1,19 +1,10 @@
 import { createHash } from 'node:crypto';
-import {
-  existsSync,
-  lstatSync,
-  mkdirSync,
-  readFileSync,
-  readdirSync,
-  renameSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 
 /**
- * Skill 패키지의 로컬 소유권과 원자적 교체. `.agentteams/skills/<slug>/`의 유일한 소유자는
- * 이 모듈이며, `convention download`의 카테고리 sweep은 이 디렉터리를 건드리지 않는다.
+ * Skill 패키지의 검증과 manifest 형식. `.agentteams/skills/<slug>/`의 유일한 소유자는
+ * 스킬 동기화 경로이며, `convention download`의 카테고리 sweep은 이 디렉터리를 건드리지 않는다.
  *
  * 계약(진입 파일, 허용 디렉터리, 크기 상한)의 SSOT는 서버가 배포하는 skill-package-guide.md다.
  * CLI는 같은 규칙을 API 호출 **전에** 한 번 더 적용해, 잘못된 패키지가 네트워크를 타기 전에
@@ -67,10 +58,12 @@ export type SkillManifestEntry = {
   version: string;
   /** 프로젝트 루트 기준 상대 경로. 이 목록에 있는 파일만 CLI가 지운다. */
   mirrorPaths: string[];
+  /** 마지막으로 배포한 파일의 SHA-256. 프로젝트 상대 경로이며 v1 항목에는 없다. */
+  fileHashes?: Record<string, string>;
 };
 
-export type SkillDownloadManifestV1 = {
-  version: 1;
+export type SkillDownloadManifest = {
+  version: 1 | 2;
   generatedAt: string;
   entries: SkillManifestEntry[];
 };
@@ -270,7 +263,7 @@ export const validateSkillPackageFiles = (files: SkillPackageFile[]): void => {
  * Finder·Explorer가 디렉터리에 자동으로 넣는 파일. 콘텐츠 검사에 걸리면 사용자가 만들지 않은
  * 파일 때문에 push 전체가 멈춘다.
  */
-const isOsJunkFileName = (name: string): boolean => {
+export const isOsJunkFileName = (name: string): boolean => {
   const lower = name.toLowerCase();
   return (
     lower === '.ds_store' ||
@@ -330,15 +323,15 @@ export const collectSkillPackageFiles = (packageDir: string): SkillPackageFile[]
   return files;
 };
 
-export const readSkillManifest = (projectRoot: string): SkillDownloadManifestV1 => {
+export const readSkillManifest = (projectRoot: string): SkillDownloadManifest => {
   const path = skillManifestPath(projectRoot);
   if (!existsSync(path)) {
     return { version: 1, generatedAt: new Date().toISOString(), entries: [] };
   }
 
   try {
-    const parsed = JSON.parse(readFileSync(path, 'utf8')) as SkillDownloadManifestV1;
-    if (parsed.version !== 1 || !Array.isArray(parsed.entries)) {
+    const parsed = JSON.parse(readFileSync(path, 'utf8')) as SkillDownloadManifest;
+    if (![1, 2].includes(parsed.version) || !Array.isArray(parsed.entries)) {
       return { version: 1, generatedAt: new Date().toISOString(), entries: [] };
     }
     return parsed;
@@ -349,66 +342,10 @@ export const readSkillManifest = (projectRoot: string): SkillDownloadManifestV1 
   }
 };
 
-export const writeSkillManifest = (projectRoot: string, manifest: SkillDownloadManifestV1): void => {
+export const writeSkillManifest = (projectRoot: string, manifest: SkillDownloadManifest): void => {
   const path = skillManifestPath(projectRoot);
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
-};
-
-/**
- * 임시 디렉터리에 전부 쓴 뒤 한 번에 교체한다. 쓰기 도중 실패하면 기존 디렉터리는
- * byte-for-byte 그대로 남는다 — 부분 적용된 패키지는 "설치됐지만 깨진" 상태를 만든다.
- */
-export const writePackageAtomically = (targetDir: string, files: SkillPackageFile[]): void => {
-  const stagingDir = `${targetDir}.staging-${process.pid}`;
-  const backupDir = `${targetDir}.backup-${process.pid}`;
-
-  rmSync(stagingDir, { recursive: true, force: true });
-  mkdirSync(stagingDir, { recursive: true });
-
-  try {
-    for (const file of files) {
-      assertSafeRelativePath(file.relativePath);
-      const destination = join(stagingDir, ...file.relativePath.split('/'));
-      mkdirSync(dirname(destination), { recursive: true });
-      writeFileSync(destination, file.content, 'utf8');
-    }
-  } catch (error) {
-    rmSync(stagingDir, { recursive: true, force: true });
-    throw error;
-  }
-
-  const hadPrevious = existsSync(targetDir);
-  if (hadPrevious) {
-    rmSync(backupDir, { recursive: true, force: true });
-    renameSync(targetDir, backupDir);
-  }
-
-  try {
-    mkdirSync(dirname(targetDir), { recursive: true });
-    renameSync(stagingDir, targetDir);
-  } catch (error) {
-    // 교체 자체가 실패하면 백업을 되돌려 이전 상태를 복원한다.
-    if (hadPrevious && !existsSync(targetDir)) {
-      renameSync(backupDir, targetDir);
-    }
-    rmSync(stagingDir, { recursive: true, force: true });
-    throw error;
-  }
-
-  rmSync(backupDir, { recursive: true, force: true });
-};
-
-/** manifest에 기록된 경로만 지운다. 사용자가 mirror 디렉터리에 둔 파일은 건드리지 않는다. */
-export const removeManifestPaths = (projectRoot: string, relativePaths: string[]): void => {
-  for (const relativePath of relativePaths) {
-    const absolutePath = join(projectRoot, ...relativePath.split('/'));
-    // 프로젝트 루트를 벗어나는 기록은 무시한다(손상되거나 조작된 manifest 방어).
-    if (!resolve(absolutePath).startsWith(resolve(projectRoot) + sep)) {
-      continue;
-    }
-    rmSync(absolutePath, { recursive: true, force: true });
-  }
 };
 
 const GITIGNORE_MARKER = '# AgentTeams skill mirrors (generated — do not edit)';

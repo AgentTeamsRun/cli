@@ -6,7 +6,7 @@ import { addPaginationOptions } from './options/pagination.js';
 import { addMutationContractOptions, addWriteContractOptions } from './options/writeContract.js';
 import { RUNNER_TYPE_OPTION_DESCRIPTION } from '../utils/runnerTypes.js';
 
-/** 액션 인벤토리: list/get/finding-list/create/update/create-plan/submit-result/cancel/delete/dismiss/resolve/undismiss. */
+/** 액션 인벤토리: list/get/recommendation/finding-list/create/update/create-plan/submit-result/cancel/delete/dismiss/resolve/undismiss. */
 export function registerCodeReviewCommand(program: Command): void {
   const root = program
     .command('code-review')
@@ -47,6 +47,12 @@ export function registerCodeReviewCommand(program: Command): void {
       .option('--target-type <type>', 'Review target type')
       .option('--source-plan-id <id>', 'Source plan ID')
       .option('--source-completion-report-id <id>', 'Source completion report ID'),
+  );
+  addLeaf('recommendation', 'Show suggested review risk and intensity without starting a review', (command) =>
+    command.requiredOption('--source-completion-report-id <id>', 'Source completion report ID'),
+  ).addHelpText(
+    'after',
+    '\nLow risk still suggests standard review. Missing evidence is UNKNOWN. The assessment includes reasons, ruleVersion, and the report evidence timestamp (evaluatedAt).',
   );
   addLeaf('get', 'Get a code review or finding', (command) =>
     command.option('--id <id>', 'Code review ID').option('--finding-id <id>', 'Finding ID for single-finding focus'),

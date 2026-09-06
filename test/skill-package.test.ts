@@ -1,14 +1,5 @@
 import { afterEach, beforeEach, describe, it, expect } from '@jest/globals';
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  readdirSync,
-  rmSync,
-  symlinkSync,
-  writeFileSync,
-} from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -19,13 +10,8 @@ import {
   detectSkillMirrorTargets,
   findUnregisteredSkillSlugs,
   ensureMirrorGitignore,
-  mirrorDirFor,
   parseSkillTargetsOption,
-  readSkillManifest,
-  removeManifestPaths,
   validateSkillPackageFiles,
-  writePackageAtomically,
-  writeSkillManifest,
 } from '../src/utils/skillPackage.js';
 
 let projectRoot = '';
@@ -212,80 +198,6 @@ describe('package validation', () => {
 
     const files = collectSkillPackageFiles(packageDir);
     expect(files.map((file) => file.relativePath).sort()).toEqual(['SKILL.md', 'references/notes.md']);
-  });
-});
-
-describe('atomic package replacement', () => {
-  it('leaves the previous package byte-for-byte intact when a write fails midway', () => {
-    const targetDir = join(projectRoot, '.agentteams', 'skills', 'my-skill');
-    writeFile(join(targetDir, 'SKILL.md'), entryContent());
-    writeFile(join(targetDir, 'references', 'keep.md'), 'original');
-    const before = readFileSync(join(targetDir, 'references', 'keep.md'), 'utf8');
-
-    expect(() =>
-      writePackageAtomically(targetDir, [
-        { relativePath: 'SKILL.md', content: 'new entry' },
-        { relativePath: '../escape.md', content: 'boom' },
-      ]),
-    ).toThrow(SkillPackageError);
-
-    expect(readFileSync(join(targetDir, 'SKILL.md'), 'utf8')).toBe(entryContent());
-    expect(readFileSync(join(targetDir, 'references', 'keep.md'), 'utf8')).toBe(before);
-    // 임시 디렉터리가 남으면 다음 실행이 남의 찌꺼기 위에서 시작한다.
-    const leftovers = readdirSync(join(projectRoot, '.agentteams', 'skills')).filter((name) =>
-      name.includes('staging'),
-    );
-    expect(leftovers).toEqual([]);
-  });
-
-  it('replaces the package and drops files that are no longer part of it', () => {
-    const targetDir = join(projectRoot, '.agentteams', 'skills', 'my-skill');
-    writeFile(join(targetDir, 'SKILL.md'), entryContent());
-    writeFile(join(targetDir, 'references', 'old.md'), 'old');
-
-    writePackageAtomically(targetDir, [{ relativePath: 'SKILL.md', content: 'updated' }]);
-
-    expect(readFileSync(join(targetDir, 'SKILL.md'), 'utf8')).toBe('updated');
-    expect(existsSync(join(targetDir, 'references', 'old.md'))).toBe(false);
-  });
-});
-
-describe('manifest-scoped mirror cleanup', () => {
-  it('removes only the paths the CLI recorded and leaves user files alone', () => {
-    const mirrorDir = mirrorDirFor(projectRoot, 'agents', 'my-skill');
-    writeFile(join(mirrorDir, 'SKILL.md'), entryContent());
-    writeFile(join(mirrorDir, 'user-note.md'), 'mine');
-
-    writeSkillManifest(projectRoot, {
-      version: 1,
-      generatedAt: new Date().toISOString(),
-      entries: [
-        {
-          skillId: 'skill-1',
-          slug: 'my-skill',
-          version: 'v1',
-          mirrorPaths: ['.agents/skills/my-skill/SKILL.md'],
-        },
-      ],
-    });
-
-    const manifest = readSkillManifest(projectRoot);
-    removeManifestPaths(projectRoot, manifest.entries[0].mirrorPaths);
-
-    expect(existsSync(join(mirrorDir, 'SKILL.md'))).toBe(false);
-    expect(readFileSync(join(mirrorDir, 'user-note.md'), 'utf8')).toBe('mine');
-  });
-
-  it('ignores manifest paths that escape the project root', () => {
-    const outside = join(projectRoot, '..', `escape-${process.pid}.md`);
-    writeFileSync(outside, 'do not delete', 'utf8');
-
-    try {
-      removeManifestPaths(projectRoot, ['../escape-' + process.pid + '.md']);
-      expect(readFileSync(outside, 'utf8')).toBe('do not delete');
-    } finally {
-      rmSync(outside, { force: true });
-    }
   });
 });
 

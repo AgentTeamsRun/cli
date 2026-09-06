@@ -150,3 +150,16 @@ export async function undismissCodeReviewFinding(
   const response = await httpClient.post(`${baseUrl}/${id}/findings/${findingId}/undismiss`, body, { headers });
   return response.data;
 }
+
+export async function getCodeReviewRecommendation(
+  apiUrl: string,
+  projectId: string,
+  headers: Record<string, string>,
+  reportId: string,
+): Promise<unknown> {
+  const response = await httpClient.get(
+    `${apiUrl}/api/projects/${projectId}/completion-reports/${encodeURIComponent(reportId)}/code-review-recommendation`,
+    { headers },
+  );
+  return response.data;
+}

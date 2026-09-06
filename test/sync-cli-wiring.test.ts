@@ -10,7 +10,8 @@ const syncResult = {
     'Unmanaged convention files are still present: .agentteams/rules/local-note.md. Remove them manually if they are stale.',
   skills: {
     message: 'Downloaded 2 skill package(s).',
-    warning: 'Local skill package copies were overwritten by the server version.',
+    warning:
+      'Preserved skill example: .agentteams/skills/example/SKILL.md (modified). Back up local changes; run agentteams skill download --id skill-id --force.',
   },
 };
 
@@ -67,12 +68,14 @@ describe('agentteams sync CLI output', () => {
     expect(output).toContain('Downloaded 4 file(s) into .agentteams');
     expect(output).toContain('Unmanaged convention files are still present: .agentteams/rules/local-note.md.');
     expect(output).toContain('Downloaded 2 skill package(s).');
-    expect(output).toContain('Local skill package copies were overwritten by the server version.');
+    expect(output).toContain(
+      'Preserved skill example: .agentteams/skills/example/SKILL.md (modified). Back up local changes; run agentteams skill download --id skill-id --force.',
+    );
     expect(output).not.toContain('{');
     expect(output).not.toContain('"unmanagedFiles"');
     expect(output.indexOf('Convention sync completed.')).toBeLessThan(output.indexOf('Unmanaged convention files'));
     expect(output.indexOf('Unmanaged convention files')).toBeLessThan(output.indexOf('Downloaded 2 skill package(s).'));
-    expect(output.indexOf('Downloaded 2 skill package(s).')).toBeLessThan(output.indexOf('Local skill package copies'));
+    expect(output.indexOf('Downloaded 2 skill package(s).')).toBeLessThan(output.indexOf('Preserved skill example'));
   });
 
   test('--format json은 전체 sync 결과 객체를 보존한다', async () => {

@@ -24,9 +24,8 @@ import { resolveApiContext } from '../utils/apiContext.js';
  *
  * 두 가지 불변식이 있다.
  *
- * 1) `skill download`는 반드시 `skill status` 게이트 뒤에서만 부른다. download는
- *    updateAvailable 판정 없이 모든 로컬 패키지를 덮어쓰므로, 게이트 없이 부르면 로컬에서
- *    작성 중인 스킬이 세션 시작마다 지워진다.
+ * 1) `skill status`로 불필요한 다운로드를 줄인다. 실제 파일 변경은 다운로드 경로의
+ *    공통 충돌 검사가 보호하며, 세션 동기화는 강제 옵션을 전달하지 않는다.
  * 2) 어떤 실패도 예외로 새어나가지 않는다. 이 명령이 죽으면 에이전트가 본 작업을 시작도 못 하고
  *    멈춘다. 실패는 전부 `notes`로 내려보내고 정상 종료한다.
  */
@@ -39,6 +38,7 @@ export type SessionSyncResult = {
   /** 보고만 한다 — 실행 중인 바이너리를 세션 도중에 교체하지 않는다. */
   cliUpdateAvailable: boolean;
   notes: string[];
+  skillConflicts: number;
   summary: string;
 };
 
@@ -123,10 +123,11 @@ export const diffConventionSnapshots = (
 const describeError = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
 const buildSummary = (result: Omit<SessionSyncResult, 'summary'>): string => {
-  if (result.reread.length === 0 && result.invalidated.length === 0) {
+  if (result.reread.length === 0 && result.invalidated.length === 0 && result.skillConflicts === 0) {
     return result.notes.length > 0 ? 'Nothing to re-read' : '✓ Up to date';
   }
   const parts: string[] = [];
+  if (result.skillConflicts > 0) parts.push(`${result.skillConflicts} skill package(s) preserved — see notes`);
   if (result.reread.length > 0) parts.push(`re-read ${result.reread.length} file(s)`);
   if (result.invalidated.length > 0) parts.push(`${result.invalidated.length} rule(s) no longer apply`);
   return parts.join('; ');
@@ -145,6 +146,7 @@ export async function sessionSync(options?: { cwd?: string }): Promise<SessionSy
       invalidated: [],
       synced,
       cliUpdateAvailable,
+      skillConflicts: 0,
       notes: ['Not an AgentTeams project — nothing to sync.'],
       summary: '✓ Up to date',
     };
@@ -166,7 +168,7 @@ export async function sessionSync(options?: { cwd?: string }): Promise<SessionSy
 
   // 스킬을 **먼저** 맞춘다. 스킬 목록이 바뀌면 convention.md의 Skill Index도 달라지므로,
   // 컨벤션 다운로드가 앞서면 방금 바뀐 스킬이 반영되지 않은 인덱스를 받게 된다.
-  await syncSkills(cwd, synced, notes);
+  const skillConflicts = await syncSkills(cwd, synced, notes);
 
   // 스킬 변경은 `checkConventionFreshness`가 보지 않는 축이다(그쪽은 컨벤션 레코드와 플랫폼
   // 가이드 해시만 본다). 이 조건이 없으면 스킬만 바뀐 세션에서 Skill Index가 낡은 채로 남는다.
@@ -181,31 +183,29 @@ export async function sessionSync(options?: { cwd?: string }): Promise<SessionSy
 
   const { reread, invalidated } = diffConventionSnapshots(before, snapshotConventionFiles(projectRoot));
 
-  const result = { reread, invalidated, synced, cliUpdateAvailable, notes };
+  const result = { reread, invalidated, synced, cliUpdateAvailable, notes, skillConflicts };
   return { ...result, summary: buildSummary(result) };
 }
 
 /**
- * 스킬은 status로 게이트한 뒤에만 받는다. `skill download`가 판정 없이 로컬 패키지를 전부
- * 덮어쓰기 때문이다 — 게이트를 빼면 로컬에서 작성 중인 패키지가 세션 시작마다 사라진다.
+ * 원격 변경이 있을 때만 다운로드한다. 충돌한 패키지는 보존하고 해결 안내를 notes에 전달한다.
  */
-async function syncSkills(cwd: string, synced: { skills: boolean }, notes: string[]): Promise<void> {
+async function syncSkills(cwd: string, synced: { skills: boolean }, notes: string[]): Promise<number> {
   let apiContext: { apiUrl: string; headers: Record<string, string>; projectId: string };
   try {
     const config = await loadConfigWithCredential();
     if (!config) {
       notes.push('Skill check skipped: project is not configured.');
-      return;
+      return 0;
     }
     const { apiUrl, headers } = resolveApiContext(config);
     apiContext = { apiUrl, headers, projectId: config.projectId };
   } catch (error) {
     notes.push(`Skill check skipped: ${describeError(error)}`);
-    return;
+    return 0;
   }
 
   const { apiUrl, headers, projectId } = apiContext;
-  let changed: { slug: string; type: string }[] = [];
   try {
     const status = (await executeSkillCommand(apiUrl, projectId, headers, 'status', { cwd })) as {
       updateAvailable?: boolean;
@@ -220,23 +220,20 @@ async function syncSkills(cwd: string, synced: { skills: boolean }, notes: strin
           `run 'agentteams skill create --dir .agentteams/skills/<slug> --apply'.`,
       );
     }
-    if (!status?.updateAvailable) return;
-    changed = Array.isArray(status.changes) ? status.changes : [];
+    if (!status?.updateAvailable) return 0;
   } catch (error) {
     notes.push(`Skill check skipped: ${describeError(error)}`);
-    return;
+    return 0;
   }
 
   try {
-    await executeSkillCommand(apiUrl, projectId, headers, 'download', { cwd });
-    synced.skills = true;
-    // download는 로컬 사본을 덮어쓴다. 편집 중이던 패키지가 있으면 사라지므로 이름을 남긴다.
-    const overwritten = changed.filter((change) => change.type === 'updated').map((change) => change.slug);
-    if (overwritten.length > 0) {
-      notes.push(`Overwrote local copies of updated skill package(s): ${overwritten.join(', ')}`);
-    }
+    const result = await executeSkillCommand(apiUrl, projectId, headers, 'download', { cwd, updatesOnly: true });
+    synced.skills = result.downloaded.length > 0 || result.removed.length > 0;
+    notes.push(...result.conflictNotes);
+    return result.conflicts?.length ?? 0;
   } catch (error) {
     notes.push(`Skill download failed: ${describeError(error)}`);
+    return 0;
   }
 }
 

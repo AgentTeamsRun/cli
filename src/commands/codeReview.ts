@@ -7,6 +7,7 @@ import {
   deleteCodeReview,
   dismissCodeReviewFinding,
   getCodeReview,
+  getCodeReviewRecommendation,
   getCodeReviewFinding,
   listCodeReviewFindings,
   listCodeReviews,
@@ -121,6 +122,11 @@ export async function executeCodeReviewCommand(
   options: any,
 ): Promise<any> {
   switch (action) {
+    case 'recommendation': {
+      const reportId = toNonEmptyString(options.sourceCompletionReportId);
+      if (!reportId) throw new Error('--source-completion-report-id is required for code-review recommendation');
+      return getCodeReviewRecommendation(apiUrl, projectId, headers, reportId);
+    }
     case 'list': {
       const params: Record<string, string | number> = {};
       if (options.search) params.search = options.search;

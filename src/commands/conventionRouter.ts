@@ -61,31 +61,22 @@ export async function executeSyncCommand(action: string, options: any): Promise<
   return withCommandContext('sync', () => executeSyncCommandWithContext(action, options));
 }
 
-/**
- * `agentteams sync` — **사람이 강제로 받는 경로**.
- *
- * 세션 시작에 에이전트가 부르는 `session sync`와 역할이 다르다. 이쪽은 판정 없이 무조건 받고,
- * 실패하면 그대로 올린다(사람이 결과를 보고 대응한다). 에이전트 경로는 반대로 status로 게이트하고
- * 실패를 흡수한다 — `commands/session.ts` 참조.
- *
- * ⚠️ `skill download`는 판정 없이 로컬 패키지를 전부 덮어쓴다. 여기서는 그게 의도된 동작이지만
- * (사람이 명시적으로 부른 강제 동기화다), 작성 중이던 패키지가 사라질 수 있으므로 경고를 남긴다.
- */
+/** 사람의 동기화도 공통 로컬 변경 보호를 사용한다. 강제 덮어쓰기는 skill download --id --force로 분리한다. */
 async function executeSyncCommandWithContext(action: string, options: any): Promise<any> {
   switch (action) {
     case 'download': {
       const cwd = options?.cwd;
       const conventions = await conventionDownload({ cwd });
-      return { ...conventions, skills: await forceSkillDownload(cwd) };
+      return { ...conventions, skills: await syncSkillDownload(cwd) };
     }
     default:
       throw new Error(`Unknown sync action: ${action}. Use download.`);
   }
 }
 
-type ForcedSkillSync = { message: string; warning?: string };
+type SkillSyncResult = { message: string; warning?: string };
 
-async function forceSkillDownload(cwd?: string): Promise<ForcedSkillSync> {
+async function syncSkillDownload(cwd?: string): Promise<SkillSyncResult> {
   const config = await loadConfigWithCredential();
   if (!config) {
     // 컨벤션 다운로드가 이미 성공한 뒤이므로 여기까지 오는 일은 드물다. 그래도 스킬 하나 때문에
@@ -100,8 +91,8 @@ async function forceSkillDownload(cwd?: string): Promise<ForcedSkillSync> {
     });
 
     return {
-      message: typeof result === 'string' ? result : 'Skill packages downloaded.',
-      warning: 'Local skill package copies were overwritten by the server version.',
+      ...result,
+      message: result.message,
     };
   } catch (error) {
     // 네트워크·API 오류도 미설정 케이스와 같은 이유로 강등한다 — 컨벤션은 이미 받아졌는데
