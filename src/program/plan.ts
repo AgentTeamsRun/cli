@@ -5,7 +5,7 @@ import { addPaginationOptions } from './options/pagination.js';
 import { RUNNER_TYPE_OPTION_DESCRIPTION } from '../utils/runnerTypes.js';
 
 /**
- * 액션 인벤토리: list/get/create/update/delete/download/cleanup/start/finish/quick/status/set-status/link-issue/unlink-issue/list-issues.
+ * 액션 인벤토리: list/get/create/update/delete/download/cleanup/start/finish/quick/status/set-status/link-issue/unlink-issue/list-issues/link-document/unlink-document/list-documents.
  * get/show와 link-issue/issue는 별칭이었으며 get과 link-issue만 유지합니다.
  */
 export function registerPlanCommand(program: Command): void {
@@ -185,4 +185,19 @@ export function registerPlanCommand(program: Command): void {
   );
 
   addLeaf('list-issues', 'List external issues linked to a plan', (command) => command.option('--id <id>', 'Plan ID'));
+
+  addLeaf('link-document', 'Link a project document to a plan', (command) =>
+    command
+      .option('--id <id>', 'Plan ID')
+      .option('--document-id <id>', 'Document ID')
+      .option('--note <text>', 'Why the document is linked'),
+  );
+
+  addLeaf('unlink-document', 'Unlink a project document from a plan', (command) =>
+    command.option('--id <id>', 'Plan ID').option('--document-id <id>', 'Document ID'),
+  );
+
+  addLeaf('list-documents', 'List project documents linked to a plan', (command) =>
+    command.option('--id <id>', 'Plan ID'),
+  );
 }

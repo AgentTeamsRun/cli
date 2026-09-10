@@ -520,7 +520,10 @@ describe('agentteams_resolve MCP tool', () => {
     // does not carry it.
     expect(delta).toBe(1_762);
     // Muse Code 러너 타입이 create/update 스키마에 추가되어 24자가 증가했다.
-    expect(withResolve.totalChars).toBe(66_911);
+    // 2026-09-10 플랜-문서 링크 쓰기 도구 2종(full 전용)이 추가되어 1,846자가 증가했다.
+    // 플랜·문서 읽기 도구에 연결 필드 설명을 추가해 66자가 증가했다.
+    // 중복 연결 응답 계약을 명시해 76자가 증가했다.
+    expect(withResolve.totalChars).toBe(68_899);
     process.stderr.write(`[agentteams_resolve budget] ${JSON.stringify({ delta, full: withResolve.totalChars })}\n`);
   });
 });

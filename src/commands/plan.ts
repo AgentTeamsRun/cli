@@ -31,12 +31,15 @@ import {
   getPlanDependencies,
   getPlanStatus,
   linkOriginIssue,
+  linkPlanDocument,
   listOriginIssues,
+  listPlanDocuments,
   listPlans,
   patchPlanStatus,
   quickPlan,
   startPlanLifecycle,
   unlinkOriginIssue,
+  unlinkPlanDocument,
   updatePlan,
 } from '../api/plan.js';
 
@@ -1084,6 +1087,39 @@ export async function executePlanCommand(
       if (!planId) throw new Error('--id is required for plan list-issues');
 
       return listOriginIssues(apiUrl, projectId, headers, planId);
+    }
+    case 'link-document': {
+      const planId = toNonEmptyString(options.id);
+      if (!planId) throw new Error('--id is required for plan link-document');
+      const documentId = toNonEmptyString(options.documentId);
+      if (!documentId) throw new Error('--document-id is required for plan link-document');
+      const note = toNonEmptyString(options.note);
+
+      try {
+        return await linkPlanDocument(apiUrl, projectId, headers, planId, { documentId, ...(note ? { note } : {}) });
+      } catch (err) {
+        // 409 CONFLICT = 이미 연결됨. link-issue와 같이 재실행이 실패로 남지 않도록 멱등 처리합니다.
+        if ((err as { response?: { status?: number } })?.response?.status === 409) {
+          return { message: 'Document already linked (skipped)' };
+        }
+        throw err;
+      }
+    }
+    case 'unlink-document': {
+      const planId = toNonEmptyString(options.id);
+      if (!planId) throw new Error('--id is required for plan unlink-document');
+      const documentId = toNonEmptyString(options.documentId);
+      if (!documentId) throw new Error('--document-id is required for plan unlink-document');
+
+      // 서버는 204로 본문 없이 응답하므로 무엇이 해제됐는지 결과에 남깁니다.
+      await unlinkPlanDocument(apiUrl, projectId, headers, planId, documentId);
+      return { message: 'Document unlinked', data: { planId, documentId } };
+    }
+    case 'list-documents': {
+      const planId = toNonEmptyString(options.id);
+      if (!planId) throw new Error('--id is required for plan list-documents');
+
+      return listPlanDocuments(apiUrl, projectId, headers, planId);
     }
     default:
       throw new Error(`Unknown action: ${action}`);

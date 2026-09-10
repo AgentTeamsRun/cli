@@ -12,6 +12,7 @@ import {
   getDocument,
   getDocumentRevision,
   listDocumentComments,
+  listDocumentPlans,
   listDocumentRevisions,
   listDocumentTags,
   listDocuments,
@@ -335,6 +336,13 @@ export async function executeDocumentCommand(
       );
     }
 
+    case 'list-plans': {
+      if (!options.id) throw new Error('--id is required for document list-plans');
+      const response = await listDocumentPlans(apiUrl, projectId, headers, options.id);
+      const plans = (response as { data: unknown[] }).data;
+      return plans.length === 0 ? withMessage(response as Record<string, unknown>, 'No linked plans found') : response;
+    }
+
     case 'revisions': {
       if (!options.id) throw new Error('--id is required for document revisions');
       const response = await listDocumentRevisions(apiUrl, projectId, headers, options.id, paginationParams(options));
@@ -408,7 +416,7 @@ export async function executeDocumentCommand(
     default:
       throw new Error(
         'Unknown document action: ' +
-          `${action}. Use create, update, download, list, delete, archive, unarchive, revisions, ` +
+          `${action}. Use create, update, download, list, delete, archive, unarchive, list-plans, revisions, ` +
           'revision-get, revision-restore, comment-list, comment-create, comment-update, or comment-delete.',
       );
   }

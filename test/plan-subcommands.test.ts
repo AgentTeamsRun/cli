@@ -94,6 +94,43 @@ describe('plan 액션별 서브커맨드', () => {
     ).rejects.toMatchObject({ code: 'test.reachedAction' });
     expect(dispatched).toEqual(['link-issue']);
   });
+
+  it.each([
+    ['link-document', ['--id', '--document-id', '--note']],
+    ['unlink-document', ['--id', '--document-id']],
+    ['list-documents', ['--id']],
+  ] as const)('%s 커맨드를 옵션과 함께 등록한다', (name, flags) => {
+    const program = createProgram('0.0.0');
+    const plan = program.commands.find((command) => command.name() === 'plan');
+    const command = plan?.commands.find((candidate) => candidate.name() === name);
+    expect(command).toBeDefined();
+    const declared = command?.options.map((option) => option.long);
+    for (const flag of flags) expect(declared).toContain(flag);
+  });
+
+  it('document list-plans 커맨드를 등록한다', () => {
+    const program = createProgram('0.0.0');
+    const document = program.commands.find((command) => command.name() === 'document');
+    const listPlans = document?.commands.find((command) => command.name() === 'list-plans');
+    expect(listPlans?.options.map((option) => option.long)).toContain('--id');
+  });
+
+  it('plan link-document를 link-document 액션으로 디스패치한다', async () => {
+    const program = createProgram('0.0.0');
+    configureForTest(program, { stdout: '', stderr: '' });
+    const dispatched: string[] = [];
+    program.hook('preAction', (_parent, actionCommand) => {
+      dispatched.push(actionCommand.name());
+      throw new CommanderError(0, 'test.reachedAction', 'reached action');
+    });
+
+    await expect(
+      program.parseAsync(['node', 'agentteams', 'plan', 'link-document', '--id', 'plan-1', '--document-id', 'doc-1'], {
+        from: 'node',
+      }),
+    ).rejects.toMatchObject({ code: 'test.reachedAction' });
+    expect(dispatched).toEqual(['link-document']);
+  });
 });
 
 // 배포 가이드 fenced 예시의 실제 파싱 검증은 guide-command-smoke.test.ts가

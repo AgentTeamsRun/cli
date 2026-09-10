@@ -3,6 +3,7 @@ import { getContextToolDefinitions } from '@agentteams/context-tools';
 import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { getWriteToolSpecs } from '../src/mcp/writeTools.js';
 
 const cliRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const srcRoot = join(cliRoot, 'src');
@@ -60,6 +61,13 @@ describe('shared context-tools package boundary', () => {
 
     expect(names.filter((name) => /_(create|update|delete)$/.test(name))).toEqual([]);
     expect(names).not.toContain('agentteams_guide_get');
+  });
+
+  // 이름 접미사 검사는 _link/_unlink처럼 CRUD가 아닌 쓰기 도구를 놓친다. 쓰기 인벤토리 전체와 직접 대조한다.
+  it('carries none of the CLI write tools, whatever their name suffix', () => {
+    const names = new Set(getContextToolDefinitions().map((definition) => definition.name));
+
+    expect(getWriteToolSpecs().filter(({ name }) => names.has(name))).toEqual([]);
   });
 
   // 답글 read 도구는 공유 패키지에 넣지만 write 도구는 넣지 않는다. 같은 엔티티의 도구가

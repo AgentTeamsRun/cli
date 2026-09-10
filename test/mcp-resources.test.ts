@@ -59,6 +59,11 @@ describe('mcp read resources', () => {
     const templates = (list.result?.resourceTemplates ?? []).map((entry: any) => entry.uriTemplate);
     expect(templates).toHaveLength(3);
     expect(templates).toEqual(expect.arrayContaining(EXPECTED_TEMPLATES));
+    const descriptions = list.result?.resourceTemplates ?? [];
+    expect(descriptions.find((entry: any) => entry.name === 'agentteams-plan').description).toContain('documentLinks');
+    expect(descriptions.find((entry: any) => entry.name === 'agentteams-document').description).toContain(
+      'linkedPlans',
+    );
   });
 
   it.each(Object.entries(EXPECTED_PROFILE_TEMPLATES) as [ToolProfile, string[]][])(

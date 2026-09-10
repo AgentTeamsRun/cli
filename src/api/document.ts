@@ -41,6 +41,16 @@ export async function getDocument(
   return response.data;
 }
 
+export async function listDocumentPlans(
+  apiUrl: string,
+  projectId: string,
+  headers: Record<string, string>,
+  documentId: string,
+) {
+  const response = await httpClient.get(`${getBaseUrl(apiUrl, projectId)}/${documentId}/plans`, { headers });
+  return response.data;
+}
+
 export async function downloadDocumentBody(
   apiUrl: string,
   projectId: string,
