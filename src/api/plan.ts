@@ -234,3 +234,40 @@ export async function unlinkOriginIssue(
   });
   return response.data;
 }
+
+export async function listPlanDocuments(
+  apiUrl: string,
+  projectId: string,
+  headers: Record<string, string>,
+  planId: string,
+): Promise<unknown> {
+  const baseUrl = `${apiUrl}/api/projects/${projectId}/plans`;
+  const response = await httpClient.get(`${baseUrl}/${planId}/documents`, { headers });
+  return response.data;
+}
+
+export async function linkPlanDocument(
+  apiUrl: string,
+  projectId: string,
+  headers: Record<string, string>,
+  planId: string,
+  body: { documentId: string; note?: string },
+): Promise<unknown> {
+  const baseUrl = `${apiUrl}/api/projects/${projectId}/plans`;
+  const response = await httpClient.post(`${baseUrl}/${planId}/documents`, body, { headers });
+  return response.data;
+}
+
+export async function unlinkPlanDocument(
+  apiUrl: string,
+  projectId: string,
+  headers: Record<string, string>,
+  planId: string,
+  documentId: string,
+): Promise<unknown> {
+  const baseUrl = `${apiUrl}/api/projects/${projectId}/plans`;
+  const response = await httpClient.delete(`${baseUrl}/${planId}/documents/${documentId}`, {
+    headers: withoutJsonContentType(headers),
+  });
+  return response.data;
+}

@@ -4,7 +4,7 @@ import { addOutputOptions } from './options/output.js';
 import { addPaginationOptions } from './options/pagination.js';
 
 /**
- * 액션 인벤토리: create/update/download/list/tags/delete/archive/unarchive/revisions/revision-get/revision-restore/comment-list/comment-create/comment-update/comment-delete.
+ * 액션 인벤토리: create/update/download/list/tags/delete/archive/unarchive/list-plans/revisions/revision-get/revision-restore/comment-list/comment-create/comment-update/comment-delete.
  * archive/unarchive는 반대 동작의 별개 액션이며 --limit 별칭은 제거합니다.
  */
 export function registerDocumentCommand(program: Command): void {
@@ -96,6 +96,7 @@ export function registerDocumentCommand(program: Command): void {
   );
   addLeaf('archive', 'Archive a document', (command) => command.option('--id <id>', 'Document ID'));
   addLeaf('unarchive', 'Unarchive a document', (command) => command.option('--id <id>', 'Document ID'));
+  addLeaf('list-plans', 'List plans linked to a document', (command) => command.option('--id <id>', 'Document ID'));
   addLeaf('revisions', 'List document revisions', (command) =>
     addPaginationOptions(command).option('--id <id>', 'Document ID'),
   );

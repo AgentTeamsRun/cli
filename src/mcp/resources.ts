@@ -56,7 +56,7 @@ export function getResourceSpecs(): McpResourceSpec[] {
       uriTemplate: 'agentteams://plan/{id}',
       title: 'AgentTeams Plan',
       description:
-        'Full plan runbook (metadata, contentMarkdown, V2 tasks, progress) as JSON. Same payload as the agentteams_plan_get tool.',
+        'Full plan runbook (metadata, contentMarkdown, V2 tasks, progress, linked documents (documentLinks)) as JSON. Same payload as the agentteams_plan_get tool.',
       toolName: 'agentteams_plan_get',
     }),
     createEntityResourceSpec({
@@ -64,7 +64,7 @@ export function getResourceSpecs(): McpResourceSpec[] {
       uriTemplate: 'agentteams://document/{id}',
       title: 'AgentTeams Document',
       description:
-        'Full document Markdown body as JSON, without the derived editor-only bodyTiptap mirror. Same payload as the agentteams_document_get tool.',
+        'Full document Markdown body and linked plans (linkedPlans) as JSON, without the derived editor-only bodyTiptap mirror. Same payload as the agentteams_document_get tool.',
       toolName: 'agentteams_document_get',
     }),
     createEntityResourceSpec({

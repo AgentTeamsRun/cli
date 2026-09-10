@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { McpToolContext } from '../src/commands/mcp.js';
 import { connect, discover, MODERN_META, TEST_TOOL_CONTEXT } from './helpers/mcp.js';
+import { getWriteToolSpecs } from '../src/mcp/writeTools.js';
 
 const { apiUrl, projectId, headers } = TEST_TOOL_CONTEXT;
 const documentsUrl = `${apiUrl}/api/projects/${projectId}/documents`;
@@ -30,6 +31,8 @@ const WRITE_TOOL_NAMES = [
   'agentteams_document_create',
   'agentteams_document_update',
   'agentteams_document_delete',
+  'agentteams_plan_document_link',
+  'agentteams_plan_document_unlink',
   'agentteams_comment_create',
   'agentteams_comment_update',
   'agentteams_comment_delete',
@@ -1232,6 +1235,102 @@ describe('mcp write tools', () => {
       },
       { headers },
     );
+  });
+
+  it('links a document to a plan with prefixed ids stripped and returns the link record', async () => {
+    const description = getWriteToolSpecs().find((tool) => tool.name === 'agentteams_plan_document_link')!.description;
+    expect(description).toContain('{ data: linkRecord }');
+    expect(description).toContain('{ alreadyLinked: true, planId, documentId }');
+    expect(description).toContain('no data or link record');
+    expect(description).toContain('existing note is unchanged');
+    const linkEnvelope = { data: { id: 'link-1', planId: 'plan-1', documentId: 'doc-1', title: '문서', note: '근거' } };
+    const postSpy = jest.spyOn(axios, 'post').mockResolvedValue({ data: linkEnvelope } as never);
+
+    const call = await callTool('agentteams_plan_document_link', {
+      planId: 'agentteams_pln_plan-1',
+      documentId: 'agentteams_doc_doc-1',
+      note: '근거',
+    });
+
+    expect(postSpy).toHaveBeenCalledWith(
+      `${apiUrl}/api/projects/${projectId}/plans/plan-1/documents`,
+      { documentId: 'doc-1', note: '근거' },
+      { headers },
+    );
+    expect(JSON.parse(call.result?.content[0].text)).toEqual(linkEnvelope);
+  });
+
+  it('treats linking an already-linked document as done instead of a tool error', async () => {
+    jest.spyOn(axios, 'post').mockRejectedValue({
+      isAxiosError: true,
+      message: 'Request failed',
+      response: { status: 409, data: { errorCode: 'CONFLICT', message: 'Document already linked' } },
+    } as never);
+
+    const call = await callTool('agentteams_plan_document_link', { planId: 'plan-1', documentId: 'doc-1' });
+
+    expect(call.result?.isError).toBeFalsy();
+    expect(JSON.parse(call.result?.content[0].text)).toEqual({
+      alreadyLinked: true,
+      planId: 'plan-1',
+      documentId: 'doc-1',
+    });
+  });
+
+  it('still surfaces other link failures as tool errors', async () => {
+    jest.spyOn(axios, 'post').mockRejectedValue({
+      isAxiosError: true,
+      message: 'Request failed',
+      response: { status: 404, data: { errorCode: 'NOT_FOUND', message: 'Document not found' } },
+    } as never);
+
+    const call = await callTool('agentteams_plan_document_link', { planId: 'plan-1', documentId: 'doc-1' });
+
+    expect(call.error).toBeUndefined();
+    expect(call.result?.isError).toBe(true);
+  });
+
+  it('unlinks a document from a plan and reports what was removed', async () => {
+    const deleteSpy = jest.spyOn(axios, 'delete').mockResolvedValue({ data: '' } as never);
+
+    const call = await callTool('agentteams_plan_document_unlink', {
+      planId: 'agentteams_pln_plan-1',
+      documentId: 'agentteams_doc_doc-1',
+    });
+
+    expect(deleteSpy).toHaveBeenCalledWith(`${apiUrl}/api/projects/${projectId}/plans/plan-1/documents/doc-1`, {
+      headers: { 'X-API-Key': 'key_test' },
+    });
+    expect(JSON.parse(call.result?.content[0].text)).toEqual({
+      unlinked: true,
+      planId: 'plan-1',
+      documentId: 'doc-1',
+    });
+  });
+
+  it('keeps the plan-document link tools to a flat schema without contract fields', async () => {
+    const { client, handle } = connect();
+    openHandle = handle;
+
+    await discover(client);
+    const response = await client.request('tools/list', { _meta: MODERN_META });
+    const tools = (response.result?.tools ?? []) as Array<{
+      name: string;
+      description: string;
+      inputSchema: { properties?: Record<string, unknown>; required?: string[] };
+    }>;
+    const link = tools.find((tool) => tool.name === 'agentteams_plan_document_link');
+    const unlink = tools.find((tool) => tool.name === 'agentteams_plan_document_unlink');
+
+    // 플랜 라우트는 쓰기 계약 헬퍼를 쓰지 않아 guideHash·idempotencyKey를 보내도 서버가 무시한다.
+    expect(Object.keys(link?.inputSchema.properties ?? {}).sort()).toEqual(['documentId', 'note', 'planId']);
+    expect(link?.inputSchema.required?.sort()).toEqual(['documentId', 'planId']);
+    expect(Object.keys(unlink?.inputSchema.properties ?? {}).sort()).toEqual(['documentId', 'planId']);
+    for (const tool of [link, unlink]) {
+      expect(tool?.description).toContain('There is no projectId argument');
+    }
+    expect(unlink?.description).toContain('cannot be undone');
+    expect(unlink?.description).toContain('Confirm with the user');
   });
 
   it('leaves the delete acknowledgement shape unchanged', async () => {

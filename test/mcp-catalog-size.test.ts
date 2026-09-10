@@ -33,7 +33,8 @@ describe('mcp catalog size after stage 4 write tools', () => {
     const byProfile = Object.fromEntries(measurements.map((item) => [item.profile, item]));
 
     // Stage 3 was 14 write tools (39 total in full). Stage 4 adds 3 write tools (42 total in full).
-    expect(byProfile.full?.toolCount).toBe(42);
+    // The plan-document link/unlink pair adds 2 more, full-only (44 total in full).
+    expect(byProfile.full?.toolCount).toBe(44);
     expect(byProfile.read?.toolCount).toBe(getContextToolSpecs().length);
     expect(byProfile.documents?.toolCount).toBe(7);
     expect(byProfile.comments?.toolCount).toBe(12);

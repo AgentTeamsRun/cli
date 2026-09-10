@@ -123,6 +123,8 @@ describe('mcp entity read tools', () => {
       expect(tool.description).toContain('contentTokenCount');
       expect(tool.description).toContain('verbatim');
     }
+    expect(tools.find((entry: any) => entry.name === 'agentteams_plan_get').description).toContain('documentLinks');
+    expect(tools.find((entry: any) => entry.name === 'agentteams_document_get').description).toContain('linkedPlans');
   });
 
   it.each(ENTITY_GET_CASES)(

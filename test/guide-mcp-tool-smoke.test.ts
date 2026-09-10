@@ -23,6 +23,16 @@ const guideFileNameByWriteDomain: Readonly<Record<string, string>> = {
 };
 
 /**
+ * 가이드 없이 여는 쓰기 도구. 도메인이 아니라 도구 이름으로만 면제해 같은 도메인의 다음 쓰기
+ * 도구가 조용히 빠져나가지 않게 한다. 플랜-문서 링크는 조인 행 하나를 만들고 지우는 연산이라
+ * 가이드가 규율할 저작 행위가 없고, 도구 설명에도 guide-first 지시를 두지 않는다.
+ */
+const GUIDELESS_WRITE_TOOLS: ReadonlySet<string> = new Set([
+  'agentteams_plan_document_link',
+  'agentteams_plan_document_unlink',
+]);
+
+/**
  * 엔티티 ID 접두사(`agentteams_pln_...`)는 도구 이름이 아니다. 실제 도구 이름의 두 번째 마디는
  * 세 글자짜리가 없으므로(document, comment, coaction, codereview, guide, resolve ...)
  * 이 형태로 안전하게 갈린다.
@@ -98,6 +108,7 @@ describe('MCP 쓰기가 열린 레코드 종류의 가이드', () => {
     const missing: Array<{ name: string; domain: string; fileName: string | null }> = [];
 
     for (const { name, discovery } of writeTools) {
+      if (GUIDELESS_WRITE_TOOLS.has(name)) continue;
       const fileName = guideFileNameByWriteDomain[discovery.domain];
       if (!fileName) {
         missing.push({ name, domain: discovery.domain, fileName: null });

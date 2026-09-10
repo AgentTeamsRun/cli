@@ -17,6 +17,7 @@ import {
 import { createDocumentComment, createDocument, deleteDocument, updateDocument } from '../api/document.js';
 import { createCoAction, deleteCoAction, updateCoAction } from '../api/coaction.js';
 import { createPostMortem, updatePostMortem } from '../api/postmortem.js';
+import { linkPlanDocument, unlinkPlanDocument } from '../api/plan.js';
 import {
   cancelCodeReview,
   createCodeReview,
@@ -103,6 +104,10 @@ const postMortemWriteDiscovery = defineToolDiscoveryMetadata({
 });
 const codeReviewWriteDiscovery = defineToolDiscoveryMetadata({
   domain: 'codeReviews',
+  profiles: ['full'],
+});
+const planDocumentWriteDiscovery = defineToolDiscoveryMetadata({
+  domain: 'plans',
   profiles: ['full'],
 });
 
@@ -290,6 +295,69 @@ const documentDeleteSpec: McpWriteToolSpec = {
       ...(args.idempotencyKey ? { idempotencyKey: args.idempotencyKey as string } : {}),
     });
     return { deleted: true, id: documentId };
+  },
+};
+
+const planIdField = z.string().min(1).describe('Plan id (bare uuid or agentteams_pln_-prefixed).');
+const linkedDocumentIdField = z.string().min(1).describe('Document id (bare uuid or agentteams_doc_-prefixed).');
+
+// 조인 행 하나를 만들고 지우는 연산이라 가이드가 규율할 저작 행위가 없고, 플랜 라우트는
+// agentWriteContract 헬퍼를 쓰지 않아 guideHash·idempotencyKey를 보내도 무시된다. 그래서 둘 다 노출하지 않는다.
+const planDocumentLinkSpec: McpWriteToolSpec = {
+  name: 'agentteams_plan_document_link',
+  title: 'Link AgentTeams Document to Plan',
+  description: [
+    'Link a document from this project’s document library to a plan, so the plan shows it under its linked items.',
+    'On creation, returns { data: linkRecord } (id, planId, documentId, title, visibility, note).',
+    'If already linked (409), returns only { alreadyLinked: true, planId, documentId }, with no data or link record; the existing note is unchanged.',
+    PROJECT_SCOPE,
+  ].join(' '),
+  discovery: planDocumentWriteDiscovery,
+  inputSchema: z.strictObject({
+    planId: planIdField,
+    documentId: linkedDocumentIdField,
+    note: z.string().min(1).optional().describe('Why the document is linked, shown next to the link.'),
+  }),
+  handler: async (args, context) => {
+    const planId = stripContextEntityIdPrefix(args.planId as string);
+    const documentId = stripContextEntityIdPrefix(args.documentId as string);
+    try {
+      return await linkPlanDocument(
+        context.apiUrl,
+        context.projectId,
+        await auth(context),
+        planId,
+        definedFields({ documentId, note: args.note }) as { documentId: string; note?: string },
+      );
+    } catch (err) {
+      // CLI plan link-document와 같이 이미 연결된 상태(409)는 실패가 아니라 완료로 돌려준다.
+      if ((err as { response?: { status?: number } })?.response?.status === 409) {
+        return { alreadyLinked: true, planId, documentId };
+      }
+      throw err;
+    }
+  },
+};
+
+const planDocumentUnlinkSpec: McpWriteToolSpec = {
+  name: 'agentteams_plan_document_unlink',
+  title: 'Unlink AgentTeams Document from Plan',
+  description: [
+    'Remove the link between a plan and a document. The document itself is not deleted.',
+    'This cannot be undone — any note on the link is lost.',
+    'Confirm with the user before removing a link you did not just create.',
+    PROJECT_SCOPE,
+  ].join(' '),
+  discovery: planDocumentWriteDiscovery,
+  inputSchema: z.strictObject({
+    planId: planIdField,
+    documentId: linkedDocumentIdField,
+  }),
+  handler: async (args, context) => {
+    const planId = stripContextEntityIdPrefix(args.planId as string);
+    const documentId = stripContextEntityIdPrefix(args.documentId as string);
+    await unlinkPlanDocument(context.apiUrl, context.projectId, await auth(context), planId, documentId);
+    return { unlinked: true, planId, documentId };
   },
 };
 
@@ -1077,6 +1145,8 @@ export function getWriteToolSpecs(): McpWriteToolSpec[] {
     documentCreateSpec,
     documentUpdateSpec,
     documentDeleteSpec,
+    planDocumentLinkSpec,
+    planDocumentUnlinkSpec,
     commentCreateSpec,
     commentUpdateSpec,
     commentDeleteSpec,
