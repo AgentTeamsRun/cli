@@ -83,9 +83,10 @@ async function executeCommandWithContext(
     case 'sync':
       return executeSyncCommand(action, options);
     // 세션 시작 동기화. 미설정 프로젝트에서도 정상 종료해야 하므로 config를 미리 요구하지
-    // 않는다 — 여기서 던지면 에이전트가 본 작업을 시작도 못 하고 멈춘다.
+    // 않는다 — 여기서 던지면 에이전트가 본 작업을 시작도 못 하고 멈춘다. 훅 설치·제거
+    // (`hook-install`/`hook-uninstall`)도 로컬 설정 파일만 다루므로 같은 경로를 탄다.
     case 'session':
-      return executeSessionCommand(action, { ...options, cwd: options.cwd ?? process.cwd() });
+      return executeSessionCommand(action, options);
     // 플랫폼 가이드 읽기. convention.md가 라우팅 표를 들고 있던 자리를 대신하므로, MCP를 안 쓰는
     // 러너에서도 반드시 동작해야 한다.
     case 'guide':

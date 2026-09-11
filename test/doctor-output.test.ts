@@ -165,6 +165,47 @@ const GIT_ROOT_PREFLIGHT_FAILURE_RESULT: DoctorResult = {
   ],
 };
 
+const SESSION_HOOK_NOT_INSTALLED_RESULT: DoctorResult = {
+  ...GIT_ROOT_READY_RESULT,
+  sessionHook: {
+    clientId: 'claude-code',
+    scopes: [
+      { scope: 'project', state: 'not-installed', configPath: '/projects/regular-repo/.claude/settings.json' },
+      { scope: 'user', state: 'not-installed', configPath: '/home/dev/.claude/settings.json' },
+    ],
+  },
+  issues: [
+    {
+      code: 'session-hook-not-installed',
+      path: '/projects/regular-repo/.claude/settings.json',
+      message:
+        "Claude Code sessions in this project do not run 'agentteams session sync' at startup. Run 'agentteams session hook install' to add the SessionStart hook (optional).",
+      severity: 'info',
+    },
+  ],
+};
+
+const SESSION_HOOK_OUTDATED_RESULT: DoctorResult = {
+  ...READY_RESULT,
+  sessionHook: {
+    clientId: 'claude-code',
+    scopes: [
+      { scope: 'project', state: 'installed', configPath: '/projects/kma/.claude/settings.json' },
+      { scope: 'user', state: 'outdated', configPath: '/home/dev/.claude/settings.json' },
+    ],
+  },
+  issues: [
+    ...READY_RESULT.issues,
+    {
+      code: 'session-hook-outdated',
+      path: '/home/dev/.claude/settings.json',
+      message:
+        "The AgentTeams SessionStart hook in /home/dev/.claude/settings.json differs from the current definition (matcher or timeout). Run 'agentteams session hook install --scope user --yes' to update it.",
+      severity: 'info',
+    },
+  ],
+};
+
 describe('printDoctorResult', () => {
   let logSpy: ReturnType<typeof jest.spyOn>;
 
@@ -258,6 +299,30 @@ describe('printDoctorResult', () => {
       expect(output).toContain('[hook-custom]');
     });
 
+    it('reports a missing session hook per scope with the install command', () => {
+      printDoctorResult(SESSION_HOOK_NOT_INSTALLED_RESULT, 'human');
+
+      const output = captureOutput(logSpy);
+      expect(output).toContain('Claude Code session hook: project not-installed, user not-installed');
+      expect(output).toContain('ℹ [session-hook-not-installed]');
+      expect(output).toContain("'agentteams session hook install'");
+    });
+
+    it('reports an outdated session hook on a non-git root project with the install command', () => {
+      printDoctorResult(SESSION_HOOK_OUTDATED_RESULT, 'human');
+
+      const output = captureOutput(logSpy);
+      expect(output).toContain('Claude Code session hook: project installed, user outdated');
+      expect(output).toContain('ℹ [session-hook-outdated]');
+      expect(output).toContain("'agentteams session hook install --scope user --yes'");
+    });
+
+    it('prints no session hook line when Claude Code was not detected', () => {
+      printDoctorResult(GIT_ROOT_READY_RESULT, 'human');
+
+      expect(captureOutput(logSpy)).not.toContain('Claude Code session hook');
+    });
+
     it('keeps the git root view when the diagnosis stopped at preflight', () => {
       printDoctorResult(GIT_ROOT_PREFLIGHT_FAILURE_RESULT, 'human');
 
@@ -282,6 +347,12 @@ describe('resolveDoctorExitCode', () => {
   it('exits 0 for a ready git root project and for a user-managed hook setup', () => {
     expect(resolveDoctorExitCode(GIT_ROOT_READY_RESULT)).toBe(0);
     expect(resolveDoctorExitCode(GIT_ROOT_USER_HOOK_RESULT)).toBe(0);
+  });
+
+  // 세션 훅은 선택 기능이라 미설치·구버전이어도 종료 코드를 바꾸지 않는다.
+  it('keeps the exit code when the session hook is missing or outdated', () => {
+    expect(resolveDoctorExitCode(SESSION_HOOK_NOT_INSTALLED_RESULT)).toBe(0);
+    expect(resolveDoctorExitCode(SESSION_HOOK_OUTDATED_RESULT)).toBe(0);
   });
 
   it('exits 1 when a git root project cannot be diagnosed or its hook cannot be written', () => {

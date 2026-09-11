@@ -611,3 +611,171 @@ describe('doctor on non-applicable layouts', () => {
     expect(result.issues.map((issue) => issue.code)).toContain('no-project-config');
   });
 });
+
+describe('doctor session hook report', () => {
+  const INSTALL_COMMAND = 'agentteams session hook install';
+
+  // 실제 홈과 PATH를 보지 않도록 감지와 user 스코프를 임시 HOME에 가둔다.
+  // `~/.claude` 디렉터리가 Claude Code 감지 신호다.
+  function createHome(options?: { claudeCode?: boolean }): string {
+    const homeDir = join(createTempDir(), 'home');
+    mkdirSync(options?.claudeCode === false ? homeDir : join(homeDir, '.claude'), { recursive: true });
+    return homeDir;
+  }
+
+  const hookDependencies = (homeDir: string) => ({ context: { homeDir, env: { PATH: '' } } });
+
+  function writeSettings(path: string, body: unknown): string {
+    mkdirSync(join(path, '..'), { recursive: true });
+    const source = typeof body === 'string' ? body : `${JSON.stringify(body, null, 2)}\n`;
+    writeFileSync(path, source, 'utf-8');
+    return source;
+  }
+
+  const hookEntry = (overrides?: { matcher?: string; timeout?: number }) => ({
+    hooks: {
+      SessionStart: [
+        {
+          matcher: overrides?.matcher ?? 'startup|resume|clear',
+          hooks: [
+            {
+              type: 'command',
+              command: 'agentteams session sync --hook claude-code',
+              timeout: overrides?.timeout ?? 60,
+            },
+          ],
+        },
+      ],
+    },
+  });
+
+  // 세션 훅은 정보성이다 — Claude Code를 감지하지 못한 실행과 종료 판정이 같아야 한다.
+  async function runWithBaseline(repoDir: string, homeDir: string) {
+    const baseline = await executeDoctorCommand({
+      cwd: repoDir,
+      sessionHookDependencies: hookDependencies(createHome({ claudeCode: false })),
+    });
+    const result = await executeDoctorCommand({ cwd: repoDir, sessionHookDependencies: hookDependencies(homeDir) });
+    expect(result.status).toBe(baseline.status);
+    expect(resolveDoctorExitCode(result)).toBe(resolveDoctorExitCode(baseline));
+    return result;
+  }
+
+  const sessionHookIssues = (result: Awaited<ReturnType<typeof executeDoctorCommand>>) =>
+    result.issues.filter((issue) => issue.code.startsWith('session-hook-'));
+
+  it('reports not-installed with the install command and creates no settings file', async () => {
+    const repoDir = createGitRootProject();
+    const homeDir = createHome();
+
+    const result = await runWithBaseline(repoDir, homeDir);
+
+    expect(result.status).toBe('READY');
+    expect(result.sessionHook).toEqual({
+      clientId: 'claude-code',
+      scopes: [
+        {
+          scope: 'project',
+          state: 'not-installed',
+          configPath: join(realpathSync(repoDir), '.claude', 'settings.json'),
+        },
+        { scope: 'user', state: 'not-installed', configPath: join(homeDir, '.claude', 'settings.json') },
+      ],
+    });
+    const issues = sessionHookIssues(result);
+    expect(issues.map((issue) => issue.code)).toEqual(['session-hook-not-installed']);
+    expect(issues[0].severity).toBe('info');
+    expect(issues[0].message).toContain(`'${INSTALL_COMMAND}'`);
+    expect(existsSync(join(repoDir, '.claude'))).toBe(false);
+    expect(existsSync(join(homeDir, '.claude', 'settings.json'))).toBe(false);
+  });
+
+  it('reports installed for the current definition without touching the file', async () => {
+    const repoDir = createGitRootProject();
+    const homeDir = createHome();
+    const projectSettings = join(repoDir, '.claude', 'settings.json');
+    const source = writeSettings(projectSettings, { permissions: { allow: ['Bash(ls)'] }, ...hookEntry() });
+
+    const result = await runWithBaseline(repoDir, homeDir);
+
+    expect(result.sessionHook?.scopes.map(({ scope, state }) => [scope, state])).toEqual([
+      ['project', 'installed'],
+      ['user', 'not-installed'],
+    ]);
+    // 한쪽 스코프에만 있어도 훅은 돈다 — 나머지 스코프를 미설치로 경고하지 않는다.
+    expect(sessionHookIssues(result)).toEqual([]);
+    expect(readFileSync(projectSettings, 'utf-8')).toBe(source);
+  });
+
+  it('reports outdated per scope with the matching install command and leaves both files byte-identical', async () => {
+    const repoDir = createGitRootProject();
+    const homeDir = createHome();
+    // doctor는 설정 루트를 realpath로 해석한다(macOS의 /var → /private/var).
+    const projectSettings = join(realpathSync(repoDir), '.claude', 'settings.json');
+    const userSettings = join(homeDir, '.claude', 'settings.json');
+    const projectSource = writeSettings(projectSettings, hookEntry({ timeout: 30 }));
+    const userSource = writeSettings(userSettings, hookEntry({ matcher: 'startup' }));
+
+    const result = await runWithBaseline(repoDir, homeDir);
+
+    expect(result.status).toBe('READY');
+    expect(result.sessionHook?.scopes.map(({ scope, state }) => [scope, state])).toEqual([
+      ['project', 'outdated'],
+      ['user', 'outdated'],
+    ]);
+    const issues = sessionHookIssues(result);
+    expect(issues.map((issue) => [issue.code, issue.path, issue.severity])).toEqual([
+      ['session-hook-outdated', projectSettings, 'info'],
+      ['session-hook-outdated', userSettings, 'info'],
+    ]);
+    expect(issues[0].message).toContain(`'${INSTALL_COMMAND}'`);
+    expect(issues[1].message).toContain(`'${INSTALL_COMMAND} --scope user --yes'`);
+    expect(readFileSync(projectSettings, 'utf-8')).toBe(projectSource);
+    expect(readFileSync(userSettings, 'utf-8')).toBe(userSource);
+    expect(existsSync(`${projectSettings}.agentteams-backup`)).toBe(false);
+  });
+
+  it('reports an unparseable settings file as unreadable without failing or rewriting it', async () => {
+    const repoDir = createGitRootProject();
+    const homeDir = createHome();
+    const projectSettings = join(repoDir, '.claude', 'settings.json');
+    const source = writeSettings(projectSettings, '{ "hooks": { // comment\n} }\n');
+    const reportedPath = join(realpathSync(repoDir), '.claude', 'settings.json');
+
+    const result = await runWithBaseline(repoDir, homeDir);
+
+    expect(result.status).toBe('READY');
+    expect(result.sessionHook?.scopes[0]).toEqual({
+      scope: 'project',
+      state: 'unreadable',
+      configPath: reportedPath,
+    });
+    expect(sessionHookIssues(result).map((issue) => [issue.code, issue.severity])).toEqual([
+      ['session-hook-unreadable', 'info'],
+      ['session-hook-not-installed', 'info'],
+    ]);
+    expect(readFileSync(projectSettings, 'utf-8')).toBe(source);
+  });
+
+  it('keeps a DEGRADED project DEGRADED and still reports the hook', async () => {
+    const repoDir = createGitRootProject({ configBody: 'not json' });
+
+    const result = await runWithBaseline(repoDir, createHome());
+
+    expect(result.status).toBe('DEGRADED');
+    expect(result.sessionHook?.scopes.map(({ state }) => state)).toEqual(['not-installed', 'not-installed']);
+  });
+
+  it('reports nothing about the session hook when Claude Code is not detected', async () => {
+    const repoDir = createGitRootProject();
+    writeSettings(join(repoDir, '.claude', 'settings.json'), hookEntry({ timeout: 30 }));
+
+    const result = await executeDoctorCommand({
+      cwd: repoDir,
+      sessionHookDependencies: hookDependencies(createHome({ claudeCode: false })),
+    });
+
+    expect(result.sessionHook).toBeUndefined();
+    expect(sessionHookIssues(result)).toEqual([]);
+  });
+});

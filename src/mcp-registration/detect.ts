@@ -2,7 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { delimiter, join } from 'node:path';
 import { MCP_CLIENTS } from './clients.js';
-import type { DetectionSignal, McpClientDefinition, McpPathContext } from './types.js';
+import type { DetectionSignal, McpClientDefinition, McpClientId, McpPathContext } from './types.js';
 
 /**
  * CLI-local client detection.
@@ -71,12 +71,19 @@ function resolveExecutable(
  * candidate when either one is present. Reporting *which* signal fired is what
  * lets a user tell "installed but never configured" apart from "config left
  * behind by an uninstall".
+ *
+ * `clientIds` narrows the scan. A caller that needs one client should pass it:
+ * resolving the others can spawn their identity probes (`grok --help`, …).
  */
-export function detectClients(dependencies: DetectionDependencies): DetectionSignal[] {
+export function detectClients(
+  dependencies: DetectionDependencies,
+  clientIds?: readonly McpClientId[],
+): DetectionSignal[] {
   const fileExists = dependencies.fileExists ?? existsSync;
   const resolved = { ...dependencies, fileExists };
+  const clients = clientIds ? MCP_CLIENTS.filter((client) => clientIds.includes(client.id)) : MCP_CLIENTS;
 
-  return MCP_CLIENTS.map((client) => {
+  return clients.map((client) => {
     const configPaths = client.configSignals(dependencies.context).filter((path) => fileExists(path));
     const executablePath = resolveExecutable(client, resolved);
 

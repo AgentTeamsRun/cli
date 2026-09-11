@@ -4,7 +4,7 @@ import { createProgram } from '../src/program/index.js';
 import { CANONICAL_CLI_NAME } from '../src/program/invokedName.js';
 
 const BASELINE_HELP_SHA256: Record<string, string> = {
-  init: '88a2ccc61b94be265bb63210c6c8019cb221153a4d5686c48aed5da56c9060f8',
+  init: '5ee68533f7f4e7a783565f2d3c21cdb7822f13794505407fcc32597b09feaf83',
   doctor: 'c8ccb727d8d02ba300d5077419ddccfb626713d266f8b8f85f7bbd03920c86ed',
   sync: 'c2089a5d0545ce3180759be24509a384676edde8109940e3ac38e9a3f1c57905',
 };
@@ -64,6 +64,14 @@ describe('커맨드 등록 모듈 분할', () => {
     expect(output).toContain('--mcp');
     expect(output).toContain('Register AgentTeams with the MCP clients detected in this folder (project scope)');
     expect(output).toContain('Without this flag no client configuration is written');
+  });
+
+  it('init 도움말이 --session-hook 옵트인을 영어 설명과 함께 노출한다', async () => {
+    const output = (await renderHelp('init')).replace(/\s+/g, ' ');
+    expect(output).toContain('--session-hook');
+    expect(output).toContain("Install a Claude Code SessionStart hook that runs 'agentteams session sync'");
+    expect(output).toContain('(project scope, .claude/settings.json)');
+    expect(output).toContain('Without this flag no hook configuration is written');
   });
 
   // 엔트리포인트 프롬프트가 옵트인이 된 뒤로, 감지 결과를 손으로 뒤집는 유일한 대안 경로가

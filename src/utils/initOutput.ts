@@ -5,6 +5,7 @@ import type {
   ConfiguredProjectInitResult,
   InitMcpResult,
   InitReadinessStep,
+  InitSessionHookResult,
   WorktreeInitResult,
 } from '../commands/init.js';
 import type { EnsurePostCheckoutHookResult } from './conventionLink.js';
@@ -25,6 +26,7 @@ interface InitResultShape {
   warning?: string;
   readiness?: InitReadinessStep[];
   mcp?: InitMcpResult;
+  sessionHook?: InitSessionHookResult;
 }
 
 /** Mirrors AGENT_API_KEY_TTL_MS in api/src/services/agentApiKey.ts. */
@@ -162,6 +164,34 @@ function printMcpRegistration(mcp: InitMcpResult | undefined): void {
   }
 }
 
+/**
+ * What `--session-hook` did. A failure is a warning with its retry command — it
+ * degrades the hook step, not the initialization.
+ */
+function printSessionHook(sessionHook: InitSessionHookResult | undefined): void {
+  if (!sessionHook) return;
+
+  console.log('');
+  console.log('Claude Code session hook (project scope):');
+
+  if (sessionHook.error) {
+    console.warn(`  ⚠ ${sessionHook.message} ${sessionHook.error}`);
+    console.warn(`    Retry: ${sessionHook.manualCommand}`);
+    return;
+  }
+
+  if (sessionHook.status === 'skipped') {
+    console.log(`  - ${sessionHook.message}`);
+    console.log(`    Install it later: ${sessionHook.manualCommand}`);
+    return;
+  }
+
+  console.log(`  ✓ ${sessionHook.message}`);
+  if (sessionHook.backupPath) {
+    console.log(`    Backup: ${sessionHook.backupPath}`);
+  }
+}
+
 export function printInitResult(result: unknown, format: InitOutputFormat): void {
   if (format === 'json') {
     console.log(formatOutput(result));
@@ -235,6 +265,7 @@ export function printInitResult(result: unknown, format: InitOutputFormat): void
     printAgentFiles(result.agentFiles);
     printReadiness(result.readiness);
     printMcpRegistration(result.mcp);
+    printSessionHook(result.sessionHook);
     return;
   }
 
@@ -307,6 +338,7 @@ export function printInitResult(result: unknown, format: InitOutputFormat): void
 
   printAgentFiles(result.agentFiles);
   printMcpRegistration(result.mcp);
+  printSessionHook(result.sessionHook);
 
   console.log('');
   console.log('Next steps:');

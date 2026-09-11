@@ -1,7 +1,12 @@
 import { chmodSync, lstatSync, readFileSync, realpathSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { CONFIG_FILE_MODE, findProjectConfig } from '../utils/config.js';
 import { BACKUP_SUFFIX } from '../mcp-registration/atomicWrite.js';
+import { detectClients, type DetectionDependencies } from '../mcp-registration/detect.js';
+import type { McpPathContext } from '../mcp-registration/types.js';
+import { findSessionHookClient, SESSION_HOOK_SCOPES, type SessionHookScope } from '../session-hooks/clients.js';
+import { inspectSessionHook, type SessionHookInstallState } from '../session-hooks/install.js';
 import { findMemberRepos, isNonGitRootProject } from '../utils/projectLayout.js';
 import {
   ensureConventionEntryPoints,
@@ -78,8 +83,33 @@ export interface DoctorResult {
    * `skipped`.
    */
   rootHook: 'ready' | 'blocked' | 'skipped';
+  /**
+   * The Claude Code SessionStart hook per settings scope. Present only when
+   * Claude Code is detected on this machine. Purely informational: it never
+   * changes `status`, and the doctor never installs it.
+   */
+  sessionHook?: DoctorSessionHookResult;
   issues: DoctorIssue[];
 }
+
+/** `unreadable`: the settings file exists but could not be read or parsed. */
+export type DoctorSessionHookState = SessionHookInstallState | 'unreadable';
+
+export interface DoctorSessionHookScopeResult {
+  scope: SessionHookScope;
+  state: DoctorSessionHookState;
+  configPath: string;
+}
+
+export interface DoctorSessionHookResult {
+  clientId: 'claude-code';
+  scopes: DoctorSessionHookScopeResult[];
+}
+
+export type DoctorSessionHookDependencies = {
+  context?: Partial<McpPathContext>;
+  detectionDependencies?: Omit<DetectionDependencies, 'context'>;
+};
 
 type DoctorOptions = {
   cwd?: string;
@@ -88,7 +118,11 @@ type DoctorOptions = {
    * linked worktree yet. Without it the doctor honors the same gate `init` does.
    */
   installWorktreeHook?: boolean;
+  /** Injection seam so tests drive Claude Code detection with a temporary HOME/PATH. */
+  sessionHookDependencies?: DoctorSessionHookDependencies;
 };
+
+const SESSION_HOOK_INSTALL_COMMAND = 'agentteams session hook install';
 
 function pathEntryExists(path: string): boolean {
   try {
@@ -174,6 +208,74 @@ function withConfigPermissionFindings(result: DoctorResult, repair: ConfigPermis
     changedCount: result.changedCount + repair.changedCount,
     issues: [...result.issues, ...repair.issues],
   };
+}
+
+type SessionHookFindings = {
+  report: DoctorSessionHookResult | null;
+  issues: DoctorIssue[];
+};
+
+/**
+ * Report whether Claude Code sessions auto-run `agentteams session sync`.
+ *
+ * Unlike the worktree hook, this one is never installed here: it edits an AI
+ * client's own settings, which only an explicit `session hook install` or
+ * `init --session-hook` may do. Every finding is therefore `info` — a project
+ * without the hook is not a broken project. The verdict comes from
+ * `inspectSessionHook`, so "current" means exactly what the installer writes.
+ */
+function diagnoseSessionHook(rootDir: string, dependencies?: DoctorSessionHookDependencies): SessionHookFindings {
+  const client = findSessionHookClient('claude-code');
+  const context: McpPathContext = { homeDir: homedir(), env: process.env, ...dependencies?.context, cwd: rootDir };
+  const [claudeCode] = detectClients({ ...dependencies?.detectionDependencies, context }, ['claude-code']);
+  if (!client || !claudeCode?.detected) return { report: null, issues: [] };
+
+  const issues: DoctorIssue[] = [];
+  const scopes = SESSION_HOOK_SCOPES.map((scope): DoctorSessionHookScopeResult => {
+    const configPath = client.configPath(scope, context);
+    try {
+      const { state } = inspectSessionHook({ clientId: client.id, scope, cwd: rootDir, homeDir: context.homeDir });
+      return { scope, state, configPath };
+    } catch (error) {
+      issues.push({
+        code: 'session-hook-unreadable',
+        path: configPath,
+        message: `Could not check the Claude Code session hook: ${error instanceof Error ? error.message : String(error)}`,
+        severity: 'info',
+      });
+      return { scope, state: 'unreadable', configPath };
+    }
+  });
+
+  for (const { scope, state, configPath } of scopes) {
+    if (state !== 'outdated') continue;
+    const command =
+      scope === 'user' ? `${SESSION_HOOK_INSTALL_COMMAND} --scope user --yes` : SESSION_HOOK_INSTALL_COMMAND;
+    issues.push({
+      code: 'session-hook-outdated',
+      path: configPath,
+      message: `The AgentTeams ${client.event} hook in ${configPath} differs from the current definition (matcher or timeout). Run '${command}' to update it.`,
+      severity: 'info',
+    });
+  }
+
+  // One notice, not one per scope: a hook in either file already runs for this project.
+  if (!scopes.some(({ state }) => state === 'installed' || state === 'outdated')) {
+    const projectScope = scopes.find(({ scope }) => scope === 'project');
+    issues.push({
+      code: 'session-hook-not-installed',
+      path: projectScope?.configPath ?? null,
+      message: `Claude Code sessions in this project do not run 'agentteams session sync' at startup. Run '${SESSION_HOOK_INSTALL_COMMAND}' to add the ${client.event} hook (optional).`,
+      severity: 'info',
+    });
+  }
+
+  return { report: { clientId: client.id, scopes }, issues };
+}
+
+function withSessionHookFindings(result: DoctorResult, findings: SessionHookFindings): DoctorResult {
+  if (!findings.report) return result;
+  return { ...result, sessionHook: findings.report, issues: [...result.issues, ...findings.issues] };
 }
 
 function notApplicableResult(rootDir: string | null, issue: DoctorIssue): DoctorResult {
@@ -494,9 +596,9 @@ function runDoctor(options?: DoctorOptions): DoctorResult {
   // before the layout branch and is merged into whichever result comes back.
   const configPermissions = repairConfigFilePermissions(rootDir);
 
-  return withConfigPermissionFindings(
-    runLayoutDoctor(rootDir, options?.installWorktreeHook === true),
-    configPermissions,
+  return withSessionHookFindings(
+    withConfigPermissionFindings(runLayoutDoctor(rootDir, options?.installWorktreeHook === true), configPermissions),
+    diagnoseSessionHook(rootDir, options?.sessionHookDependencies),
   );
 }
 

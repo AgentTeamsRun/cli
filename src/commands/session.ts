@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import matter from 'gray-matter';
 import {
@@ -11,6 +12,15 @@ import {
   readDeployedConventionPaths,
 } from './convention.js';
 import { executeSkillCommand } from './skill.js';
+import {
+  DEFAULT_SESSION_HOOK_CLIENT_ID,
+  findSessionHookClient,
+  isSessionHookClientId,
+  isSessionHookScope,
+  SESSION_HOOK_CLIENT_IDS,
+  SESSION_HOOK_SCOPES,
+} from '../session-hooks/clients.js';
+import { installSessionHook, uninstallSessionHook, type SessionHookResult } from '../session-hooks/install.js';
 import { loadConfigWithCredential } from '../utils/config.js';
 import { resolveApiContext } from '../utils/apiContext.js';
 
@@ -46,6 +56,9 @@ export type ConventionFileState = { hash: string; alwaysOn: boolean };
 export type ConventionSnapshot = Map<string, ConventionFileState>;
 
 const ALWAYS_ON = 'always_on';
+
+/** 프로젝트 밖 결과의 표식. 훅 출력은 이 결과를 무출력으로 다루므로 문구를 한 곳에 둔다. */
+export const NOT_A_PROJECT_NOTE = 'Not an AgentTeams project — nothing to sync.';
 
 const hashOf = (content: string): string => createHash('sha256').update(content).digest('hex');
 
@@ -147,7 +160,7 @@ export async function sessionSync(options?: { cwd?: string }): Promise<SessionSy
       synced,
       cliUpdateAvailable,
       skillConflicts: 0,
-      notes: ['Not an AgentTeams project — nothing to sync.'],
+      notes: [NOT_A_PROJECT_NOTE],
       summary: '✓ Up to date',
     };
   }
@@ -237,11 +250,93 @@ async function syncSkills(cwd: string, synced: { skills: boolean }, notes: strin
   }
 }
 
+const bullet = (item: string): string => `- ${item}`;
+
+/**
+ * Claude Code SessionStart 훅 출력(https://code.claude.com/docs/en/hooks). `additionalContext`는
+ * 세션 컨텍스트에 그대로 주입되므로, 에이전트가 할 일만 문장으로 남긴다.
+ *
+ * 프로젝트 밖이면 `null`이다. 훅은 사용자 설정에 걸려 모든 저장소의 세션에서 돌 수 있는데,
+ * 무관한 세션에 "이미 동기화했다"는 문장을 넣으면 그 자체가 잘못된 컨텍스트가 된다.
+ *
+ * CLI 업데이트는 알리기만 한다. 전역 설치는 사용자 판단이라 에이전트에게 설치를 시키지 않는다.
+ */
+export function formatClaudeCodeSessionStartHook(result: SessionSyncResult): string | null {
+  if (result.notes.includes(NOT_A_PROJECT_NOTE)) return null;
+
+  const lines = [
+    "AgentTeams session sync already ran at session start — do not run 'agentteams session sync' again this session.",
+  ];
+  if (result.reread.length > 0) {
+    lines.push('These convention files changed during sync — re-read these files:', ...result.reread.map(bullet));
+  }
+  if (result.invalidated.length > 0) {
+    lines.push('These rules no longer apply (removed from the server):', ...result.invalidated.map(bullet));
+  }
+  if (result.skillConflicts > 0) {
+    lines.push(`${result.skillConflicts} skill package(s) preserved — see notes`);
+  }
+  if (result.notes.length > 0) {
+    lines.push('Notes:', ...result.notes.map(bullet));
+  }
+  if (lines.length === 1) lines.push(result.summary);
+  if (result.cliUpdateAvailable) {
+    lines.push("AgentTeams CLI update available — tell the user to run 'npm install -g @agentteams/cli'.");
+  }
+
+  return JSON.stringify({
+    hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: lines.join('\n') },
+  });
+}
+
+/**
+ * `session hook install|uninstall`의 입력 검증. user 스코프는 이 머신의 모든 세션에 걸리므로
+ * `--yes` 없이는 쓰지 않는다 — 미리보기(`--dry-run`)는 쓰지 않으니 허용한다.
+ */
+export function runSessionHookCommand(
+  action: 'install' | 'uninstall',
+  options: Record<string, unknown> = {},
+  // Jest ESM 환경에서는 `process.env.HOME`을 바꿔도 `os.homedir()`가 실제 홈을 돌려준다.
+  // 테스트가 사용자의 실제 설정 파일을 쓰지 않도록 홈은 주입받는다.
+  context: { homeDir?: string } = {},
+): SessionHookResult {
+  const homeDir = context.homeDir ?? homedir();
+  const clientId = options.client ?? DEFAULT_SESSION_HOOK_CLIENT_ID;
+  if (!isSessionHookClientId(clientId)) {
+    throw new Error(`Unsupported --client: ${String(clientId)}. Use one of: ${SESSION_HOOK_CLIENT_IDS.join(', ')}.`);
+  }
+  const scope = options.scope ?? 'project';
+  if (!isSessionHookScope(scope)) {
+    throw new Error(`Unsupported --scope: ${String(scope)}. Use one of: ${SESSION_HOOK_SCOPES.join(', ')}.`);
+  }
+  const dryRun = options.dryRun === true;
+  if (scope === 'user' && !dryRun && options.yes !== true) {
+    const client = findSessionHookClient(clientId);
+    const path = client?.configPath('user', { cwd: process.cwd(), homeDir }) ?? 'the user settings file';
+    throw new Error(
+      `--scope user edits ${path}, which applies to every ${client?.label ?? clientId} session on this machine. Re-run with --scope user --yes to apply, or add --dry-run to preview.`,
+    );
+  }
+
+  const hookOptions = {
+    clientId,
+    scope,
+    cwd: typeof options.cwd === 'string' ? options.cwd : undefined,
+    homeDir,
+    dryRun,
+  };
+  return action === 'install' ? installSessionHook(hookOptions) : uninstallSessionHook(hookOptions);
+}
+
 export async function executeSessionCommand(action: string, options: any): Promise<unknown> {
   switch (action) {
     case 'sync':
       return sessionSync({ cwd: options?.cwd });
+    case 'hook-install':
+      return runSessionHookCommand('install', options);
+    case 'hook-uninstall':
+      return runSessionHookCommand('uninstall', options);
     default:
-      throw new Error(`Unknown session action: ${action}. Use sync.`);
+      throw new Error(`Unknown session action: ${action}. Use sync, hook install, or hook uninstall.`);
   }
 }

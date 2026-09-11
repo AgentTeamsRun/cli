@@ -63,6 +63,13 @@ export function registerInitCommand(program: Command): void {
       'Register AgentTeams with the MCP clients detected in this folder (project scope). Without this flag no client configuration is written.',
       false,
     )
+    // Same rule as --mcp: opt-in and project scope only. The user-scope hook is a
+    // machine-wide choice, so it stays with `agentteams session hook install`.
+    .option(
+      '--session-hook',
+      "Install a Claude Code SessionStart hook that runs 'agentteams session sync' (project scope, .claude/settings.json) when Claude Code is detected. Without this flag no hook configuration is written.",
+      false,
+    )
     // Explicit opt-in only. There is deliberately no `--no-device-auth`: the default
     // already is the browser callback, so the way to turn this off is not to pass it.
     .option('--device-auth', DEVICE_AUTH_OPTION_DESCRIPTION, false)
@@ -82,6 +89,7 @@ export function registerInitCommand(program: Command): void {
           deviceAuth: options.deviceAuth === true,
           setDefault: options.setDefault === true,
           mcp: options.mcp === true,
+          sessionHook: options.sessionHook === true,
         });
         const format = normalizeInteractiveFormat(options.format);
 
