@@ -615,6 +615,11 @@ describe('doctor on non-applicable layouts', () => {
 describe('doctor session hook report', () => {
   const INSTALL_COMMAND = 'agentteams session hook install';
 
+  // Windows에서 JS realpathSync는 8.3 짧은 경로(RUNNER~1)를 남기고, doctor가
+  // 보고하는 프로젝트 설정 경로는 native realpath(runneradmin)다. macOS /var →
+  // /private/var 도 같은 헬퍼로 맞춘다.
+  const projectSettingsPath = (repoDir: string) => join(canonicalizePath(repoDir), '.claude', 'settings.json');
+
   // 실제 홈과 PATH를 보지 않도록 감지와 user 스코프를 임시 HOME에 가둔다.
   // `~/.claude` 디렉터리가 Claude Code 감지 신호다.
   function createHome(options?: { claudeCode?: boolean }): string {
@@ -677,7 +682,7 @@ describe('doctor session hook report', () => {
         {
           scope: 'project',
           state: 'not-installed',
-          configPath: join(realpathSync(repoDir), '.claude', 'settings.json'),
+          configPath: projectSettingsPath(repoDir),
         },
         { scope: 'user', state: 'not-installed', configPath: join(homeDir, '.claude', 'settings.json') },
       ],
@@ -710,8 +715,7 @@ describe('doctor session hook report', () => {
   it('reports outdated per scope with the matching install command and leaves both files byte-identical', async () => {
     const repoDir = createGitRootProject();
     const homeDir = createHome();
-    // doctor는 설정 루트를 realpath로 해석한다(macOS의 /var → /private/var).
-    const projectSettings = join(realpathSync(repoDir), '.claude', 'settings.json');
+    const projectSettings = projectSettingsPath(repoDir);
     const userSettings = join(homeDir, '.claude', 'settings.json');
     const projectSource = writeSettings(projectSettings, hookEntry({ timeout: 30 }));
     const userSource = writeSettings(userSettings, hookEntry({ matcher: 'startup' }));
@@ -740,7 +744,7 @@ describe('doctor session hook report', () => {
     const homeDir = createHome();
     const projectSettings = join(repoDir, '.claude', 'settings.json');
     const source = writeSettings(projectSettings, '{ "hooks": { // comment\n} }\n');
-    const reportedPath = join(realpathSync(repoDir), '.claude', 'settings.json');
+    const reportedPath = projectSettingsPath(repoDir);
 
     const result = await runWithBaseline(repoDir, homeDir);
 
