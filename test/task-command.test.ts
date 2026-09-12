@@ -97,11 +97,18 @@ describe('task lifecycle commands', () => {
       data: { data: { planStatus: 'PARTIAL', tasks: [], progress: null } },
     } as never);
 
-    const result = await executeTaskCommand(apiUrl, projectId, headers, 'finish', {
-      planId: 'plan-1',
-      taskId: 'task-1',
-      status: 'done',
-    });
+    const result = await executeTaskCommand(
+      apiUrl,
+      projectId,
+      headers,
+      'finish',
+      {
+        planId: 'plan-1',
+        taskId: 'task-1',
+        status: 'done',
+      },
+      { collectTaskFinishGitSnapshot: () => null },
+    );
 
     expect(postSpy).toHaveBeenCalledWith(
       `${apiUrl}/api/projects/${projectId}/plans/plan-1/tasks/task-1/finish`,
@@ -114,5 +121,137 @@ describe('task lifecycle commands', () => {
       taskId: 'task-1',
       status: 'DONE',
     });
+  });
+
+  it('includes a git snapshot and warns when HEAD is not on any remote branch', async () => {
+    const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    const postSpy = jest.spyOn(axios, 'post').mockResolvedValue({
+      data: { data: { planStatus: 'IN_PROGRESS', tasks: [], progress: null } },
+    } as never);
+    const git = {
+      commit: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      branch: 'feat/unpushed',
+      commitOnRemote: false,
+    };
+
+    const result = await executeTaskCommand(
+      apiUrl,
+      projectId,
+      headers,
+      'finish',
+      {
+        planId: 'plan-1',
+        taskId: 'task-1',
+        status: 'DONE',
+      },
+      { collectTaskFinishGitSnapshot: () => git },
+    );
+
+    expect(postSpy).toHaveBeenCalledWith(
+      `${apiUrl}/api/projects/${projectId}/plans/plan-1/tasks/task-1/finish`,
+      { status: 'DONE', git },
+      { headers },
+    );
+    expect(result).toMatchObject({
+      warning: 'HEAD commit is not on any remote branch. Push before another runner continues this plan.',
+    });
+    expect(errorSpy).toHaveBeenCalledWith(
+      'Warning: HEAD commit is not on any remote branch. Push before another runner continues this plan.',
+    );
+  });
+
+  it('warns on BLOCKED finish when HEAD is not on any remote branch', async () => {
+    const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    const postSpy = jest.spyOn(axios, 'post').mockResolvedValue({
+      data: { data: { planStatus: 'IN_PROGRESS', tasks: [], progress: null } },
+    } as never);
+    const git = {
+      commit: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+      branch: 'feat/blocked',
+      commitOnRemote: false,
+    };
+
+    await executeTaskCommand(
+      apiUrl,
+      projectId,
+      headers,
+      'finish',
+      {
+        planId: 'plan-1',
+        taskId: 'task-1',
+        status: 'BLOCKED',
+      },
+      { collectTaskFinishGitSnapshot: () => git },
+    );
+
+    expect(postSpy).toHaveBeenCalledWith(
+      `${apiUrl}/api/projects/${projectId}/plans/plan-1/tasks/task-1/finish`,
+      { status: 'BLOCKED', git },
+      { headers },
+    );
+    expect(errorSpy).toHaveBeenCalledWith(
+      'Warning: HEAD commit is not on any remote branch. Push before another runner continues this plan.',
+    );
+  });
+
+  it('omits git from the request body when --no-git is set', async () => {
+    const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    const collect = jest.fn(() => ({
+      commit: 'cccccccccccccccccccccccccccccccccccccccc',
+      branch: 'feat/ignored',
+      commitOnRemote: false,
+    }));
+    const postSpy = jest.spyOn(axios, 'post').mockResolvedValue({
+      data: { data: { planStatus: 'IN_PROGRESS', tasks: [], progress: null } },
+    } as never);
+
+    const result = await executeTaskCommand(
+      apiUrl,
+      projectId,
+      headers,
+      'finish',
+      {
+        planId: 'plan-1',
+        taskId: 'task-1',
+        status: 'DONE',
+        git: false,
+      },
+      { collectTaskFinishGitSnapshot: collect },
+    );
+
+    expect(collect).not.toHaveBeenCalled();
+    expect(postSpy).toHaveBeenCalledWith(
+      `${apiUrl}/api/projects/${projectId}/plans/plan-1/tasks/task-1/finish`,
+      { status: 'DONE' },
+      { headers },
+    );
+    expect(result).not.toHaveProperty('warning');
+    expect(errorSpy).not.toHaveBeenCalled();
+  });
+
+  it('succeeds without a git field when the working directory is not a git repository', async () => {
+    const postSpy = jest.spyOn(axios, 'post').mockResolvedValue({
+      data: { data: { planStatus: 'IN_PROGRESS', tasks: [], progress: null } },
+    } as never);
+
+    const result = await executeTaskCommand(
+      apiUrl,
+      projectId,
+      headers,
+      'finish',
+      {
+        planId: 'plan-1',
+        taskId: 'task-1',
+        status: 'DONE',
+      },
+      { collectTaskFinishGitSnapshot: () => null },
+    );
+
+    expect(postSpy).toHaveBeenCalledWith(
+      `${apiUrl}/api/projects/${projectId}/plans/plan-1/tasks/task-1/finish`,
+      { status: 'DONE' },
+      { headers },
+    );
+    expect(result).toMatchObject({ message: 'Task finished (task-1: DONE)', status: 'DONE' });
   });
 });

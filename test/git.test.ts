@@ -2,6 +2,7 @@ import { describe, it, expect } from '@jest/globals';
 import { resolve } from 'node:path';
 import {
   collectGitMetrics,
+  collectTaskFinishGitSnapshot,
   getGitRemoteOriginUrl,
   resolveGitTopLevel,
   resolveMainCheckoutRoot,
@@ -108,6 +109,64 @@ describe('Git Metrics Utility', () => {
     });
 
     expect(remoteUrl).toBe('git@github.com:agentteams/agentteams.git');
+  });
+});
+
+describe('collectTaskFinishGitSnapshot', () => {
+  it('marks commitOnRemote true when a remote branch contains HEAD', () => {
+    const snapshot = collectTaskFinishGitSnapshot((cmd, args) => {
+      expect(cmd).toBe('git');
+      const serializedArgs = args.join(' ');
+      if (serializedArgs === 'rev-parse HEAD') return 'abc123\n';
+      if (serializedArgs === 'branch --show-current') return 'feat/pushed\n';
+      if (serializedArgs === 'branch -r --contains HEAD') return '  origin/feat/pushed\n';
+      throw new Error(`unexpected args: ${serializedArgs}`);
+    });
+
+    expect(snapshot).toEqual({
+      commit: 'abc123',
+      branch: 'feat/pushed',
+      commitOnRemote: true,
+    });
+  });
+
+  it('marks commitOnRemote false when no remote branch contains HEAD', () => {
+    const snapshot = collectTaskFinishGitSnapshot((cmd, args) => {
+      const serializedArgs = args.join(' ');
+      if (serializedArgs === 'rev-parse HEAD') return 'def456\n';
+      if (serializedArgs === 'branch --show-current') return 'feat/local\n';
+      if (serializedArgs === 'branch -r --contains HEAD') return '\n';
+      throw new Error(`unexpected args: ${serializedArgs}`);
+    });
+
+    expect(snapshot).toEqual({
+      commit: 'def456',
+      branch: 'feat/local',
+      commitOnRemote: false,
+    });
+  });
+
+  it('uses commitOnRemote null when the remote lookup fails', () => {
+    const snapshot = collectTaskFinishGitSnapshot((cmd, args) => {
+      const serializedArgs = args.join(' ');
+      if (serializedArgs === 'rev-parse HEAD') return 'ghi789\n';
+      if (serializedArgs === 'branch --show-current') return 'feat/offline\n';
+      if (serializedArgs === 'branch -r --contains HEAD') throw new Error('not a git repository');
+      throw new Error(`unexpected args: ${serializedArgs}`);
+    });
+
+    expect(snapshot).toEqual({
+      commit: 'ghi789',
+      branch: 'feat/offline',
+      commitOnRemote: null,
+    });
+  });
+
+  it('returns null when HEAD cannot be resolved', () => {
+    const snapshot = collectTaskFinishGitSnapshot(() => {
+      throw new Error('not a git repository');
+    });
+    expect(snapshot).toBeNull();
   });
 });
 

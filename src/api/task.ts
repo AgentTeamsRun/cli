@@ -27,6 +27,12 @@ export async function startPlanTask(
   return response.data;
 }
 
+export type PlanTaskFinishGit = {
+  commit: string;
+  branch: string | null;
+  commitOnRemote: boolean | null;
+};
+
 export async function finishPlanTask(
   apiUrl: string,
   projectId: string,
@@ -34,8 +40,10 @@ export async function finishPlanTask(
   planId: string,
   taskId: string,
   status: string,
+  git?: PlanTaskFinishGit,
 ): Promise<unknown> {
   const baseUrl = `${apiUrl}/api/projects/${projectId}/plans`;
-  const response = await httpClient.post(`${baseUrl}/${planId}/tasks/${taskId}/finish`, { status }, { headers });
+  const body = git ? { status, git } : { status };
+  const response = await httpClient.post(`${baseUrl}/${planId}/tasks/${taskId}/finish`, body, { headers });
   return response.data;
 }
