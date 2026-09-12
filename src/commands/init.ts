@@ -50,7 +50,9 @@ import {
   type AgentEntryPointValue,
 } from '../utils/agentEntryPoints.js';
 import { bootstrapLinkedWorktree, resolveLinkedWorktreeSource, type WorktreeInitResult } from './initWorktree.js';
-import type { InstallOutcome, McpRegistrationDependencies } from '../mcp-registration/index.js';
+import type { InstallOutcome, McpPathContext, McpRegistrationDependencies } from '../mcp-registration/index.js';
+import type { DetectionDependencies } from '../mcp-registration/detect.js';
+import type { SessionHookStatus } from '../session-hooks/install.js';
 import {
   DEFAULT_CONVENTION_REFERENCE,
   upgradeLegacyConventionReference,
@@ -114,6 +116,36 @@ type InitOptions = {
   mcp?: boolean;
   /** Injection seam so tests drive a temporary HOME/PATH and a fake vendor CLI. */
   mcpDependencies?: McpRegistrationDependencies;
+  /**
+   * Opt-in: install the Claude Code SessionStart hook at project scope.
+   * Absent means init writes no hook configuration at all.
+   */
+  sessionHook?: boolean;
+  /** Injection seam so tests drive Claude Code detection with a temporary HOME/PATH. */
+  sessionHookDependencies?: InitSessionHookDependencies;
+};
+
+export type InitSessionHookDependencies = {
+  context?: Partial<McpPathContext>;
+  detectionDependencies?: Omit<DetectionDependencies, 'context'>;
+};
+
+/**
+ * What `--session-hook` did. Present only when the flag was passed, so its absence is
+ * the proof that a plain `agentteams init` touched no hook configuration.
+ */
+export type InitSessionHookResult = {
+  clientId: 'claude-code';
+  scope: 'project';
+  /** `skipped`: Claude Code was not detected. `failed`: the install could not run. */
+  status: SessionHookStatus | 'skipped' | 'failed';
+  configPath: string | null;
+  backupPath: string | null;
+  message: string;
+  /** Set whenever nothing was installed — the command that installs the hook by hand. */
+  manualCommand?: string;
+  /** Set when the install could not run. Init itself still succeeds. */
+  error?: string;
 };
 
 /** One client's registration outcome, as reported by `agentteams mcp install`. */
@@ -205,6 +237,8 @@ type OAuthInitResult = {
   localAdapters: InitAdapterOutcome[];
   /** Present only when `--mcp` was passed. Additive. */
   mcp?: InitMcpResult;
+  /** Present only when `--session-hook` was passed. Additive. */
+  sessionHook?: InitSessionHookResult;
 };
 
 export type ConfiguredProjectInitResult = {
@@ -228,6 +262,8 @@ export type ConfiguredProjectInitResult = {
   postCheckoutHook?: EnsurePostCheckoutHookResult;
   /** Present only when `--mcp` was passed. Additive. */
   mcp?: InitMcpResult;
+  /** Present only when `--session-hook` was passed. Additive. */
+  sessionHook?: InitSessionHookResult;
 };
 
 type InitResult = OAuthInitResult | WorktreeInitResult | ConfiguredProjectInitResult;
@@ -1057,11 +1093,72 @@ async function runMcpRegistrationStep(cwd: string, dependencies?: McpRegistratio
   }
 }
 
+const SESSION_HOOK_MANUAL_COMMAND = 'agentteams session hook install';
+
+/**
+ * Install the Claude Code SessionStart hook for this project.
+ *
+ * The write goes through `installSessionHook`, the function behind
+ * `agentteams session hook install`, so the merge into the user's settings file, the
+ * backup and the refusal to rewrite a file it cannot parse have exactly one
+ * implementation. Init only adds the detection gate: on a machine without Claude Code
+ * the hook would never run, so nothing is written and the manual command is reported.
+ *
+ * Like the MCP step it is imported lazily, pinned to project scope, and never throws —
+ * a hook that could not be installed is a reported detail, not a failed init.
+ */
+async function runSessionHookStep(
+  cwd: string,
+  dependencies?: InitSessionHookDependencies,
+): Promise<InitSessionHookResult> {
+  const base = { clientId: 'claude-code', scope: 'project' } as const;
+  try {
+    const [{ detectClients }, { installSessionHook }] = await Promise.all([
+      import('../mcp-registration/index.js'),
+      import('../session-hooks/install.js'),
+    ]);
+    const context: McpPathContext = { cwd, homeDir: homedir(), env: process.env, ...dependencies?.context };
+    const claudeCode = detectClients({ ...dependencies?.detectionDependencies, context }, ['claude-code']).find(
+      (signal) => signal.clientId === 'claude-code',
+    );
+    if (!claudeCode?.detected) {
+      return {
+        ...base,
+        status: 'skipped',
+        configPath: null,
+        backupPath: null,
+        message: 'Claude Code was not detected in this environment; no hook configuration was written.',
+        manualCommand: SESSION_HOOK_MANUAL_COMMAND,
+      };
+    }
+
+    const installed = installSessionHook({ clientId: 'claude-code', scope: 'project', cwd });
+    return {
+      ...base,
+      status: installed.status,
+      configPath: installed.configPath,
+      backupPath: installed.backupPath,
+      message: installed.message,
+    };
+  } catch (error) {
+    return {
+      ...base,
+      status: 'failed',
+      configPath: null,
+      backupPath: null,
+      message: 'The session hook could not be installed.',
+      manualCommand: SESSION_HOOK_MANUAL_COMMAND,
+      error: toErrorMessage(error),
+    };
+  }
+}
+
 async function runConfiguredProjectInit(
   cwd: string,
   executionContext: InitExecutionContext,
   adapterOptions: LocalAdapterPassOptions,
   mcpOptions: { requested: boolean; dependencies?: McpRegistrationDependencies },
+  sessionHookOptions: { requested: boolean; dependencies?: InitSessionHookDependencies },
 ): Promise<ConfiguredProjectInitResult> {
   const configPath = executionContext.configPath;
   const projectConfig = executionContext.config;
@@ -1122,6 +1219,10 @@ async function runConfiguredProjectInit(
   // Registration runs after the binding and the credential are verified, because the
   // entry it writes is only useful once `agentteams mcp` can resolve this project.
   const mcp = mcpOptions.requested ? await runMcpRegistrationStep(cwd, mcpOptions.dependencies) : undefined;
+  // Same ordering reason: the hook runs `agentteams session sync`, which needs this binding.
+  const sessionHook = sessionHookOptions.requested
+    ? await runSessionHookStep(cwd, sessionHookOptions.dependencies)
+    : undefined;
 
   const doctor = await executeDoctorCommand({ cwd, installWorktreeHook: adapterOptions.installWorktreeHook });
   const configuredAuthMode: AuthMode =
@@ -1146,6 +1247,7 @@ async function runConfiguredProjectInit(
     localAdapters: adapterPass.adapters,
     ...(adapterPass.postCheckoutHook ? { postCheckoutHook: adapterPass.postCheckoutHook } : {}),
     ...(mcp ? { mcp } : {}),
+    ...(sessionHook ? { sessionHook } : {}),
   };
 }
 
@@ -1480,6 +1582,7 @@ async function executeInitCommandWithContext(options?: InitOptions): Promise<Ini
         executionContext,
         { ...adapterOptions, allowPrompt: false },
         { requested: options?.mcp === true, dependencies: options?.mcpDependencies },
+        { requested: options?.sessionHook === true, dependencies: options?.sessionHookDependencies },
       );
     } catch (error) {
       throw new Error(`Initialization failed: ${toErrorMessage(error)}`);
@@ -1527,6 +1630,8 @@ async function executeInitCommandWithContext(options?: InitOptions): Promise<Ini
   const { adapters: localAdapters, agentFiles, postCheckoutHook } = await runLocalAdapterPass(cwd, adapterOptions);
 
   const mcp = options?.mcp === true ? await runMcpRegistrationStep(cwd, options?.mcpDependencies) : undefined;
+  const sessionHook =
+    options?.sessionHook === true ? await runSessionHookStep(cwd, options?.sessionHookDependencies) : undefined;
 
   const seedPlanId = setup.seedPlanId;
   const seedPlanWebUrl = seedPlanId ? `${AUTH_BASE_URL.replace(/\/+$/, '')}/go?type=plan&id=${seedPlanId}` : null;
@@ -1548,5 +1653,6 @@ async function executeInitCommandWithContext(options?: InitOptions): Promise<Ini
     localAdapters,
     ...(setup.personalLogin ? { personalLogin: setup.personalLogin } : {}),
     ...(mcp ? { mcp } : {}),
+    ...(sessionHook ? { sessionHook } : {}),
   };
 }

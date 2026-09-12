@@ -107,6 +107,26 @@ describe('mcp client detection', () => {
     expect(signals['kiro-cli'].executablePath).toBe(join(localBin, 'kiro-cli'));
   });
 
+  it('scans only the requested clients and never probes the others', () => {
+    fakeExecutable('claude');
+    fakeExecutable('grok');
+    const probed: string[] = [];
+
+    const signals = detectClients(
+      {
+        context,
+        probeExecutable: (executablePath) => {
+          probed.push(executablePath);
+          return 'Grok Build TUI';
+        },
+      },
+      ['claude-code'],
+    );
+
+    expect(signals.map((signal) => [signal.clientId, signal.detected])).toEqual([['claude-code', true]]);
+    expect(probed).toEqual([]);
+  });
+
   it('skips a PATH name collision and detects the official Grok Build path', () => {
     fakeExecutable('grok');
     const grokBin = join(home, '.grok', 'bin');

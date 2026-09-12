@@ -149,4 +149,19 @@ describe('agentteams init CLI wiring', () => {
     const [, , options] = executeCommand.mock.calls[0] as [string, string, Record<string, unknown>];
     expect(options.mcp).toBe(false);
   });
+
+  test('--session-hook이 init 페이로드로 전달된다', async () => {
+    await runCli(['init', '--session-hook']);
+
+    const [, , options] = executeCommand.mock.calls[0] as [string, string, Record<string, unknown>];
+    expect(options.sessionHook).toBe(true);
+  });
+
+  // --mcp와 같은 이유: 기본 실행이 훅 설정을 쓰면 옵트인이 아니게 된다.
+  test('--session-hook이 없으면 false로 전달된다', async () => {
+    await runCli(['init']);
+
+    const [, , options] = executeCommand.mock.calls[0] as [string, string, Record<string, unknown>];
+    expect(options.sessionHook).toBe(false);
+  });
 });

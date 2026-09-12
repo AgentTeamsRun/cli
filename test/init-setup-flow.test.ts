@@ -1092,6 +1092,143 @@ describe('init configured-project fast path', () => {
       expect(result.mcp?.clients.find((client) => client.clientId === 'cursor-cli')?.outcome).toBe('INSTALLED');
     });
   });
+
+  /**
+   * `--session-hook`도 `--mcp`와 같은 옵트인 규칙이다: 플래그가 없으면 훅 설정을 쓰지 않고,
+   * 있으면 `session hook install`과 같은 설치 함수를 project 스코프로 부르며, 어떤 실패도
+   * init을 실패시키지 않는다. 감지용 HOME/PATH는 주입해 실제 머신의 Claude Code 흔적과 무관하게 한다.
+   */
+  describe('--session-hook opt-in', () => {
+    type SessionHookCapableResult = {
+      success: true;
+      sessionHook?: {
+        clientId: string;
+        scope: string;
+        status: string;
+        configPath: string | null;
+        manualCommand?: string;
+        error?: string;
+      };
+    };
+
+    function createDetectionFixture({ claudeInstalled }: { claudeInstalled: boolean }): {
+      homeDir: string;
+      dependencies: Record<string, unknown>;
+    } {
+      const homeDir = createTempProject();
+      const binDir = createTempProject();
+      if (claudeInstalled) {
+        writeFileSync(join(binDir, 'claude'), '#!/bin/sh\n', { mode: 0o755 });
+      }
+      return { homeDir, dependencies: { context: { homeDir, env: { PATH: binDir } } } };
+    }
+
+    const settingsPath = (dir: string): string => join(dir, '.claude', 'settings.json');
+
+    test('writes no hook configuration when the flag is absent, even with Claude Code installed', async () => {
+      const { axios, executeInitCommand } = await loadInitModules();
+      const cwd = createConfiguredProject();
+      const fixture = createDetectionFixture({ claudeInstalled: true });
+      mockConventionEndpoints(axios);
+
+      const result = (await executeInitCommand({
+        cwd,
+        sessionHookDependencies: fixture.dependencies,
+      })) as SessionHookCapableResult;
+
+      expect(result.sessionHook).toBeUndefined();
+      expect(existsSync(join(cwd, '.claude'))).toBe(false);
+    });
+
+    test('installs the project-scope hook through the same function as `session hook install`', async () => {
+      const { axios, executeInitCommand } = await loadInitModules();
+      const { installSessionHook } = await import('../src/session-hooks/install.js');
+      const cwd = createConfiguredProject();
+      const fixture = createDetectionFixture({ claudeInstalled: true });
+      mockConventionEndpoints(axios);
+
+      const result = (await executeInitCommand({
+        cwd,
+        sessionHook: true,
+        sessionHookDependencies: fixture.dependencies,
+      })) as SessionHookCapableResult;
+
+      expect(result.success).toBe(true);
+      expect(result.sessionHook).toMatchObject({
+        clientId: 'claude-code',
+        scope: 'project',
+        status: 'installed',
+        configPath: settingsPath(cwd),
+      });
+      expect(result.sessionHook?.error).toBeUndefined();
+
+      const reference = createTempProject();
+      installSessionHook({ clientId: 'claude-code', scope: 'project', cwd: reference });
+      expect(readFileSync(settingsPath(cwd), 'utf-8')).toBe(readFileSync(settingsPath(reference), 'utf-8'));
+      // init은 머신 전역 스코프를 고를 수 없다.
+      expect(existsSync(settingsPath(fixture.homeDir))).toBe(false);
+    });
+
+    test('does not probe unrelated clients when only the session hook is requested', async () => {
+      const { axios, executeInitCommand } = await loadInitModules();
+      const cwd = createConfiguredProject();
+      const fixture = createDetectionFixture({ claudeInstalled: true });
+      const probeExecutable = jest.fn(() => null);
+      mockConventionEndpoints(axios);
+
+      const result = (await executeInitCommand({
+        cwd,
+        sessionHook: true,
+        sessionHookDependencies: {
+          ...fixture.dependencies,
+          detectionDependencies: { fileExists: () => true, probeExecutable },
+        },
+      })) as SessionHookCapableResult;
+
+      expect(result.sessionHook?.status).toBe('installed');
+      expect(probeExecutable).not.toHaveBeenCalled();
+    });
+
+    test('skips the write and reports the manual command when Claude Code is not detected', async () => {
+      const { axios, executeInitCommand } = await loadInitModules();
+      const cwd = createConfiguredProject();
+      const fixture = createDetectionFixture({ claudeInstalled: false });
+      mockConventionEndpoints(axios);
+
+      const result = (await executeInitCommand({
+        cwd,
+        sessionHook: true,
+        sessionHookDependencies: fixture.dependencies,
+      })) as SessionHookCapableResult;
+
+      expect(result.success).toBe(true);
+      expect(result.sessionHook?.status).toBe('skipped');
+      expect(result.sessionHook?.manualCommand).toBe('agentteams session hook install');
+      expect(existsSync(join(cwd, '.claude'))).toBe(false);
+    });
+
+    test('keeps init successful and leaves the file alone when the install throws', async () => {
+      const { axios, executeInitCommand } = await loadInitModules();
+      const cwd = createConfiguredProject();
+      const fixture = createDetectionFixture({ claudeInstalled: true });
+      mockConventionEndpoints(axios);
+      mkdirSync(join(cwd, '.claude'), { recursive: true });
+      const broken = '{ "permissions": { "allow": [] }, // hand-edited\n}\n';
+      writeFileSync(settingsPath(cwd), broken, 'utf-8');
+
+      const result = (await executeInitCommand({
+        cwd,
+        sessionHook: true,
+        sessionHookDependencies: fixture.dependencies,
+      })) as SessionHookCapableResult;
+
+      expect(result.success).toBe(true);
+      expect(result.sessionHook?.status).toBe('failed');
+      expect(result.sessionHook?.error).toContain('is not valid JSON');
+      expect(result.sessionHook?.manualCommand).toBe('agentteams session hook install');
+      expect(readFileSync(settingsPath(cwd), 'utf-8')).toBe(broken);
+    });
+  });
 });
 
 describe('init unified setup failure paths', () => {

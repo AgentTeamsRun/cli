@@ -585,6 +585,88 @@ describe('printInitResult', () => {
     });
   });
 
+  describe('세션 훅 (human format)', () => {
+    const sessionHookResult = (overrides: Record<string, unknown> = {}) => ({
+      clientId: 'claude-code' as const,
+      scope: 'project' as const,
+      status: 'installed' as const,
+      configPath: '/project/.claude/settings.json',
+      backupPath: null,
+      message: 'Added the AgentTeams Claude Code SessionStart hook to /project/.claude/settings.json.',
+      ...overrides,
+    });
+
+    it('세션 훅 결과가 없으면 섹션을 출력하지 않는다', () => {
+      printInitResult(MOCK_INIT_RESULT, 'human');
+
+      expect(captureOutput(logSpy)).not.toContain('Claude Code session hook');
+    });
+
+    it('설치 결과와 백업 경로를 출력한다', () => {
+      printInitResult(
+        {
+          ...MOCK_INIT_RESULT,
+          sessionHook: sessionHookResult({ backupPath: '/project/.claude/settings.json.agentteams-backup' }),
+        },
+        'human',
+      );
+
+      const output = captureOutput(logSpy);
+      expect(output).toContain('Claude Code session hook (project scope):');
+      expect(output).toContain(
+        '✓ Added the AgentTeams Claude Code SessionStart hook to /project/.claude/settings.json.',
+      );
+      expect(output).toContain('Backup: /project/.claude/settings.json.agentteams-backup');
+    });
+
+    it('Claude Code가 감지되지 않으면 수동 설치 명령을 안내한다', () => {
+      printInitResult(
+        {
+          ...MOCK_INIT_RESULT,
+          sessionHook: sessionHookResult({
+            status: 'skipped',
+            configPath: null,
+            message: 'Claude Code was not detected in this environment; no hook configuration was written.',
+            manualCommand: 'agentteams session hook install',
+          }),
+        },
+        'human',
+      );
+
+      const output = captureOutput(logSpy);
+      expect(output).toContain('Claude Code was not detected');
+      expect(output).toContain('Install it later: agentteams session hook install');
+    });
+
+    it('설치가 실패해도 경고와 재시도 명령만 남기고 성공 경로를 유지한다', () => {
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        printInitResult(
+          {
+            ...MOCK_INIT_RESULT,
+            sessionHook: sessionHookResult({
+              status: 'failed',
+              configPath: null,
+              message: 'The session hook could not be installed.',
+              manualCommand: 'agentteams session hook install',
+              error: '/project/.claude/settings.json is not valid JSON.',
+            }),
+          },
+          'human',
+        );
+
+        const output = `${captureOutput(logSpy)}\n${captureOutput(warnSpy)}`;
+        expect(output).toContain(
+          '⚠ The session hook could not be installed. /project/.claude/settings.json is not valid JSON.',
+        );
+        expect(output).toContain('Retry: agentteams session hook install');
+        expect(output).toContain('Next steps:');
+      } finally {
+        warnSpy.mockRestore();
+      }
+    });
+  });
+
   describe('json format', () => {
     it('json 포맷이면 JSON 문자열을 출력한다', () => {
       printInitResult(MOCK_INIT_RESULT, 'json');
@@ -632,6 +714,22 @@ describe('printInitResult', () => {
 
       const parsed = JSON.parse(captureOutput(logSpy)) as Record<string, unknown>;
       expect(parsed.mcp).toEqual(mcp);
+    });
+
+    it('세션 훅 설치 결과를 JSON 페이로드에도 포함한다', () => {
+      const sessionHook = {
+        clientId: 'claude-code',
+        scope: 'project',
+        status: 'installed',
+        configPath: '/project/.claude/settings.json',
+        backupPath: null,
+        message: 'Added the AgentTeams Claude Code SessionStart hook to /project/.claude/settings.json.',
+      };
+
+      printInitResult({ ...MOCK_INIT_RESULT, sessionHook }, 'json');
+
+      const parsed = JSON.parse(captureOutput(logSpy)) as Record<string, unknown>;
+      expect(parsed.sessionHook).toEqual(sessionHook);
     });
 
     it('어댑터 상태는 기존 필드를 건드리지 않고 추가만 한다', () => {

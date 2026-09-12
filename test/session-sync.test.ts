@@ -1,8 +1,21 @@
-import { afterEach, beforeEach, describe, it, expect } from '@jest/globals';
+import { afterEach, beforeEach, describe, it, expect, jest } from '@jest/globals';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { diffConventionSnapshots, sessionSync, snapshotConventionFiles } from '../src/commands/session.js';
+import {
+  diffConventionSnapshots,
+  formatClaudeCodeSessionStartHook,
+  sessionSync,
+  snapshotConventionFiles,
+  type SessionSyncResult,
+} from '../src/commands/session.js';
+
+// 훅 배선 테스트는 commander를 실제로 통과시키되 라우팅만 가로챈다. 기본 구현은 진짜
+// `sessionSync`로 넘겨, 프로젝트 밖 판정 같은 실제 결과가 그대로 흐르게 한다.
+const executeCommand = jest.fn(async (_resource: string, _action: string, options: { cwd?: string }) =>
+  sessionSync({ cwd: options.cwd }),
+);
+jest.unstable_mockModule('../src/commands/index.js', () => ({ __esModule: true, executeCommand }));
 
 let projectRoot = '';
 
@@ -158,5 +171,224 @@ describe('sessionSync', () => {
     expect(result.synced).toEqual({ conventions: false, skills: false, platformGuides: false });
     expect(result.cliUpdateAvailable).toBe(false);
     expect(result.notes).toEqual(['Not an AgentTeams project — nothing to sync.']);
+  });
+});
+
+const syncResult = (overrides: Partial<SessionSyncResult> = {}): SessionSyncResult => ({
+  reread: [],
+  invalidated: [],
+  synced: { conventions: false, skills: false, platformGuides: false },
+  cliUpdateAvailable: false,
+  notes: [],
+  skillConflicts: 0,
+  summary: '✓ Up to date',
+  ...overrides,
+});
+
+const parseHook = (result: SessionSyncResult) => {
+  const payload = formatClaudeCodeSessionStartHook(result);
+  expect(payload).not.toBeNull();
+  const parsed = JSON.parse(payload as string) as {
+    hookSpecificOutput: { hookEventName: string; additionalContext: string };
+  };
+  expect(parsed.hookSpecificOutput.hookEventName).toBe('SessionStart');
+  return parsed.hookSpecificOutput.additionalContext;
+};
+
+describe('formatClaudeCodeSessionStartHook', () => {
+  // 훅이 이미 돌았는데 에이전트가 convention.md의 Session Start 절을 따라 한 번 더 부르면 중복이다.
+  it('opens with the already-ran line and falls back to the summary when there is nothing else', () => {
+    const lines = parseHook(syncResult()).split('\n');
+
+    expect(lines[0]).toContain('already ran at session start');
+    expect(lines[0]).toContain("do not run 'agentteams session sync' again");
+    expect(lines).toEqual([lines[0], '✓ Up to date']);
+  });
+
+  it.each<[string, Partial<SessionSyncResult>, string[]]>([
+    ['reread only', { reread: ['.agentteams/convention.md'] }, ['re-read these files', '- .agentteams/convention.md']],
+    [
+      'invalidated only',
+      { invalidated: ['.agentteams/rules/legacy.md'] },
+      ['no longer apply', '- .agentteams/rules/legacy.md'],
+    ],
+    ['notes only', { notes: ['Skill check skipped: offline'] }, ['- Skill check skipped: offline']],
+    [
+      'skill conflicts with notes',
+      { skillConflicts: 2, notes: ['Preserved dev-cli: local edits'] },
+      ['2 skill package(s) preserved', '- Preserved dev-cli: local edits'],
+    ],
+    [
+      'everything at once',
+      {
+        reread: ['.agentteams/rules/context.md', '.agentteams/rules/my.md'],
+        invalidated: ['.agentteams/rules/legacy.md'],
+        skillConflicts: 1,
+        notes: ['Convention download failed: timeout'],
+      },
+      [
+        '- .agentteams/rules/context.md',
+        '- .agentteams/rules/my.md',
+        '- .agentteams/rules/legacy.md',
+        '1 skill package(s) preserved',
+        '- Convention download failed: timeout',
+      ],
+    ],
+  ])('carries every item for %s, and drops the summary', (_label, overrides, expected) => {
+    const context = parseHook(syncResult({ ...overrides, summary: 'SUMMARY-MARKER' }));
+
+    for (const text of expected) expect(context).toContain(text);
+    expect(context).not.toContain('SUMMARY-MARKER');
+  });
+
+  // 전역 설치는 사용자 판단이다. 에이전트에게는 사용자에게 알리라고만 한다.
+  it('adds the CLI update line only when an update is available', () => {
+    const withUpdate = parseHook(syncResult({ cliUpdateAvailable: true }));
+    expect(withUpdate).toContain('npm install -g @agentteams/cli');
+    expect(withUpdate).toContain('tell the user');
+
+    expect(parseHook(syncResult({ cliUpdateAvailable: false }))).not.toContain('npm install -g @agentteams/cli');
+  });
+
+  it('returns null outside an AgentTeams project', () => {
+    expect(
+      formatClaudeCodeSessionStartHook(syncResult({ notes: ['Not an AgentTeams project — nothing to sync.'] })),
+    ).toBe(null);
+  });
+});
+
+describe('session sync --hook claude-code', () => {
+  let stdout = '';
+  let stderr = '';
+  let stdoutSpy: ReturnType<typeof jest.spyOn>;
+  let stderrSpy: ReturnType<typeof jest.spyOn>;
+  let consoleErrorSpy: ReturnType<typeof jest.spyOn>;
+  let consoleLogSpy: ReturnType<typeof jest.spyOn>;
+  let exitSpy: ReturnType<typeof jest.spyOn>;
+
+  beforeEach(() => {
+    stdout = '';
+    stderr = '';
+    executeCommand.mockClear();
+    stdoutSpy = jest.spyOn(process.stdout, 'write').mockImplementation((chunk: string | Uint8Array) => {
+      stdout += String(chunk);
+      return true;
+    });
+    stderrSpy = jest.spyOn(process.stderr, 'write').mockImplementation((chunk: string | Uint8Array) => {
+      stderr += String(chunk);
+      return true;
+    });
+    consoleLogSpy = jest.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+      stdout += `${args.join(' ')}\n`;
+    });
+    consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
+      stderr += `${args.join(' ')}\n`;
+    });
+    exitSpy = jest.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
+  });
+
+  afterEach(() => {
+    stdoutSpy.mockRestore();
+    stderrSpy.mockRestore();
+    consoleLogSpy.mockRestore();
+    consoleErrorSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  const runSessionSync = async (args: string[]) => {
+    const { Command } = await import('commander');
+    const { registerSessionCommand } = await import('../src/program/session.js');
+    const program = new Command('agentteams').exitOverride();
+    registerSessionCommand(program);
+    await program.parseAsync(['node', 'agentteams', 'session', 'sync', '--cwd', projectRoot, ...args], {
+      from: 'node',
+    });
+  };
+
+  // Claude Code는 훅 stdout을 JSON으로 파싱한다. 출력 정책의 요약 텍스트가 섞이면 주입이 깨진다.
+  it('writes exactly one JSON line, bypassing the output policy even with --output-file', async () => {
+    executeCommand.mockResolvedValueOnce(syncResult({ reread: ['.agentteams/convention.md'] }));
+
+    await runSessionSync(['--hook', 'claude-code', '--output-file', join(projectRoot, 'out.json')]);
+
+    const lines = stdout.split('\n').filter(Boolean);
+    expect(lines).toHaveLength(1);
+    const parsed = JSON.parse(lines[0]) as { hookSpecificOutput: { hookEventName: string; additionalContext: string } };
+    expect(parsed.hookSpecificOutput.hookEventName).toBe('SessionStart');
+    expect(parsed.hookSpecificOutput.additionalContext).toContain('- .agentteams/convention.md');
+  });
+
+  // 훅은 사용자 설정에 걸려 모든 저장소에서 돈다. 무관한 세션에는 아무것도 주입하지 않는다.
+  it('prints nothing outside an AgentTeams project', async () => {
+    await runSessionSync(['--hook', 'claude-code']);
+
+    expect(executeCommand).toHaveBeenCalledTimes(1);
+    expect(stdout).toBe('');
+    expect(exitSpy).not.toHaveBeenCalled();
+  });
+
+  // non-zero 종료는 매 세션 시작에 `hook error` 알림을 띄운다.
+  it('swallows a routing failure: exit code 0, one stderr line, empty stdout', async () => {
+    executeCommand.mockRejectedValueOnce(new Error('routing broke\nsecond line'));
+
+    await runSessionSync(['--hook', 'claude-code']);
+
+    expect(exitSpy).not.toHaveBeenCalled();
+    expect(process.exitCode ?? 0).toBe(0);
+    expect(stdout).toBe('');
+    expect(stderr).toBe('AgentTeams session sync hook failed: routing broke second line\n');
+  });
+
+  it('ends a stalled hook after 15 seconds with manual sync context and exit 0', async () => {
+    // 모듈 로딩은 가짜 타이머를 켜기 전에 끝낸다.
+    await import('../src/program/session.js');
+    jest.useFakeTimers();
+    let finishSync!: (result: SessionSyncResult) => void;
+    executeCommand.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishSync = resolve;
+        }),
+    );
+    stdoutSpy.mockImplementation((chunk: string | Uint8Array, callback?: () => void) => {
+      stdout += String(chunk);
+      callback?.();
+      return true;
+    });
+    try {
+      const running = runSessionSync(['--hook', 'claude-code']);
+      await jest.advanceTimersByTimeAsync(14_999);
+      expect(stdout).toBe('');
+      await jest.advanceTimersByTimeAsync(1);
+      expect(exitSpy).toHaveBeenCalledWith(0);
+      const payload = JSON.parse(stdout);
+      expect(payload.hookSpecificOutput.hookEventName).toBe('SessionStart');
+      expect(payload.hookSpecificOutput.additionalContext).toContain('did not finish');
+      expect(payload.hookSpecificOutput.additionalContext).toContain("run 'agentteams session sync' manually");
+      expect(stdout).not.toContain('do not run');
+      finishSync(syncResult({}));
+      await running;
+      expect(stdout.trim().split('\n')).toHaveLength(1);
+    } finally {
+      finishSync?.(syncResult({}));
+      jest.useRealTimers();
+    }
+  });
+
+  it('rejects an unknown hook client', async () => {
+    await expect(runSessionSync(['--hook', 'cursor'])).rejects.toMatchObject({
+      code: 'commander.invalidArgument',
+    });
+    expect(executeCommand).not.toHaveBeenCalled();
+  });
+
+  // 플래그 없는 경로의 계약은 그대로다: 결과 JSON 전체를 출력하고, 라우팅 실패는 exit 1.
+  it('leaves the plain session sync output and exit code unchanged', async () => {
+    await runSessionSync([]);
+    expect(JSON.parse(stdout)).toMatchObject({ notes: ['Not an AgentTeams project — nothing to sync.'] });
+
+    executeCommand.mockRejectedValueOnce(new Error('routing broke'));
+    await runSessionSync([]);
+    expect(exitSpy).toHaveBeenCalledWith(1);
   });
 });

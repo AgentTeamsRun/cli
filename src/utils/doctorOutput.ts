@@ -7,6 +7,12 @@ export function resolveDoctorExitCode(result: DoctorResult): 0 | 1 {
   return result.status === 'DEGRADED' ? 1 : 0;
 }
 
+function printSessionHook(result: DoctorResult): void {
+  if (!result.sessionHook) return;
+  const scopes = result.sessionHook.scopes.map(({ scope, state }) => `${scope} ${state}`).join(', ');
+  console.log(`Claude Code session hook: ${scopes}`);
+}
+
 export function printDoctorResult(result: DoctorResult, format: DoctorOutputFormat): void {
   if (format === 'json') {
     // The JSON view must stay a single parseable document on stdout.
@@ -45,6 +51,7 @@ export function printDoctorResult(result: DoctorResult, format: DoctorOutputForm
     console.log(
       `Root entry points: ${result.rootEntryPoints.length > 0 ? result.rootEntryPoints.join(', ') : '(none)'}`,
     );
+    printSessionHook(result);
     for (const issue of result.issues) {
       const marker = issue.severity === 'info' ? 'ℹ' : '⚠';
       console.log(`${marker} [${issue.code}] ${issue.message}`);
@@ -74,6 +81,7 @@ export function printDoctorResult(result: DoctorResult, format: DoctorOutputForm
       }
     }
   }
+  printSessionHook(result);
 
   for (const issue of result.issues) {
     const marker = issue.severity === 'info' ? 'ℹ' : '⚠';
