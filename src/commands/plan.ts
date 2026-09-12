@@ -5,7 +5,7 @@ import { checkConventionFreshness } from './convention.js';
 import { parseReportOptions } from '../utils/report.js';
 import { findProjectConfig } from '../utils/config.js';
 import { collectGitMetrics, getGitRemoteOriginUrl } from '../utils/git.js';
-import { withSpinner, printFileInfo } from '../utils/spinner.js';
+import { withSpinner, createSpinner, printFileInfo } from '../utils/spinner.js';
 import { mergePlanWithDependencies, normalizeDependencies } from '../utils/planFormat.js';
 import {
   ensureUrlProtocol,
@@ -525,11 +525,26 @@ export async function executePlanCommand(
         body.fastMode = true;
       }
 
-      const result = await withSpinner(
-        'Starting plan...',
-        () => startPlanLifecycle(apiUrl, projectId, headers, options.id, body),
-        'Plan started',
-      );
+      // 성공 문구가 응답에 달려 있어 withSpinner의 고정 successText를 쓸 수 없다. 이미 시작된
+      // (IN_PROGRESS·PARTIAL) 플랜의 재시작은 서버가 아무것도 바꾸지 않은 멱등 응답(alreadyStarted)이라,
+      // "Plan started"로 보고하면 러너가 상태를 되짚지 않고 넘어간다. 상태는 응답의 plan에서 읽는다.
+      const startSpinner = createSpinner('Starting plan...');
+      let result: { data?: { alreadyStarted?: boolean; plan?: { status?: string } } } | undefined;
+      try {
+        result = await startPlanLifecycle(apiUrl, projectId, headers, options.id, body);
+      } catch (error) {
+        startSpinner?.fail();
+        throw error;
+      }
+      if (result?.data?.alreadyStarted) {
+        const resumedStatus = result.data.plan?.status ?? 'IN_PROGRESS';
+        startSpinner?.succeed(`Plan already started (${resumedStatus})`);
+        process.stderr.write(
+          `\n  Plan already started (${resumedStatus}) — no changes made.\n  Next: agentteams plan status --id ${options.id}, then agentteams task start --plan-id ${options.id} --task-id <taskId>\n`,
+        );
+        return result;
+      }
+      startSpinner?.succeed('Plan started');
       process.stderr.write(`\n  Hint: Run 'agentteams plan download --id ${options.id}' to save the plan locally.\n`);
       return result;
     }

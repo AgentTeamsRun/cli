@@ -9,7 +9,7 @@ import {
 
 function makeAxiosError(
   status: number,
-  data?: { message?: string; errorCode?: string; errorDetailCode?: string; minimumVersion?: string },
+  data?: { message?: string; errorCode?: string; errorDetailCode?: string; minimumVersion?: string; reason?: string },
 ): AxiosError {
   return new AxiosError(data?.message ?? `HTTP ${status}`, undefined, undefined, undefined, {
     status,
@@ -59,6 +59,36 @@ describe('errors', () => {
       'Conflict (stale update).',
     );
     expect(handleError(makeAxiosError(500, { message: 'boom' }))).toContain('Server error occurred.');
+  });
+
+  // plan start 409에 "convention download" 안내가 붙던 문제. 이 코드는 시작 라우트의 범용 폴백이라
+  // "종료된 플랜"으로 단정하지 않고 상태 확인으로 안내하며, 서버가 실은 reason을 그대로 보여 준다.
+  it('maps a plan start 409 to a plan status guide instead of convention download', () => {
+    const result = handleError(
+      makeAxiosError(409, {
+        message: 'Cannot start plan in current state',
+        errorCode: 'CONFLICT',
+        errorDetailCode: 'PLAN_START_NOT_ALLOWED',
+        reason: 'INVALID_TRANSITION',
+      }),
+    );
+
+    expect(result).toContain('Conflict (plan cannot be started in its current state).');
+    expect(result).toContain('agentteams plan status --id');
+    expect(result).toContain('DONE and CANCELLED plans are closed');
+    expect(result).toContain('IN_PROGRESS and PARTIAL plans are already started');
+    expect(result).toContain("resume with 'agentteams task start'");
+    expect(result).toContain('Reason: INVALID_TRANSITION');
+    expect(result).not.toContain('convention download');
+
+    const withoutReason = handleError(
+      makeAxiosError(409, {
+        message: 'Cannot start plan in current state',
+        errorCode: 'CONFLICT',
+        errorDetailCode: 'PLAN_START_NOT_ALLOWED',
+      }),
+    );
+    expect(withoutReason).not.toContain('Reason:');
   });
 
   it('maps unmatched worktree repository 404 to a register-or-check-remote guide', () => {

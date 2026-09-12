@@ -13,6 +13,8 @@ type ApiErrorPayload = {
   // GUIDE_OUTDATED 응답에만 실리는 복구 정보.
   requiredGuideHash?: unknown;
   guideFileName?: unknown;
+  // 라이프사이클 409(PLAN_START_NOT_ALLOWED 등)가 싣는 서버 측 사유.
+  reason?: unknown;
 };
 
 export type ErrorContext = {
@@ -222,6 +224,15 @@ Details: ${message}`;
           if (errorDetailCode === 'MUTATION_IDEMPOTENCY_KEY_REUSED') {
             return `Conflict (idempotency key reused).
 Next: This key was already used for a different request. Use a new --idempotency-key, or repeat the original request unchanged to replay it.
+Details: ${message}`;
+          }
+          // The start route's catch-all for every unmapped lifecycle failure — not a synonym
+          // for "closed plan", so point at the status instead of asserting one. The generic
+          // 409 fallback below points at convention download, which has nothing to do with this.
+          if (errorDetailCode === 'PLAN_START_NOT_ALLOWED') {
+            const reason = typeof data?.reason === 'string' ? `\nReason: ${data.reason}` : '';
+            return `Conflict (plan cannot be started in its current state).
+Next: Run 'agentteams plan status --id <id>' and act on the status it shows. DONE and CANCELLED plans are closed — do not retry. IN_PROGRESS and PARTIAL plans are already started — resume with 'agentteams task start'.${reason}
 Details: ${message}`;
           }
           if (errorCode === 'OPTIMISTIC_LOCK_CONFLICT') {
