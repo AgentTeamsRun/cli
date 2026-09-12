@@ -21,6 +21,12 @@ type ExecFileSyncFn = (
   options: { cwd?: string; encoding: 'utf8'; stdio: ['ignore', 'pipe', 'ignore']; windowsHide?: boolean },
 ) => string;
 
+export type TaskFinishGitSnapshot = {
+  commit: string;
+  branch: string | null;
+  commitOnRemote: boolean | null;
+};
+
 export function collectGitMetrics(
   execFileSyncImpl: ExecFileSyncFn = childProcess.execFileSync,
   options?: { startCommit?: string },
@@ -40,6 +46,33 @@ export function collectGitMetrics(
     linesAdded: parsed.linesAdded,
     linesDeleted: parsed.linesDeleted,
   };
+}
+
+export function collectTaskFinishGitSnapshot(
+  execFileSyncImpl: ExecFileSyncFn = childProcess.execFileSync,
+  cwd?: string,
+): TaskFinishGitSnapshot | null {
+  const commit = runGit(execFileSyncImpl, ['rev-parse', 'HEAD'], cwd);
+  if (!commit) return null;
+
+  const branchRaw = runGit(execFileSyncImpl, ['branch', '--show-current'], cwd);
+  const branch = branchRaw && branchRaw.length > 0 ? branchRaw : null;
+
+  let commitOnRemote: boolean | null;
+  try {
+    const output = execFileSyncImpl('git', ['branch', '-r', '--contains', 'HEAD'], {
+      cwd,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      windowsHide: true,
+    });
+    commitOnRemote = output.trim().length > 0;
+  } catch {
+    // 원격 조회만 실패한 경우에는 스냅샷 자체를 버리지 않는다.
+    commitOnRemote = null;
+  }
+
+  return { commit, branch, commitOnRemote };
 }
 
 export function getGitRemoteOriginUrl(

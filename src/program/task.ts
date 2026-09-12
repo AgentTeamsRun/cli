@@ -1,4 +1,5 @@
 import { Command, CONVENTION_HINT } from './shared.js';
+import { addGitToggleOption } from './options/completionReport.js';
 import { addJsonResourceLeaf } from './options/resource.js';
 
 export function registerTaskCommand(program: Command): void {
@@ -12,9 +13,11 @@ export function registerTaskCommand(program: Command): void {
     command.option('--plan-id <id>', 'Plan ID').option('--task-id <id>', 'Plan task ID'),
   );
   addLeaf('finish', 'Finish a plan task', (command) =>
-    command
-      .option('--plan-id <id>', 'Plan ID')
-      .option('--task-id <id>', 'Plan task ID')
-      .option('--status <status>', 'Task finish status: DONE, BLOCKED, or SKIPPED'),
+    addGitToggleOption(
+      command
+        .option('--plan-id <id>', 'Plan ID')
+        .option('--task-id <id>', 'Plan task ID')
+        .option('--status <status>', 'Task finish status: DONE, BLOCKED, or SKIPPED'),
+    ),
   );
 }

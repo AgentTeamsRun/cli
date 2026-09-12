@@ -66,6 +66,40 @@ describe('plan start runner/model snapshot', () => {
     );
   });
 
+  // 이미 시작된(IN_PROGRESS·PARTIAL) 플랜의 재시작은 서버가 아무것도 바꾸지 않은 멱등 응답이다.
+  // "Plan started"로 보고하면 러너가 상태를 되짚지 않는다 — 실제 상태와 함께 태스크로 넘어가라는
+  // 안내를 stderr에 낸다.
+  it.each([
+    ['IN_PROGRESS', { id: planId, alreadyStarted: true, plan: { status: 'IN_PROGRESS' } }],
+    ['PARTIAL', { id: planId, alreadyStarted: true, plan: { status: 'PARTIAL' } }],
+    // 상태가 응답에 없으면 IN_PROGRESS로 본다(구 서버 호환).
+    ['IN_PROGRESS', { id: planId, alreadyStarted: true }],
+  ])('reports an already started (%s) plan and points at task start', async (status, data) => {
+    jest.spyOn(httpClient, 'post').mockResolvedValue({ data: { data } } as never);
+    const stderr = jest.spyOn(process.stderr, 'write').mockImplementation(() => true);
+
+    const result = (await startWithoutFlags()) as { data: { alreadyStarted: boolean } };
+
+    expect(result.data.alreadyStarted).toBe(true);
+    const written = stderr.mock.calls.map((call) => String(call[0])).join('');
+    expect(written).toContain(`Plan already started (${status})`);
+    expect(written).toContain('no changes made');
+    expect(written).toContain(`agentteams plan status --id ${planId}`);
+    expect(written).toContain(`agentteams task start --plan-id ${planId}`);
+    expect(written).not.toContain('plan download');
+  });
+
+  it('keeps the download hint for a fresh start', async () => {
+    mockPost();
+    const stderr = jest.spyOn(process.stderr, 'write').mockImplementation(() => true);
+
+    await startWithoutFlags();
+
+    const written = stderr.mock.calls.map((call) => String(call[0])).join('');
+    expect(written).toContain(`agentteams plan download --id ${planId}`);
+    expect(written).not.toContain('already IN_PROGRESS');
+  });
+
   // 러너 밖(사람이 로컬에서 직접 시작)에서는 채울 값이 없다. 필드를 생략하던 기존 동작을
   // 유지해야 하며, 여기서 새로 실패하면 안 된다.
   it('omits the fields outside a runner session instead of failing', async () => {
