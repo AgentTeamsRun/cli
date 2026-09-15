@@ -41,6 +41,9 @@ jest.unstable_mockModule('../src/api/skill.js', () => ({
   createSkill: jest.fn(),
   updateSkill: jest.fn(),
   deleteSkill: jest.fn(),
+  requestSkillAssetUploadUrls: jest.fn(),
+  putSkillAssetBytes: jest.fn(),
+  fetchSkillAssetBytes: jest.fn(),
 }));
 const { executeSkillCommand } = await import('../src/commands/skill.js');
 const { sessionSync } = await import('../src/commands/session.js');

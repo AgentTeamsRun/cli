@@ -18,7 +18,12 @@ export const SKILL_PACKAGE_DIR = 'skills';
 export const SKILL_MANIFEST_FILE = 'skills.manifest.json';
 
 export const SKILL_ENTRY_FILE = 'SKILL.md';
-export const SKILL_RESOURCE_DIRS = ['references', 'scripts'] as const;
+/** 텍스트 리소스 디렉터리. `assets/`는 바이너리 전용이라 별도 상수다. */
+export const SKILL_TEXT_RESOURCE_DIRS = ['references', 'scripts'] as const;
+/** 바이너리 자산 디렉터리. 위치가 종류를 결정한다. */
+export const SKILL_ASSET_DIR = 'assets';
+/** 서버(api/src/services/skillPackage.ts)와 같은 값(복제). */
+export const SKILL_RESOURCE_DIRS = [...SKILL_TEXT_RESOURCE_DIRS, SKILL_ASSET_DIR] as const;
 
 export const SKILL_LIMITS = {
   entryFileBytes: 64 * 1024,
@@ -26,11 +31,75 @@ export const SKILL_LIMITS = {
   fileCount: 50,
   totalBytes: 2 * 1024 * 1024,
   pathLength: 200,
+  /** 자산 파일 1개 크기 상한(바이트). 서버와 같은 값(복제). */
+  assetFileBytes: 10 * 1024 * 1024,
+  /** 패키지의 자산 합계 상한(바이트). 서버와 같은 값(복제). TEXT 합계와 별도다. */
+  assetTotalBytes: 20 * 1024 * 1024,
 } as const;
 
-export type SkillPackageFile = {
+export type SkillPackageTextFile = {
   relativePath: string;
   content: string;
+  kind?: 'TEXT';
+};
+
+/** 로컬에서 수집한 자산. 바이트를 그대로 들고 있다. */
+export type SkillPackageLocalAsset = {
+  relativePath: string;
+  kind: 'BINARY';
+  content: Buffer;
+  sha256: string;
+  sizeBytes: number;
+  mimeType: string;
+};
+
+/** 다운로드 응답의 자산. 바이트는 `downloadUrl`로 따로 받는다. */
+export type SkillPackageRemoteAsset = {
+  relativePath: string;
+  kind: 'BINARY';
+  sha256: string;
+  sizeBytes: number;
+  mimeType: string;
+  downloadUrl: string;
+};
+
+export type SkillPackageFile = SkillPackageTextFile | SkillPackageLocalAsset | SkillPackageRemoteAsset;
+
+/** 스테이징·기록 가능한 파일. 바이트를 갖고 있다(TEXT 본문 또는 자산 원본). */
+export type SkillWritableFile = SkillPackageTextFile | SkillPackageLocalAsset;
+
+export const isSkillAssetFile = (file: SkillPackageFile): file is SkillPackageLocalAsset | SkillPackageRemoteAsset =>
+  file.kind === 'BINARY';
+
+export const isSkillLocalAsset = (file: SkillPackageFile): file is SkillPackageLocalAsset =>
+  file.kind === 'BINARY' && 'content' in file;
+
+/**
+ * 자산 허용 형식. 서버(api/src/services/attachment.ts skillAssetMimeTypes)와 같은 집합(복제) —
+ * 최종 판정은 서버가 한다.
+ */
+const ASSET_MIME_BY_EXTENSION: Record<string, string> = {
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  png: 'image/png',
+  gif: 'image/gif',
+  webp: 'image/webp',
+  pdf: 'application/pdf',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+};
+
+export const resolveSkillAssetMimeType = (relativePath: string): string => {
+  const dot = relativePath.lastIndexOf('.');
+  const extension = dot >= 0 ? relativePath.slice(dot + 1).toLowerCase() : '';
+  const mimeType = ASSET_MIME_BY_EXTENSION[extension];
+  if (!mimeType) {
+    throw new SkillPackageError(
+      `Unsupported skill asset type ".${extension}". Allowed: ${Object.keys(ASSET_MIME_BY_EXTENSION).join(', ')}`,
+    );
+  }
+  return mimeType;
 };
 
 /** mirror 대상. 값은 `--skill-targets` 토큰과 1:1로 대응한다. */
@@ -178,11 +247,22 @@ export const findUnregisteredSkillSlugs = (projectRoot: string, knownSlugs: Set<
 export const mirrorDirFor = (projectRoot: string, target: SkillMirrorTarget, slug: string): string =>
   join(projectRoot, MIRROR_SPECS[target].dir, slug);
 
-const sha256 = (content: string): string => createHash('sha256').update(content, 'utf8').digest('hex');
+const sha256 = (content: string | Buffer): string =>
+  typeof content === 'string'
+    ? createHash('sha256').update(content, 'utf8').digest('hex')
+    : createHash('sha256').update(content).digest('hex');
 
-export const computeSkillVersion = (files: { relativePath: string; content: string }[]): string => {
+/** 로컬 버전 계산. TEXT는 UTF-8 본문, 자산은 원본 바이트 해시로 서버와 같은 값을 낸다. */
+export const computeSkillVersion = (files: SkillPackageFile[]): string => {
   const normalized = [...files]
-    .map((file) => ({ relativePath: file.relativePath, hash: sha256(file.content) }))
+    .map((file) => ({
+      relativePath: file.relativePath,
+      hash: isSkillAssetFile(file)
+        ? isSkillLocalAsset(file)
+          ? sha256(file.content)
+          : file.sha256
+        : sha256(file.content),
+    }))
     .sort((left, right) =>
       left.relativePath === right.relativePath ? 0 : left.relativePath < right.relativePath ? -1 : 1,
     )
@@ -216,6 +296,20 @@ const assertSafeRelativePath = (relativePath: string): void => {
   }
 };
 
+/**
+ * 위치-종류 규칙. `assets/` 아래는 항상 BINARY, 그 외는 항상 TEXT다 — 서버와 같은 규칙을
+ * 로컬에서 먼저 적용한다.
+ */
+const assertKindLocation = (relativePath: string, isAsset: boolean): void => {
+  const isAssetPath = relativePath.startsWith(`${SKILL_ASSET_DIR}/`);
+  if (isAssetPath && !isAsset) {
+    throw new SkillPackageError(`${relativePath} lives under ${SKILL_ASSET_DIR}/ and must be a binary asset`);
+  }
+  if (!isAssetPath && isAsset) {
+    throw new SkillPackageError(`${relativePath} is a binary asset but only ${SKILL_ASSET_DIR}/ accepts binary assets`);
+  }
+};
+
 /** 패키지 계약을 로컬에서 먼저 적용한다. 실패 사유는 서버 메시지와 같은 축을 쓴다. */
 export const validateSkillPackageFiles = (files: SkillPackageFile[]): void => {
   if (files.length === 0) {
@@ -228,6 +322,7 @@ export const validateSkillPackageFiles = (files: SkillPackageFile[]): void => {
   const seen = new Set<string>();
   const seenLower = new Map<string, string>();
   let totalBytes = 0;
+  let assetTotalBytes = 0;
 
   for (const file of files) {
     assertSafeRelativePath(file.relativePath);
@@ -243,6 +338,20 @@ export const validateSkillPackageFiles = (files: SkillPackageFile[]): void => {
     seen.add(file.relativePath);
     seenLower.set(lower, file.relativePath);
 
+    if (isSkillAssetFile(file)) {
+      assertKindLocation(file.relativePath, true);
+      const sizeBytes = isSkillLocalAsset(file) ? file.content.length : file.sizeBytes;
+      if (!Number.isInteger(sizeBytes) || sizeBytes <= 0 || sizeBytes > SKILL_LIMITS.assetFileBytes) {
+        throw new SkillPackageError(`${file.relativePath} exceeds ${SKILL_LIMITS.assetFileBytes} bytes`);
+      }
+      if (resolveSkillAssetMimeType(file.relativePath) !== file.mimeType) {
+        throw new SkillPackageError(`${file.relativePath} extension does not match its content type`);
+      }
+      assetTotalBytes += sizeBytes;
+      continue;
+    }
+
+    assertKindLocation(file.relativePath, false);
     const sizeBytes = Buffer.byteLength(file.content, 'utf8');
     const limit = file.relativePath === SKILL_ENTRY_FILE ? SKILL_LIMITS.entryFileBytes : SKILL_LIMITS.resourceFileBytes;
     if (sizeBytes > limit) {
@@ -256,6 +365,9 @@ export const validateSkillPackageFiles = (files: SkillPackageFile[]): void => {
   }
   if (totalBytes > SKILL_LIMITS.totalBytes) {
     throw new SkillPackageError(`The package exceeds ${SKILL_LIMITS.totalBytes} bytes in total`);
+  }
+  if (assetTotalBytes > SKILL_LIMITS.assetTotalBytes) {
+    throw new SkillPackageError(`Assets exceed ${SKILL_LIMITS.assetTotalBytes} bytes in total`);
   }
 };
 
@@ -278,9 +390,9 @@ export const isOsJunkFileName = (name: string): boolean => {
  * 로컬 디렉터리에서 패키지 파일을 모은다. symlink는 따라가지 않는다 — 링크가 패키지 밖을
  * 가리키면 저장소 밖 파일이 업로드된다.
  */
-export const collectSkillPackageFiles = (packageDir: string): SkillPackageFile[] => {
+export const collectSkillPackageFiles = (packageDir: string): SkillWritableFile[] => {
   const rootPath = resolve(packageDir);
-  const files: SkillPackageFile[] = [];
+  const files: SkillWritableFile[] = [];
 
   const walk = (currentDir: string): void => {
     for (const entry of readdirSync(currentDir, { withFileTypes: true })) {
@@ -299,6 +411,25 @@ export const collectSkillPackageFiles = (packageDir: string): SkillPackageFile[]
         continue;
       }
       if (!entry.isFile()) {
+        continue;
+      }
+
+      // `assets/` 아래 파일은 Buffer 그대로 자산으로 모으고 UTF-8 검사를 건너뛴다.
+      // 그 외 위치는 기존 텍스트 검사를 그대로 한다.
+      if (relativePath === SKILL_ASSET_DIR || relativePath.startsWith(`${SKILL_ASSET_DIR}/`)) {
+        const raw = readFileSync(absolutePath);
+        const mimeType = resolveSkillAssetMimeType(relativePath);
+        if (raw.length === 0 || raw.length > SKILL_LIMITS.assetFileBytes) {
+          throw new SkillPackageError(`${relativePath} exceeds ${SKILL_LIMITS.assetFileBytes} bytes`);
+        }
+        files.push({
+          relativePath,
+          kind: 'BINARY',
+          content: raw,
+          sha256: sha256(raw),
+          sizeBytes: raw.length,
+          mimeType,
+        });
         continue;
       }
 

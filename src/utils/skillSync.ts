@@ -10,14 +10,19 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { isOsJunkFileName, SkillPackageError, type SkillManifestEntry, type SkillPackageFile } from './skillPackage.js';
+import {
+  isOsJunkFileName,
+  SkillPackageError,
+  type SkillManifestEntry,
+  type SkillWritableFile,
+} from './skillPackage.js';
 
 export type SkillConflict = { path: string; reason: 'modified' | 'added' | 'deleted' | 'unknown' | 'unsafe' };
 export type SkillTree = Record<string, string>;
 
 export const hashSkillFile = (content: string | Buffer): string => createHash('sha256').update(content).digest('hex');
 
-export const skillFileHashes = (roots: string[], files: SkillPackageFile[]): Record<string, string> =>
+export const skillFileHashes = (roots: string[], files: SkillWritableFile[]): Record<string, string> =>
   Object.fromEntries(
     roots.flatMap((root) => files.map((file) => [`${root}/${file.relativePath}`, hashSkillFile(file.content)])),
   );
@@ -101,7 +106,7 @@ export const findSkillConflicts = (
   return conflicts;
 };
 
-export type SkillTreeChange = { root: string; files: SkillPackageFile[] | null; before: SkillTree };
+export type SkillTreeChange = { root: string; files: SkillWritableFile[] | null; before: SkillTree };
 
 /** 준비한 모든 경로와 manifest를 함께 적용한다. 복구 실패 시 백업은 지우지 않는다. */
 export const commitSkillChanges = (
@@ -134,7 +139,12 @@ export const commitSkillChanges = (
         for (const file of change.files) {
           const path = join(state.next, file.relativePath);
           mkdirSync(dirname(path), { recursive: true });
-          writeFileSync(path, file.content, 'utf8');
+          // 자산은 원본 바이트 그대로 쓴다 — UTF-8로 기록하면 해시가 깨진다.
+          if (typeof file.content === 'string') {
+            writeFileSync(path, file.content, 'utf8');
+          } else {
+            writeFileSync(path, file.content);
+          }
         }
       }
     }
