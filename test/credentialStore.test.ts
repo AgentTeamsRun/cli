@@ -16,6 +16,7 @@ import {
   type CreateCredentialStoreOptions,
   type CredentialCommand,
 } from '../src/auth/credentialStore.js';
+import { createPersonalTokenStore } from '../src/auth/personalTokenStore.js';
 import { FILE_CREDENTIALS_DISABLED_ENV, credentialFileName } from '../src/auth/fileCredentialStore.js';
 
 const SECRET = 'acr_super_secret_refresh_token';
@@ -905,4 +906,43 @@ describe('credentialStore integration (Windows PasswordVault)', () => {
     },
     60_000,
   );
+});
+
+describe('개인 access 캐시 저장소 격리', () => {
+  for (const disabled of [false, true]) {
+    posixIt(`큰 캐시가 refresh 키체인 상태를 오염시키지 않는다 (파일 금지=${disabled})`, () => {
+      const values = new Map<string, string>();
+      const calls: CredentialCommand[] = [];
+      const backing = storeIn({
+        platform: 'darwin',
+        env: { [FILE_CREDENTIALS_DISABLED_ENV]: disabled ? '1' : '0' },
+        runner: (command) => {
+          calls.push(command);
+          const account = command.args[command.args.indexOf('-a') + 1];
+          if (command.args[0] === 'add-generic-password') {
+            values.set(account, (command.input ?? '').split('\n')[0].slice(0, 128));
+            return ok();
+          }
+          if (command.args[0] === 'find-generic-password') {
+            return values.has(account) ? ok(values.get(account)) : fail(44);
+          }
+          return ok();
+        },
+      });
+      const store = createPersonalTokenStore(ACCOUNT, backing);
+      expect(store.save('atr_refresh').persisted).toBe(true);
+      const session = {
+        accessToken: 'atp_' + 'a'.repeat(43),
+        expiresAt: Date.now() + 900_000,
+        identity: { memberId: 'member', email: 'member@example.com', nickname: '한글'.repeat(100) },
+      };
+      store.saveAccess?.(session, 'atr_refresh');
+      expect(store.status()).toEqual({ backend: 'macos-keychain', persisted: true, reason: 'OK' });
+      expect(calls.filter((call) => call.args[0] === 'add-generic-password')).toHaveLength(1);
+      expect(store.readAccess?.('atr_refresh')).toEqual(disabled ? null : session);
+      store.removeAccess?.();
+      expect(store.readAccess?.('atr_refresh')).toBeNull();
+      expect(store.read({ fresh: true })).toBe('atr_refresh');
+    });
+  }
 });

@@ -446,7 +446,7 @@ describe('auth status problem priority outside a project', () => {
     ['revoked login', authStatusState({ reconnectRequired: true }), 'auth login'],
     ['lock contention', authStatusState({ refreshFailure: 'LOCK_CONTENTION' }), 'Another agentteams process'],
     ['lock unavailable', authStatusState({ refreshFailure: 'LOCK_UNAVAILABLE' }), 'free space and permissions'],
-    ['network failure', authStatusState({ refreshFailure: 'NETWORK' }), 'network connection'],
+    ['network failure', authStatusState({ refreshFailure: 'NETWORK' }), 'server could not be reached'],
   ])('keeps the concrete %s guidance', (_label, state, expected) => {
     const problem = describeAuthStatusProblem(resolutionError, state, false);
 

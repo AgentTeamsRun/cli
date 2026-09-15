@@ -138,6 +138,8 @@ export interface CredentialStore {
   status(account?: string): CredentialStoreStatus;
   read(account: string, options?: CredentialReadOptions): string | null;
   save(account: string, secret: string): CredentialSaveOutcome;
+  /** 크기 제한이 없는 선택적 캐시. OS 저장소 상태에 영향을 주지 않는다. */
+  saveProtectedCache?(account: string, secret: string): void;
   remove(account: string): void;
 }
 
@@ -267,6 +269,8 @@ export function buildSaveCommand(
       // it from argv, where `ps` would expose it. It asks twice ("retype
       // password"), so the value is written twice. `detachTerminal` is what makes
       // it read *this* stdin instead of prompting the user's terminal.
+      // macOS readpassphrase는 약 128바이트에서 잘린다. 큰 JSON 캐시는
+      // saveProtectedCache를 사용하며 비밀을 argv로 넘겨 우회하지 않는다.
       return {
         command: 'security',
         args: ['add-generic-password', '-a', account, '-s', service, '-U', '-w'],
@@ -669,6 +673,12 @@ export function createCredentialStore(options: CreateCredentialStoreOptions = {}
       writeFailureDetail = null;
       memoryOnlyAccounts.delete(account);
       return { persisted: true, reason: 'OK' };
+    },
+
+    saveProtectedCache(account, secret) {
+      // 캐시는 선택 사항이다. 파일 금지·쓰기 실패가 refresh 영속 상태를 바꾸면 안 된다.
+      if (!fileWritesAllowed) return;
+      if (fileStore.save(account, secret).ok) memory.set(account, secret);
     },
 
     remove(account) {

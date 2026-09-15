@@ -1,3 +1,5 @@
+import { describeEndedLogin } from './authMessages.js';
+
 /**
  * Human-readable rendering of `agentteams auth` results.
  *
@@ -135,7 +137,8 @@ function formatStatus(result: Record<string, unknown>): string[] {
 
   // A stored-but-rejected token is the case where "connected" alone misleads.
   if (token.reconnectRequired === true) {
-    lines.push("Sign-in required: the stored login was rejected. Run 'agentteams auth login'.");
+    const reason = asString(token.revokedReason);
+    lines.push(`Sign-in required: ${describeEndedLogin(reason)}`);
   }
 
   return lines;

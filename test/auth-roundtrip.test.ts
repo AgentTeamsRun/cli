@@ -382,7 +382,7 @@ describe('personal login round trip', () => {
           const mcpToken = await mcp.getAccessToken();
 
           expect(mcpToken).not.toBeNull();
-          expect(mcpToken).not.toBe(commandToken);
+          expect(mcpToken).toBe(commandToken);
           expect(tokenServer.familyRevocations()).toBe(0);
           expect(mcp.state().reconnectRequired).toBe(false);
         } finally {
@@ -403,7 +403,7 @@ describe('personal login round trip', () => {
           const tokens = await Promise.all(processes.map((client) => client.getAccessToken()));
 
           expect(tokens.every((token) => typeof token === 'string')).toBe(true);
-          expect(new Set(tokens).size).toBe(processes.length);
+          expect(new Set(tokens).size).toBe(1);
           expect(tokenServer.familyRevocations()).toBe(0);
           // Exactly one live refresh token is left: the last rotation's.
           expect(tokenServer.issued.size).toBe(1);
@@ -446,7 +446,10 @@ describe('personal login round trip', () => {
 
         try {
           const retiredBefore = [...tokenServer.issued];
-          await openProcess().getAccessToken();
+          const client = openProcess();
+          await client.getAccessToken();
+          client.invalidateAccessToken();
+          await client.getAccessToken();
 
           const replay = await fetch(`${tokenServer.url}/api/auth/desktop/token`, {
             method: 'POST',

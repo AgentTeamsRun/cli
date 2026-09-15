@@ -40,10 +40,11 @@ const LOCK_DIR = ['.agentteams', 'locks'];
  * How long a held lock stays credible. A token request that has not finished by
  * then is either hung or its process is gone; both justify taking over.
  */
-export const DEFAULT_STALE_AFTER_MS = 20_000;
+// 서버 회전 예산 12초보다 긴 15초 요청 두 번과 저장 여유를 보장한다.
+export const DEFAULT_STALE_AFTER_MS = 45_000;
 
 /** Long enough to outlast a slow-but-real rotation ahead of us in the queue. */
-export const DEFAULT_TIMEOUT_MS = 30_000;
+export const DEFAULT_TIMEOUT_MS = 60_000;
 
 const DEFAULT_RETRY_DELAY_MS = 50;
 
