@@ -478,23 +478,29 @@ describe('PersonalTokenClient revoke', () => {
 
 describe('personalTokenStore', () => {
   it('scopes the credential slot per API server', () => {
-    const reads: string[] = [];
-    const backing = createCredentialStore({
-      platform: 'darwin',
-      runner: (command) => {
-        if (command.args.includes('list-keychains')) return { status: 0, stdout: '', stderr: '' };
-        reads.push(command.args[2] ?? '');
-        return { status: 44, stdout: '', stderr: '' };
-      },
-    });
+    const home = mkdtempSync(join(tmpdir(), 'agentteams-slot-scope-'));
+    try {
+      const reads: string[] = [];
+      const backing = createCredentialStore({
+        homeDir: home,
+        platform: 'darwin',
+        runner: (command) => {
+          if (command.args.includes('list-keychains')) return { status: 0, stdout: '', stderr: '' };
+          reads.push(command.args[2] ?? '');
+          return { status: 44, stdout: '', stderr: '' };
+        },
+      });
 
-    createPersonalTokenStore('https://api.agentteams.run/', backing).read();
-    createPersonalTokenStore('https://dev-api.agentteams.run', backing).read();
+      createPersonalTokenStore('https://api.agentteams.run/', backing).read();
+      createPersonalTokenStore('https://dev-api.agentteams.run', backing).read();
 
-    expect(reads).toEqual([
-      'personal-refresh:https://api.agentteams.run',
-      'personal-refresh:https://dev-api.agentteams.run',
-    ]);
+      expect(reads).toEqual([
+        'personal-refresh:https://api.agentteams.run',
+        'personal-refresh:https://dev-api.agentteams.run',
+      ]);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 
   posixIt('reports the backend that holds this slot, not the one the machine prefers', () => {
