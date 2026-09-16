@@ -118,8 +118,12 @@ describe('package validation', () => {
       /traverse/,
     );
     expect(() => validateSkillPackageFiles([entry, { relativePath: '/etc/passwd', content: 'x' }])).toThrow(/relative/);
-    expect(() => validateSkillPackageFiles([entry, { relativePath: 'assets/logo.bin', content: 'x' }])).toThrow(
+    expect(() => validateSkillPackageFiles([entry, { relativePath: 'vendor/bundle.js', content: 'x' }])).toThrow(
       /must live under/,
+    );
+    // `assets/`는 바이너리 전용이라 텍스트 항목은 위치-종류 규칙으로 거부된다.
+    expect(() => validateSkillPackageFiles([entry, { relativePath: 'assets/logo.bin', content: 'x' }])).toThrow(
+      /must be a binary asset/,
     );
     expect(() => validateSkillPackageFiles([entry, { relativePath: 'README.md', content: 'x' }])).toThrow(
       /only file allowed at the package root/,
@@ -181,6 +185,57 @@ describe('package validation', () => {
 
     const files = collectSkillPackageFiles(packageDir);
     expect(files.find((file) => file.relativePath === 'references/notes.md')?.content).toBe(original);
+  });
+
+  it('collects assets/ binaries as BINARY with hash, size and mime type', () => {
+    const packageDir = join(projectRoot, 'pkg');
+    writeFile(join(packageDir, 'SKILL.md'), entryContent());
+    const raw = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00]);
+    mkdirSync(join(packageDir, 'assets'), { recursive: true });
+    writeFileSync(join(packageDir, 'assets', 'logo.png'), raw);
+
+    const files = collectSkillPackageFiles(packageDir);
+    const asset = files.find((file) => file.relativePath === 'assets/logo.png');
+    expect(asset?.kind).toBe('BINARY');
+    if (asset?.kind !== 'BINARY' || !('content' in asset)) throw new Error('asset not collected');
+    expect(Buffer.compare(asset.content, raw)).toBe(0);
+    expect(asset.sizeBytes).toBe(raw.length);
+    expect(asset.mimeType).toBe('image/png');
+    expect(asset.sha256).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+  it('still refuses binaries outside assets/ while collecting', () => {
+    const packageDir = join(projectRoot, 'pkg');
+    writeFile(join(packageDir, 'SKILL.md'), entryContent());
+    mkdirSync(join(packageDir, 'references'), { recursive: true });
+    writeFileSync(
+      join(packageDir, 'references', 'logo.png'),
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0xff, 0xfe]),
+    );
+
+    expect(() => collectSkillPackageFiles(packageDir)).toThrow(/must be UTF-8 text/);
+  });
+
+  it('rejects unsupported asset types and mismatched mime declarations', () => {
+    const entry = { relativePath: 'SKILL.md', content: entryContent() };
+    const png = {
+      relativePath: 'assets/logo.png',
+      kind: 'BINARY' as const,
+      sha256: 'a'.repeat(64),
+      sizeBytes: 10,
+      mimeType: 'image/png',
+      downloadUrl: 'https://example.test/download',
+    };
+    expect(() => validateSkillPackageFiles([entry, png])).not.toThrow();
+    expect(() =>
+      validateSkillPackageFiles([entry, { ...png, relativePath: 'assets/bundle.zip', mimeType: 'application/zip' }]),
+    ).toThrow(/extension does not match|Unsupported skill asset/);
+    expect(() => validateSkillPackageFiles([entry, { ...png, mimeType: 'image/jpeg' }])).toThrow(
+      /extension does not match/,
+    );
+    expect(() => validateSkillPackageFiles([entry, { ...png, relativePath: 'references/logo.png' }])).toThrow(
+      /only assets\/.* accepts binary assets/,
+    );
   });
 
   it('skips well-known OS junk files instead of failing collection', () => {

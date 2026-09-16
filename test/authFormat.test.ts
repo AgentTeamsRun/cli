@@ -62,10 +62,19 @@ describe('auth status as text', () => {
     const text = formatAuthResultText('status', {
       ...STATUS,
       credentialSource: null,
-      personalToken: { ...STATUS.personalToken, reconnectRequired: true, identity: null, expiresAt: null },
+      personalToken: {
+        ...STATUS.personalToken,
+        reconnectRequired: true,
+        revokedReason: 'reused',
+        identity: null,
+        expiresAt: null,
+      },
     });
 
-    expect(text).toContain("Sign-in required: the stored login was rejected. Run 'agentteams auth login'.");
+    expect(text).not.toContain('Rejection reason: reused');
+    expect(text).toContain('used more than once');
+    expect(text).toContain('review your sessions');
+    expect(text).toContain("Run 'agentteams auth login'");
   });
 
   it('says a session-only store will not survive the process', () => {

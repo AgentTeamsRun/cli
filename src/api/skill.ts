@@ -34,18 +34,38 @@ export async function downloadSkill(
   projectId: string,
   headers: Record<string, string>,
   skillId: string,
+  includeAssets = false,
 ): Promise<any> {
   const response = await httpClient.get(`${getBaseUrl(apiUrl, projectId)}/${encodeURIComponent(skillId)}/download`, {
     headers,
+    ...(includeAssets ? { params: { includeAssets: true } } : {}),
   });
   return response.data;
 }
+
+export type SkillTextFileBody = { relativePath: string; content: string };
+export type SkillNewAssetFileBody = {
+  relativePath: string;
+  kind: 'BINARY';
+  sha256: string;
+  sizeBytes: number;
+  mimeType: string;
+  draftKey: string;
+};
+export type SkillReuseAssetFileBody = { relativePath: string; kind: 'BINARY'; sha256: string; reuse: true };
+export type SkillFileBody = SkillTextFileBody | SkillNewAssetFileBody | SkillReuseAssetFileBody;
 
 export async function createSkill(
   apiUrl: string,
   projectId: string,
   headers: Record<string, string>,
-  body: { slug: string; files: { relativePath: string; content: string }[]; repositoryId?: string; scope?: string },
+  body: {
+    slug: string;
+    files: SkillFileBody[];
+    repositoryId?: string;
+    scope?: string;
+    assetsAware?: boolean;
+  },
 ): Promise<any> {
   const response = await httpClient.post(getBaseUrl(apiUrl, projectId), body, { headers });
   return response.data;
@@ -56,12 +76,34 @@ export async function updateSkill(
   projectId: string,
   headers: Record<string, string>,
   skillId: string,
-  body: { files: { relativePath: string; content: string }[]; updatedAt: string; scope?: string },
+  body: { files: SkillFileBody[]; updatedAt: string; scope?: string; assetsAware?: boolean },
 ): Promise<any> {
   const response = await httpClient.patch(`${getBaseUrl(apiUrl, projectId)}/${encodeURIComponent(skillId)}`, body, {
     headers,
   });
   return response.data;
+}
+
+/** Asset upload URL issuance (`POST /skills/asset-upload-urls`). */
+export async function requestSkillAssetUploadUrls(
+  apiUrl: string,
+  projectId: string,
+  headers: Record<string, string>,
+  files: { relativePath: string; sizeBytes: number; mimeType: string; sha256: string }[],
+): Promise<{ relativePath: string; draftKey: string; uploadUrl: string }[]> {
+  const response = await httpClient.post(`${getBaseUrl(apiUrl, projectId)}/asset-upload-urls`, { files }, { headers });
+  return response.data?.data ?? [];
+}
+
+/** Raw bytes to a presigned PUT URL (bypasses the API server, like attachment uploads). */
+export async function putSkillAssetBytes(uploadUrl: string, buffer: Buffer, contentType: string): Promise<void> {
+  await httpClient.put(uploadUrl, buffer, { headers: { 'Content-Type': contentType } });
+}
+
+/** Raw bytes from a presigned GET URL. */
+export async function fetchSkillAssetBytes(downloadUrl: string): Promise<Buffer> {
+  const response = await httpClient.get(downloadUrl, { responseType: 'arraybuffer' });
+  return Buffer.from(response.data);
 }
 
 export async function deleteSkill(

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import {
   closeSync,
   existsSync,
@@ -10,15 +11,29 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
-import { createSkill, deleteSkill, downloadSkill, getSkill, listSkills, updateSkill } from '../api/skill.js';
+import {
+  createSkill,
+  deleteSkill,
+  downloadSkill,
+  fetchSkillAssetBytes,
+  getSkill,
+  listSkills,
+  putSkillAssetBytes,
+  requestSkillAssetUploadUrls,
+  updateSkill,
+  type SkillFileBody,
+} from '../api/skill.js';
 import { resolveSessionRunnerType } from '../utils/agentIdentity.js';
 import {
   SKILL_ENTRY_FILE,
   SKILL_PACKAGE_DIR,
   SkillPackageError,
+  isSkillAssetFile,
+  isSkillLocalAsset,
   type SkillManifestEntry,
   type SkillMirrorTarget,
-  type SkillPackageFile,
+  type SkillPackageLocalAsset,
+  type SkillWritableFile,
   collectSkillPackageFiles,
   detectSkillMirrorTargets,
   findUnregisteredSkillSlugs,
@@ -187,10 +202,46 @@ const skillDownload = async (
     conflicts.push({ skillId: entry.skillId, slug: entry.slug, paths: [{ path, reason: 'unsafe' }] });
   };
 
+  /**
+   * 원격 자산을 바이트로 푼다. 해시·크기가 선언과 다르면 패키지 전체를 실패시키고,
+   * 기존 파일은 그대로 둔다(스테이징 이전이라 적는 게 없다).
+   */
+  const resolveRemoteFiles = async (remoteFiles: any[]): Promise<SkillWritableFile[]> => {
+    const files: SkillWritableFile[] = [];
+    for (const file of remoteFiles) {
+      if (file?.kind === 'BINARY') {
+        if (typeof file.downloadUrl !== 'string' || file.downloadUrl.length === 0) {
+          throw new SkillPackageError(`Asset is missing its download URL: ${String(file?.relativePath)}`);
+        }
+        const buffer = await fetchSkillAssetBytes(String(file.downloadUrl));
+        const sha256 = createHash('sha256').update(buffer).digest('hex');
+        if (sha256 !== file.sha256 || buffer.length !== file.sizeBytes) {
+          throw new SkillPackageError(
+            `Asset hash mismatch: ${String(file.relativePath)}. The server state changed during download; retry.`,
+          );
+        }
+        files.push({
+          relativePath: String(file.relativePath),
+          kind: 'BINARY',
+          content: buffer,
+          sha256: String(file.sha256),
+          sizeBytes: buffer.length,
+          mimeType: String(file.mimeType),
+        });
+        continue;
+      }
+      files.push({
+        relativePath: String(file.relativePath),
+        content: String(file.content ?? ''),
+      });
+    }
+    return files;
+  };
+
   const prepare = (
     old: SkillManifestEntry | undefined,
     next: SkillManifestEntry | undefined,
-    files: SkillPackageFile[],
+    files: SkillWritableFile[],
   ) => {
     const entry = next ?? old!;
     if (old && invalidEntries.has(old)) {
@@ -292,11 +343,8 @@ const skillDownload = async (
       );
       continue;
     }
-    const payload = await downloadSkill(apiUrl, projectId, headers, summary.id);
-    const files: SkillPackageFile[] = (payload?.data?.files ?? []).map((file: any) => ({
-      relativePath: String(file.relativePath),
-      content: String(file.content ?? ''),
-    }));
+    const payload = await downloadSkill(apiUrl, projectId, headers, summary.id, true);
+    const files = await resolveRemoteFiles(payload?.data?.files ?? []);
     validateSkillPackageFiles(files);
     const roots = [
       `.agentteams/skills/${summary.slug}`,
@@ -413,6 +461,110 @@ const skillStatus = async (
   };
 };
 
+/**
+ * 바뀐 자산만 업로드한다. 업로드 URL 발급 → presigned PUT 순서이며, 발급받은
+ * `draftKey`를 생성·수정 본문에 싣는다.
+ */
+const uploadSkillAssets = async (
+  apiUrl: string,
+  projectId: string,
+  headers: Record<string, string>,
+  assets: SkillPackageLocalAsset[],
+): Promise<Map<string, string>> => {
+  const draftKeys = new Map<string, string>();
+  if (assets.length === 0) {
+    return draftKeys;
+  }
+  const grants = await requestSkillAssetUploadUrls(
+    apiUrl,
+    projectId,
+    headers,
+    assets.map((asset) => ({
+      relativePath: asset.relativePath,
+      sizeBytes: asset.sizeBytes,
+      mimeType: asset.mimeType,
+      sha256: asset.sha256,
+    })),
+  );
+  const byPath = new Map(grants.map((grant) => [grant.relativePath, grant]));
+  for (const asset of assets) {
+    const grant = byPath.get(asset.relativePath);
+    if (!grant) {
+      throw new SkillPackageError(`Asset upload URL was not issued: ${asset.relativePath}`);
+    }
+    await putSkillAssetBytes(grant.uploadUrl, asset.content, asset.mimeType);
+    draftKeys.set(asset.relativePath, grant.draftKey);
+  }
+  return draftKeys;
+};
+
+const toCreateFileBodies = async (
+  apiUrl: string,
+  projectId: string,
+  headers: Record<string, string>,
+  files: SkillWritableFile[],
+): Promise<SkillFileBody[]> => {
+  const draftKeys = await uploadSkillAssets(apiUrl, projectId, headers, files.filter(isSkillLocalAsset));
+  return files.map((file) => {
+    if (!isSkillLocalAsset(file)) {
+      return { relativePath: file.relativePath, content: file.content };
+    }
+    const draftKey = draftKeys.get(file.relativePath);
+    if (!draftKey) {
+      throw new SkillPackageError(`Asset upload URL was not issued: ${file.relativePath}`);
+    }
+    return {
+      relativePath: file.relativePath,
+      kind: 'BINARY' as const,
+      sha256: file.sha256,
+      sizeBytes: file.sizeBytes,
+      mimeType: file.mimeType,
+      draftKey,
+    };
+  });
+};
+
+/**
+ * 수정 본문. 서버 자산과 sha256이 같은 로컬 자산은 `reuse: true`로 이어 쓰고
+ * (업로드 URL 요청 없음), 새로워지거나 처음 보는 자산만 업로드한다.
+ */
+const toUpdateFileBodies = async (
+  apiUrl: string,
+  projectId: string,
+  headers: Record<string, string>,
+  files: SkillWritableFile[],
+  remoteFiles: any,
+): Promise<SkillFileBody[]> => {
+  const remoteBinaries = new Set<string>();
+  for (const remote of Array.isArray(remoteFiles) ? remoteFiles : []) {
+    if (remote?.kind === 'BINARY' && typeof remote?.sha256 === 'string') {
+      remoteBinaries.add(remote.sha256);
+    }
+  }
+  const changed = files.filter(isSkillLocalAsset).filter((asset) => !remoteBinaries.has(asset.sha256));
+  const draftKeys = await uploadSkillAssets(apiUrl, projectId, headers, changed);
+  return files.map((file) => {
+    if (!isSkillLocalAsset(file)) {
+      return { relativePath: file.relativePath, content: file.content };
+    }
+    if (remoteBinaries.has(file.sha256)) {
+      return { relativePath: file.relativePath, kind: 'BINARY' as const, sha256: file.sha256, reuse: true as const };
+    }
+    const draftKey = draftKeys.get(file.relativePath);
+    if (!draftKey) {
+      throw new SkillPackageError(`Asset upload URL was not issued: ${file.relativePath}`);
+    }
+    return {
+      relativePath: file.relativePath,
+      kind: 'BINARY' as const,
+      sha256: file.sha256,
+      sizeBytes: file.sizeBytes,
+      mimeType: file.mimeType,
+      draftKey,
+    };
+  });
+};
+
 export async function executeSkillCommand(
   apiUrl: string,
   projectId: string,
@@ -495,15 +647,19 @@ export async function executeSkillCommand(
           dryRun: true,
           slug,
           files: files.map((file) => file.relativePath),
+          assets: files
+            .filter(isSkillLocalAsset)
+            .map((file) => ({ relativePath: file.relativePath, sizeBytes: file.sizeBytes })),
           hint: 'Re-run with --apply to create the skill on the server.',
         };
       }
 
       return createSkill(apiUrl, projectId, headers, {
         slug,
-        files,
+        files: await toCreateFileBodies(apiUrl, projectId, headers, files),
         ...(options.repositoryId ? { repositoryId: String(options.repositoryId) } : {}),
         ...(options.scope ? { scope: String(options.scope) } : {}),
+        assetsAware: true,
       });
     }
 
@@ -523,14 +679,18 @@ export async function executeSkillCommand(
           dryRun: true,
           skillId,
           files: files.map((file) => file.relativePath),
+          assets: files
+            .filter(isSkillLocalAsset)
+            .map((file) => ({ relativePath: file.relativePath, sizeBytes: file.sizeBytes })),
           hint: 'Re-run with --apply to update the skill on the server.',
         };
       }
 
       return updateSkill(apiUrl, projectId, headers, skillId, {
-        files,
+        files: await toUpdateFileBodies(apiUrl, projectId, headers, files, current?.data?.files),
         updatedAt,
         ...(options.scope ? { scope: String(options.scope) } : {}),
+        assetsAware: true,
       });
     }
 

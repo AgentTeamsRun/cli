@@ -45,7 +45,9 @@ export const ACCESS_REFRESH_SKEW_MS = 60_000;
  * token — the reuse that revokes the whole family. Bounding the request keeps the
  * holder inside the window it promised.
  */
-export const TOKEN_REQUEST_TIMEOUT_MS = Math.floor(DEFAULT_STALE_AFTER_MS / 2);
+// 서버의 transactionRetry 예산(12초)을 넘는 15초를 기다린다.
+// 연결 실패 재시도 두 번도 stale 창(45초)의 2/3으로 제한한다.
+export const TOKEN_REQUEST_TIMEOUT_MS = Math.floor(DEFAULT_STALE_AFTER_MS / 3);
 
 export type PersonalTokenErrorCode =
   | 'INVALID_GRANT'
@@ -86,7 +88,7 @@ export interface PersonalTokenSession {
  * surface as "check your network connection", which sends the user after a
  * network that is fine.
  */
-export type PersonalTokenRefreshFailure = 'NETWORK' | 'LOCK_CONTENTION' | 'LOCK_UNAVAILABLE';
+export type PersonalTokenRefreshFailure = 'NETWORK' | 'SERVER' | 'LOCK_CONTENTION' | 'LOCK_UNAVAILABLE';
 
 export interface PersonalTokenState {
   /** A refresh token exists locally. It may still turn out to be revoked. */
@@ -106,6 +108,7 @@ export interface PersonalTokenState {
   expiresAt: number | null;
   /** The server rejected the refresh token; only a fresh login recovers. */
   reconnectRequired: boolean;
+  revokedReason?: 'reused' | 'expired' | 'invalid' | null;
   /** Why the last refresh produced nothing; null when it succeeded or never ran. */
   refreshFailure: PersonalTokenRefreshFailure | null;
 }
@@ -138,7 +141,7 @@ interface TokenResponse {
 
 type ParsedTokenResponse =
   | { kind: 'success'; tokens: TokenResponse }
-  | { kind: 'invalidGrant' }
+  | { kind: 'invalidGrant'; reason?: 'reused' | 'expired' | 'invalid' }
   | { kind: 'transient'; detail: string };
 
 /**
@@ -160,7 +163,11 @@ export async function parseTokenResponse(response: Response): Promise<ParsedToke
 
   if (!response.ok) {
     if ((response.status === 400 || response.status === 401) && error === 'invalid_grant') {
-      return { kind: 'invalidGrant' };
+      const reason = (body as { reason?: unknown }).reason;
+      return {
+        kind: 'invalidGrant',
+        ...(reason === 'reused' || reason === 'expired' || reason === 'invalid' ? { reason } : {}),
+      };
     }
     return { kind: 'transient', detail: `HTTP ${response.status}` };
   }
@@ -247,8 +254,10 @@ const parseDeviceSetupResult = (value: unknown): DeviceSetupResult | null => {
 export class PersonalTokenClient {
   private accessToken: string | null = null;
   private accessExpiresAt = 0;
+  private rejectedAccessToken: string | null = null;
   private identity: PersonalTokenIdentity | null = null;
   private reconnectRequired = false;
+  private revokedReason: PersonalTokenState['revokedReason'] = null;
   private refreshFailure: PersonalTokenRefreshFailure | null = null;
   private refreshInFlight: Promise<string | null> | null = null;
 
@@ -265,6 +274,7 @@ export class PersonalTokenClient {
       identity: this.identity,
       expiresAt: this.accessToken ? this.accessExpiresAt : null,
       reconnectRequired: this.reconnectRequired,
+      revokedReason: this.revokedReason,
       refreshFailure: this.refreshFailure,
     };
   }
@@ -489,6 +499,9 @@ export class PersonalTokenClient {
       return this.accessToken;
     }
 
+    const refreshToken = this.deps.store.read({ fresh: true });
+    if (refreshToken && this.restoreAccessCache(refreshToken)) return this.accessToken;
+
     if (!this.refreshInFlight) {
       this.refreshInFlight = this.refresh().finally(() => {
         this.refreshInFlight = null;
@@ -499,6 +512,8 @@ export class PersonalTokenClient {
 
   /** Force the next {@link getAccessToken} to refresh even if the cached token looks fresh. */
   invalidateAccessToken(): void {
+    this.rejectedAccessToken = this.accessToken;
+    this.removeAccessCache();
     this.accessToken = null;
     this.accessExpiresAt = 0;
   }
@@ -593,18 +608,28 @@ export class PersonalTokenClient {
     // every token in the family.
     const refreshToken = this.deps.store.read({ fresh: true });
     if (!refreshToken) return null;
+    if (this.restoreAccessCache(refreshToken)) return this.accessToken;
 
+    const body = { grantType: 'refresh_token', clientId: CLI_OAUTH_CLIENT_ID, refreshToken };
     let parsed: ParsedTokenResponse;
     try {
-      parsed = await this.postToken({
-        grantType: 'refresh_token',
-        clientId: CLI_OAUTH_CLIENT_ID,
-        refreshToken,
-      });
+      try {
+        parsed = await this.postToken(body);
+      } catch (error) {
+        // 연결조차 성립하지 않은 오류만 즉시 재시도한다. 타임아웃·응답 유실은
+        // 서버가 아직 처리 중일 수 있으므로 자격증명을 남겨 다음 명령에서 복구한다.
+        const failure = error as { name?: string; code?: string; cause?: { code?: string } } | null;
+        const code = failure?.cause?.code ?? failure?.code;
+        if (
+          failure?.name === 'AbortError' ||
+          failure?.name === 'TimeoutError' ||
+          !code ||
+          !['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN'].includes(code)
+        )
+          throw error;
+        parsed = await this.postToken(body);
+      }
     } catch {
-      // Network-level failure, which now includes the request outrunning
-      // TOKEN_REQUEST_TIMEOUT_MS. The refresh token is still presumed valid, so
-      // it stays exactly where it is; the next command can try again.
       this.refreshFailure = 'NETWORK';
       return null;
     }
@@ -612,9 +637,13 @@ export class PersonalTokenClient {
     if (parsed.kind === 'invalidGrant') {
       this.clear();
       this.reconnectRequired = true;
+      this.revokedReason = parsed.reason ?? null;
       return null;
     }
-    if (parsed.kind !== 'success') return null;
+    if (parsed.kind !== 'success') {
+      this.refreshFailure = 'SERVER';
+      return null;
+    }
 
     this.acceptTokens(parsed.tokens);
     this.reconnectRequired = false;
@@ -643,14 +672,61 @@ export class PersonalTokenClient {
     // the client never assumes a duration of its own.
     this.accessExpiresAt = this.now() + tokens.expiresIn * 1000;
     this.identity = tokens.identity;
-    return this.deps.store.save(tokens.refreshToken);
+    this.revokedReason = null;
+    const outcome = this.deps.store.save(tokens.refreshToken);
+    this.rejectedAccessToken = null;
+    try {
+      this.deps.store.saveAccess?.(
+        {
+          accessToken: this.accessToken,
+          expiresAt: this.accessExpiresAt,
+          identity: this.identity,
+        },
+        tokens.refreshToken,
+      );
+    } catch {
+      // 캐시 저장은 최적화일 뿐, 성공한 로그인이나 회전을 실패로 바꾸지 않는다.
+    }
+    return outcome;
+  }
+
+  private restoreAccessCache(refreshToken: string): boolean {
+    try {
+      const cached = this.deps.store.readAccess?.(refreshToken);
+      if (
+        !cached ||
+        cached.accessToken === this.rejectedAccessToken ||
+        cached.expiresAt - ACCESS_REFRESH_SKEW_MS <= this.now()
+      )
+        return false;
+      this.accessToken = cached.accessToken;
+      this.accessExpiresAt = cached.expiresAt;
+      this.identity = cached.identity;
+      this.reconnectRequired = false;
+      this.revokedReason = null;
+      this.refreshFailure = null;
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private removeAccessCache(): void {
+    try {
+      this.deps.store.removeAccess?.();
+    } catch {
+      // 저장소가 잠겨도 메모리 무효화와 refresh 철회는 계속한다.
+    }
   }
 
   private clear(): void {
+    this.rejectedAccessToken = this.accessToken;
+    this.removeAccessCache();
     this.accessToken = null;
     this.accessExpiresAt = 0;
     this.identity = null;
     this.reconnectRequired = false;
+    this.revokedReason = null;
     this.refreshFailure = null;
     this.deps.store.remove();
   }

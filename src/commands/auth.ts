@@ -82,6 +82,7 @@ export type AuthStatusResult = {
     storeReason: CredentialStoreReason;
     storeDetail?: string;
     reconnectRequired: boolean;
+    revokedReason?: PersonalTokenState['revokedReason'];
     identity: { memberId: string; email: string; nickname: string } | null;
     expiresAt: string | null;
   };
@@ -472,6 +473,7 @@ async function status(options: Record<string, unknown> = {}): Promise<AuthStatus
       storeReason: tokenState.storeReason,
       ...(tokenState.storeDetail === undefined ? {} : { storeDetail: tokenState.storeDetail }),
       reconnectRequired: refreshedState.reconnectRequired,
+      revokedReason: refreshedState.revokedReason,
       identity: refreshedState.identity,
       expiresAt: refreshedState.expiresAt ? new Date(refreshedState.expiresAt).toISOString() : null,
     },

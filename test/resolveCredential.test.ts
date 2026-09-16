@@ -302,6 +302,18 @@ describe('resolveCredential and the legacy key_ path', () => {
 });
 
 describe('resolveCredential failure reporting', () => {
+  it('일시 서버 오류는 자격증명을 유지하고 철회 사유는 구분한다', () => {
+    const transient = describeUnusableCredential(unusableCredentialState({ refreshFailure: 'SERVER' }));
+    expect(transient).toContain('credential is intact');
+    expect(transient).not.toContain('auth login');
+    const revoked = describeUnusableCredential(
+      unusableCredentialState({ reconnectRequired: true, revokedReason: 'reused' }),
+    );
+    expect(revoked).not.toContain('refresh token');
+    expect(revoked).toContain('used more than once');
+    expect(revoked).toContain('review your sessions');
+  });
+
   it('points an unconnected directory at the project binding when the login is usable', () => {
     const message = describeUnusableCredential(unusableCredentialState({ refreshFailure: null }), {
       projectConnected: false,
@@ -323,7 +335,7 @@ describe('resolveCredential failure reporting', () => {
       'Could not maintain the lock that keeps concurrent logins from clashing (check free space and permissions on ~/.agentteams/locks). Your credential is intact — retry the command.',
     );
     expect(describeUnusableCredential(unusableCredentialState())).toBe(
-      "Could not refresh your AgentTeams login. Check your network connection, then retry or run 'agentteams auth login'.",
+      'Your login is intact — the server could not be reached. Retry once you are back online.',
     );
   });
 
@@ -342,7 +354,7 @@ describe('resolveCredential failure reporting', () => {
       throw new Error('ENOTFOUND');
     }) as unknown as typeof fetch);
 
-    await expect(resolveCredential(undefined, deps)).rejects.toThrow(/network connection/);
+    await expect(resolveCredential(undefined, deps)).rejects.toThrow(/server could not be reached/);
   });
 
   it('explains an opted-in project that has no stored credential', async () => {

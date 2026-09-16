@@ -21,6 +21,9 @@ const getSkill = jest.fn();
 const createSkill = jest.fn();
 const updateSkill = jest.fn();
 const deleteSkill = jest.fn();
+const requestSkillAssetUploadUrls = jest.fn();
+const putSkillAssetBytes = jest.fn();
+const fetchSkillAssetBytes = jest.fn();
 
 jest.unstable_mockModule('../src/api/skill.js', () => ({
   __esModule: true,
@@ -30,6 +33,9 @@ jest.unstable_mockModule('../src/api/skill.js', () => ({
   createSkill,
   updateSkill,
   deleteSkill,
+  requestSkillAssetUploadUrls,
+  putSkillAssetBytes,
+  fetchSkillAssetBytes,
 }));
 
 const { executeSkillCommand } = await import('../src/commands/skill.js');
@@ -270,7 +276,7 @@ describe('skill create/update dry-run', () => {
         dir: packageDir,
         apply: true,
       }),
-    ).rejects.toThrow(/must live under/);
+    ).rejects.toThrow(/Unsupported skill asset type/);
     expect(createSkill).not.toHaveBeenCalled();
   });
 });

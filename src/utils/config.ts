@@ -1,3 +1,4 @@
+import { describeEndedLogin } from './authMessages.js';
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import { homedir } from 'node:os';
@@ -329,7 +330,7 @@ export function describeUnusableCredential(
   context: { projectConnected?: boolean } = {},
 ): string {
   if (state.reconnectRequired) {
-    return "Your AgentTeams login was revoked or expired. Run 'agentteams auth login' to sign in again.";
+    return describeEndedLogin(state.revokedReason);
   }
 
   switch (state.refreshFailure) {
@@ -338,7 +339,9 @@ export function describeUnusableCredential(
     case 'LOCK_UNAVAILABLE':
       return 'Could not maintain the lock that keeps concurrent logins from clashing (check free space and permissions on ~/.agentteams/locks). Your credential is intact — retry the command.';
     case 'NETWORK':
-      return "Could not refresh your AgentTeams login. Check your network connection, then retry or run 'agentteams auth login'.";
+      return 'Your login is intact — the server could not be reached. Retry once you are back online.';
+    case 'SERVER':
+      return 'The server could not refresh your login temporarily. Your credential is intact — retry the command later.';
     default:
       return context.projectConnected === false
         ? "No AgentTeams project is connected to this directory. Run the command from a project directory, or run 'agentteams init' here to connect one."

@@ -150,6 +150,8 @@ function startTokenServer(expectedChallenge: string): Promise<TokenServer> {
  * correctly is `credentialStore.test.ts`'s job.
  */
 function createStandInStoreFactory(service: string): () => CredentialStore {
+  const homeDir = mkdtempSync(join(tmpdir(), 'agentteams-stand-in-'));
+  tempDirs.push(homeDir);
   const items = new Map<string, string>();
   const ok = (stdout = ''): CommandResult => ({ status: 0, stdout, stderr: '' });
   // `security` answers a missing item with 44, not with an empty value.
@@ -172,7 +174,23 @@ function createStandInStoreFactory(service: string): () => CredentialStore {
     return ok();
   };
 
-  return () => createCredentialStore({ service, platform: 'darwin', runner });
+  return () => {
+    const store = createCredentialStore({
+      service,
+      platform: 'darwin',
+      runner,
+      homeDir,
+      env: { AGENTTEAMS_DISABLE_FILE_CREDENTIALS: '1' },
+    });
+    // 가짜 macOS 백엔드의 캐시도 공유 저장소로 보낸다. Windows 파일에
+    // POSIX 권한 검사를 적용하면 캐시만 거부되어 호스트별 결과가 달라진다.
+    return {
+      ...store,
+      saveProtectedCache: (account, secret) => {
+        store.save(account, secret);
+      },
+    };
+  };
 }
 
 /**
@@ -224,6 +242,19 @@ function createProject(config: Record<string, unknown>): string {
 }
 
 describe('personal login round trip', () => {
+  it('shares the stand-in access cache across stores without depending on host file permissions', () => {
+    const openStore = createStandInStoreFactory('agentteams-cache-fixture');
+    const first = openStore();
+    const second = openStore();
+    const account = 'personal-access:http://127.0.0.1';
+
+    expect(second.read(account)).toBeNull();
+    first.saveProtectedCache?.(account, 'cached-session');
+    expect(second.read(account, { fresh: true })).toBe('cached-session');
+    second.remove(account);
+    expect(first.read(account, { fresh: true })).toBeNull();
+  });
+
   it('logs in, resolves a credential for a command, then logs out', async () => {
     const service = `agentteams-cli-roundtrip-${process.pid}`;
     const openStore = createRoundTripStoreFactory(service);
@@ -382,7 +413,7 @@ describe('personal login round trip', () => {
           const mcpToken = await mcp.getAccessToken();
 
           expect(mcpToken).not.toBeNull();
-          expect(mcpToken).not.toBe(commandToken);
+          expect(mcpToken).toBe(commandToken);
           expect(tokenServer.familyRevocations()).toBe(0);
           expect(mcp.state().reconnectRequired).toBe(false);
         } finally {
@@ -403,7 +434,7 @@ describe('personal login round trip', () => {
           const tokens = await Promise.all(processes.map((client) => client.getAccessToken()));
 
           expect(tokens.every((token) => typeof token === 'string')).toBe(true);
-          expect(new Set(tokens).size).toBe(processes.length);
+          expect(new Set(tokens).size).toBe(1);
           expect(tokenServer.familyRevocations()).toBe(0);
           // Exactly one live refresh token is left: the last rotation's.
           expect(tokenServer.issued.size).toBe(1);
@@ -446,7 +477,10 @@ describe('personal login round trip', () => {
 
         try {
           const retiredBefore = [...tokenServer.issued];
-          await openProcess().getAccessToken();
+          const client = openProcess();
+          await client.getAccessToken();
+          client.invalidateAccessToken();
+          await client.getAccessToken();
 
           const replay = await fetch(`${tokenServer.url}/api/auth/desktop/token`, {
             method: 'POST',
