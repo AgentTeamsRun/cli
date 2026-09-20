@@ -94,7 +94,6 @@ describe('skill share', () => {
       skillId: 'skill-1',
       share: {
         scope: 'PUBLIC',
-        targetTeamId: null,
         includeBody: true,
         includeExecutable: false,
         allowInstall: true,
@@ -104,16 +103,21 @@ describe('skill share', () => {
     expect(String(result.hint)).toContain('--apply');
   });
 
-  it('rejects an unknown scope and a team scope without --team before calling the server', async () => {
+  it('rejects an unknown scope and an invalid date before calling the server', async () => {
     await expect(run('share', { id: 'skill-1', scope: 'friends' })).rejects.toThrow(/Invalid --scope/);
-    await expect(run('share', { id: 'skill-1', scope: 'team' })).rejects.toThrow(/--team <teamId> is required/);
-    await expect(run('share', { id: 'skill-1', scope: 'public', team: 'team-1' })).rejects.toThrow(
-      /--team applies only/,
-    );
     await expect(run('share', { id: 'skill-1', scope: 'link', expiresAt: 'not-a-date' })).rejects.toThrow(
       /Invalid --expires-at/,
     );
     expect(totalApiCalls()).toBe(0);
+  });
+
+  it('shares with the team without --team and sends no target team', async () => {
+    const result = await run('share', { id: 'skill-1', scope: 'team' });
+
+    expect(totalApiCalls()).toBe(0);
+    expect(result).toMatchObject({ dryRun: true, skillId: 'skill-1', share: { scope: 'TEAM' } });
+    expect('targetTeamId' in (result.share as Record<string, unknown>)).toBe(false);
+    expect(await renderNestedHelp('skill', 'share')).not.toContain('--team ');
   });
 
   it('sends only the explicitly chosen options so server defaults apply to the rest', async () => {
@@ -124,7 +128,6 @@ describe('skill share', () => {
     const result = await run('share', {
       id: 'skill-1',
       scope: 'TEAM',
-      team: 'team-1',
       includeBody: false,
       includeExecutable: true,
       allowInstall: false,
@@ -135,7 +138,6 @@ describe('skill share', () => {
     expect(createSkillShare).toHaveBeenCalledTimes(1);
     expect(createSkillShare).toHaveBeenCalledWith(apiUrl, projectId, headers, 'skill-1', {
       scope: 'TEAM',
-      targetTeamId: 'team-1',
       includeBody: false,
       includeExecutable: true,
       allowInstall: false,
@@ -370,7 +372,7 @@ describe('skill install', () => {
 
 describe('skill share help', () => {
   it.each([
-    ['share', ['--id <id>', '--scope <scope>', '--team <teamId>', '--no-include-body', '--include-executable']],
+    ['share', ['--id <id>', '--scope <scope>', '--no-include-body', '--include-executable']],
     ['share', ['--no-allow-install', '--expires-at <iso8601>', '--apply']],
     ['unshare', ['--id <shareId>', '--skill <skillId>', '--apply']],
     ['shares', ['--id <id>', '--page <number>', '--page-size <number>']],

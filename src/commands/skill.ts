@@ -620,18 +620,9 @@ const pageParams = (options: SkillOptions): Record<string, number> => ({
 /** 발행 본문. 옵션을 안 준 필드는 싣지 않아 서버 기본값(body=on, executable=off, install=on)이 적용된다. */
 const buildShareBody = (options: SkillOptions): SkillShareCreateBody => {
   const scope = parseShareScope(options.scope);
-  const targetTeamId =
-    typeof options.team === 'string' && options.team.trim().length > 0 ? options.team.trim() : undefined;
-  if (scope === 'TEAM' && !targetTeamId) {
-    throw new Error('--team <teamId> is required when --scope is team');
-  }
-  if (scope !== 'TEAM' && targetTeamId) {
-    throw new Error('--team applies only to --scope team');
-  }
   const expiresAt = parseExpiresAt(options.expiresAt);
   return {
     scope,
-    ...(targetTeamId ? { targetTeamId } : {}),
     ...(typeof options.includeBody === 'boolean' ? { includeBody: options.includeBody } : {}),
     ...(options.includeExecutable === true ? { includeExecutable: true } : {}),
     ...(options.allowInstall === false ? { allowInstall: false } : {}),
@@ -642,7 +633,6 @@ const buildShareBody = (options: SkillOptions): SkillShareCreateBody => {
 /** dry-run 미리보기는 서버 기본값을 채워 실제로 적용될 값을 보여준다. */
 const previewShareBody = (body: SkillShareCreateBody) => ({
   scope: body.scope,
-  targetTeamId: body.targetTeamId ?? null,
   includeBody: body.includeBody ?? true,
   includeExecutable: body.includeExecutable ?? false,
   allowInstall: body.allowInstall ?? true,

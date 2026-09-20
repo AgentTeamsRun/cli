@@ -122,7 +122,6 @@ export async function deleteSkill(
 
 export type SkillShareCreateBody = {
   scope: string;
-  targetTeamId?: string;
   includeBody?: boolean;
   includeExecutable?: boolean;
   allowInstall?: boolean;

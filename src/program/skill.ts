@@ -90,7 +90,6 @@ export function registerSkillCommand(program: Command): void {
     addCwd(command)
       .option('--id <id>', 'Skill ID')
       .option('--scope <scope>', 'public, team, or link')
-      .option('--team <teamId>', 'Target team ID (required for --scope team; shares with all projects in the team)')
       .option('--include-body', 'Include SKILL.md and other text files (server default: on)')
       .option('--no-include-body', 'Expose metadata only, without file bodies')
       .option('--include-executable', 'Also expose scripts/ and assets/ (default: off)')
