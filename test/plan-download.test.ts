@@ -194,3 +194,54 @@ describe('plan v2 task metadata', () => {
     });
   });
 });
+
+// 회귀: 선행 작업이 뒤쪽 orderIndex를 가리키면 위상 순서와 orderIndex 순서가 갈린다. 런북 본문은
+// 서버의 위상 서수(`### N.`)로 쓰이므로, 사이드카·주석 삽입도 서버 number를 따라야 번호가 하나로 남는다.
+describe('plan v2 task numbering follows the server number', () => {
+  // task-b(orderIndex 0)가 task-a(orderIndex 1)에 의존 → 서버 번호는 A=1, B=2.
+  const tasks = [
+    { id: 'task-b', title: 'Task B', status: 'TODO', orderIndex: 0, number: 2, dependsOnTaskIds: ['task-a'] },
+    { id: 'task-a', title: 'Task A', status: 'TODO', orderIndex: 1, number: 1, dependsOnTaskIds: [] },
+  ];
+  const markdown = '## TODOs\n\n### 1. Task A — TODO\n\ndo A\n\n### 2. Task B — TODO\n\ndo B';
+
+  it('injects task id comments when topological order differs from orderIndex', () => {
+    const withComments = addTaskIdCommentsToPlanRunbook(markdown, tasks, 'V2');
+
+    expect(withComments).toContain('<!-- agentteams-task-id: task-a -->\n### 1. Task A');
+    expect(withComments).toContain('<!-- agentteams-task-id: task-b -->\n### 2. Task B');
+  });
+
+  it('sidecar numbers match the runbook body headings', () => {
+    expect(buildPlanTaskSidecar('plan-1', tasks)).toEqual({
+      planId: 'plan-1',
+      tasks: [
+        {
+          id: 'task-a',
+          number: 1,
+          title: 'Task A',
+          status: 'TODO',
+          dependsOnTaskIds: [],
+          dependsOnTaskNumbers: [],
+        },
+        {
+          id: 'task-b',
+          number: 2,
+          title: 'Task B',
+          status: 'TODO',
+          dependsOnTaskIds: ['task-a'],
+          dependsOnTaskNumbers: [1],
+        },
+      ],
+    });
+  });
+
+  it('falls back to orderIndex order when the server response has no number', () => {
+    const legacyTasks = tasks.map(({ number: _number, ...task }) => task);
+
+    expect(buildPlanTaskSidecar('plan-1', legacyTasks).tasks.map((task) => [task.id, task.number])).toEqual([
+      ['task-b', 1],
+      ['task-a', 2],
+    ]);
+  });
+});

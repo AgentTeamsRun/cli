@@ -50,6 +50,8 @@ type PlanRunbookTask = {
   title: string;
   status: string;
   orderIndex: number;
+  /** 서버가 매긴 표시 번호(1-base, 위상 정렬 서수). 구버전 서버 응답에는 없다. */
+  number?: number;
   dependsOnTaskIds?: string[];
 };
 
@@ -263,6 +265,23 @@ export function buildPlanRunbookMarkdown(plan: {
 
 const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
+/**
+ * 런북 본문과 사이드카가 공유하는 태스크 표시 순서·번호.
+ *
+ * 런북 본문(`### N. 제목`)은 서버가 위상 정렬 서수로 매긴 번호이고, 응답의 `number`가 같은 값이다.
+ * 따라서 정렬도 번호도 서버 값을 그대로 따른다 — orderIndex로 다시 매기면 선행 작업이 뒤쪽
+ * orderIndex를 가리키는 플랜에서 본문·웹 화면과 사이드카의 번호가 갈린다.
+ * `number`가 없는 구버전 서버 응답에서만 기존 orderIndex 순서로 폴백한다.
+ */
+function orderPlanRunbookTasks(tasks: PlanRunbookTask[]): { task: PlanRunbookTask; number: number }[] {
+  const hasServerNumbers = tasks.every((task) => typeof task.number === 'number');
+  const ordered = hasServerNumbers
+    ? [...tasks].sort((a, b) => (a.number ?? 0) - (b.number ?? 0))
+    : [...tasks].sort((a, b) => a.orderIndex - b.orderIndex);
+
+  return ordered.map((task, index) => ({ task, number: task.number ?? index + 1 }));
+}
+
 export function addTaskIdCommentsToPlanRunbook(
   markdown: string,
   tasks: PlanRunbookTask[],
@@ -270,7 +289,7 @@ export function addTaskIdCommentsToPlanRunbook(
 ): string {
   if (contentVersion !== 'V2' || tasks.length === 0) return markdown;
 
-  const orderedTasks = [...tasks].sort((a, b) => a.orderIndex - b.orderIndex);
+  const orderedTasks = orderPlanRunbookTasks(tasks);
   const lines = markdown.split('\n');
   const output: string[] = [];
   let nextTaskIndex = 0;
@@ -282,8 +301,9 @@ export function addTaskIdCommentsToPlanRunbook(
       isInsideTodos = /^##\s+TODOs\s*$/.test(line);
     }
 
-    const task = orderedTasks[nextTaskIndex];
-    const taskNumber = nextTaskIndex + 1;
+    const entry = orderedTasks[nextTaskIndex];
+    const task = entry?.task;
+    const taskNumber = entry?.number;
     const taskHeading = task
       ? new RegExp(
           `^###\\s+${taskNumber}\\.\\s+${escapeRegExp(task.title)}\\s+—\\s+${escapeRegExp(task.status)}(?:\\s+\\(Wave\\s+\\d+\\))?\\s*$`,
@@ -317,14 +337,14 @@ export function buildPlanTaskSidecar(
     dependsOnTaskNumbers: number[];
   }[];
 } {
-  const orderedTasks = [...tasks].sort((a, b) => a.orderIndex - b.orderIndex);
-  const taskNumberById = new Map(orderedTasks.map((task, index) => [task.id, index + 1]));
+  const orderedTasks = orderPlanRunbookTasks(tasks);
+  const taskNumberById = new Map(orderedTasks.map(({ task, number }) => [task.id, number]));
 
   return {
     planId,
-    tasks: orderedTasks.map((task, index) => ({
+    tasks: orderedTasks.map(({ task, number }) => ({
       id: task.id,
-      number: index + 1,
+      number,
       title: task.title,
       status: task.status,
       dependsOnTaskIds: task.dependsOnTaskIds ?? [],
