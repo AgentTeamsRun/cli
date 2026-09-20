@@ -25,6 +25,16 @@ jest.unstable_mockModule('../src/api/skill.js', () => ({
   requestSkillAssetUploadUrls,
   putSkillAssetBytes,
   fetchSkillAssetBytes,
+  // 공유 커맨드(share/unshare/shares/browse/install)용. 이 파일의 시나리오는 호출하지 않는다.
+  createSkillShare: jest.fn(),
+  revokeSkillShare: jest.fn(),
+  listSkillShares: jest.fn(),
+  listSkillInstalls: jest.fn(),
+  listSharedSkills: jest.fn(),
+  getSharedSkill: jest.fn(),
+  installSharedSkill: jest.fn(),
+  getPublicSharedSkill: jest.fn(),
+  installSharedSkillByToken: jest.fn(),
 }));
 
 const { executeSkillCommand } = await import('../src/commands/skill.js');
