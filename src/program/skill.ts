@@ -90,7 +90,7 @@ export function registerSkillCommand(program: Command): void {
     addCwd(command)
       .option('--id <id>', 'Skill ID')
       .option('--scope <scope>', 'public, team, or link')
-      .option('--team <teamId>', 'Target team ID (required for --scope team)')
+      .option('--team <teamId>', 'Target team ID (required for --scope team; shares with all projects in the team)')
       .option('--include-body', 'Include SKILL.md and other text files (server default: on)')
       .option('--no-include-body', 'Expose metadata only, without file bodies')
       .option('--include-executable', 'Also expose scripts/ and assets/ (default: off)')
@@ -110,7 +110,7 @@ export function registerSkillCommand(program: Command): void {
     addPaging(addCwd(command).option('--id <id>', 'Skill ID')),
   );
 
-  addLeaf('browse', 'Browse skills shared with you (public and your teams)', (command) =>
+  addLeaf('browse', 'Browse skills shared with this project (public and its team shares)', (command) =>
     addPaging(addCwd(command).option('--search <keyword>', 'Filter by keyword')),
   );
 

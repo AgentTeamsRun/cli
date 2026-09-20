@@ -723,8 +723,8 @@ const skillShares = async (
   return { skillId, shares, installs };
 };
 
-const skillBrowse = async (apiUrl: string, headers: Record<string, string>, options: SkillOptions) =>
-  listSharedSkills(apiUrl, headers, {
+const skillBrowse = async (apiUrl: string, projectId: string, headers: Record<string, string>, options: SkillOptions) =>
+  listSharedSkills(apiUrl, projectId, headers, {
     ...pageParams(options),
     ...(options.search ? { search: String(options.search) } : {}),
   });
@@ -767,7 +767,7 @@ const skillInstall = async (
   }
   const detail = shareToken
     ? ((await getPublicSharedSkill(apiUrl, shareToken))?.data ?? {})
-    : ((await getSharedSkill(apiUrl, headers, shareId!))?.data ?? {});
+    : ((await getSharedSkill(apiUrl, projectId, headers, shareId!))?.data ?? {});
   const files = (Array.isArray(detail.files) ? detail.files : []).map((file: any) => ({
     relativePath: String(file.relativePath),
     sizeBytes: Number(file.sizeBytes ?? 0),
@@ -961,7 +961,7 @@ export async function executeSkillCommand(
       return skillShares(apiUrl, projectId, headers, options);
 
     case 'browse':
-      return skillBrowse(apiUrl, headers, options);
+      return skillBrowse(apiUrl, projectId, headers, options);
 
     case 'install':
       return skillInstall(apiUrl, projectId, headers, options);

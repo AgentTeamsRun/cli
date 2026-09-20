@@ -191,26 +191,34 @@ export async function listSkillInstalls(
   return response.data;
 }
 
-// 소비자 계약. `/api/skills/shared`는 프로젝트 비종속이라 projectId를 받지 않는다.
+// 소비자 계약. 소비 프로젝트 네임스페이스(`/api/projects/:projectId/skills/shared*`)에서 조회한다.
 
-const getSharedBaseUrl = (apiUrl: string) => {
+const getSharedBaseUrl = (apiUrl: string, projectId: string) => {
   const normalizedApiUrl = apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl;
-  return `${normalizedApiUrl}/api/skills/shared`;
+  return `${normalizedApiUrl}/api/projects/${projectId}/skills/shared`;
 };
 
 export async function listSharedSkills(
   apiUrl: string,
+  projectId: string,
   headers: Record<string, string>,
   params?: Record<string, string | number>,
 ): Promise<any> {
   const requestConfig = params && Object.keys(params).length > 0 ? { headers, params } : { headers };
-  const response = await httpClient.get(getSharedBaseUrl(apiUrl), requestConfig);
+  const response = await httpClient.get(getSharedBaseUrl(apiUrl, projectId), requestConfig);
   return response.data;
 }
 
 /** 공유 상세. 파일 목록(경로·크기)만 있고 storageKey는 없다 — 설치 전 미리보기 용도. */
-export async function getSharedSkill(apiUrl: string, headers: Record<string, string>, shareId: string): Promise<any> {
-  const response = await httpClient.get(`${getSharedBaseUrl(apiUrl)}/${encodeURIComponent(shareId)}`, { headers });
+export async function getSharedSkill(
+  apiUrl: string,
+  projectId: string,
+  headers: Record<string, string>,
+  shareId: string,
+): Promise<any> {
+  const response = await httpClient.get(`${getSharedBaseUrl(apiUrl, projectId)}/${encodeURIComponent(shareId)}`, {
+    headers,
+  });
   return response.data;
 }
 

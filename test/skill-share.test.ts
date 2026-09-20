@@ -204,10 +204,14 @@ describe('skill shares / browse', () => {
     expect(mutationCalls()).toBe(0);
   });
 
-  it('browse forwards search and paging to the project-independent shared endpoint', async () => {
+  it('browse forwards search and paging to the consumer project shared endpoint', async () => {
     listSharedSkills.mockImplementation((async () => ({ data: [], meta: { total: 0 } })) as never);
     await run('browse', { search: 'deploy', page: '1', pageSize: '20' });
-    expect(listSharedSkills).toHaveBeenCalledWith(apiUrl, headers, { page: 1, pageSize: 20, search: 'deploy' });
+    expect(listSharedSkills).toHaveBeenCalledWith(apiUrl, projectId, headers, {
+      page: 1,
+      pageSize: 20,
+      search: 'deploy',
+    });
     expect(mutationCalls()).toBe(0);
   });
 });
@@ -235,7 +239,7 @@ describe('skill install', () => {
 
     const result = await run('install', { share: 'share-1' });
 
-    expect(getSharedSkill).toHaveBeenCalledWith(apiUrl, headers, 'share-1');
+    expect(getSharedSkill).toHaveBeenCalledWith(apiUrl, projectId, headers, 'share-1');
     expect(installSharedSkill).not.toHaveBeenCalled();
     expect(mutationCalls()).toBe(0);
     expect(result).toMatchObject({
