@@ -1,7 +1,7 @@
 import { Command, CONVENTION_HINT, executeCommand, handleError, printCommandResult } from './shared.js';
 import { addOutputOptions } from './options/output.js';
 
-/** 액션 인벤토리: list/show/download/status/create/update/delete. */
+/** 액션 인벤토리: list/show/download/status/create/update/delete + share/unshare/shares/browse/install. */
 export function registerSkillCommand(program: Command): void {
   const root = program
     .command('skill')
@@ -81,5 +81,42 @@ export function registerSkillCommand(program: Command): void {
 
   addLeaf('delete', 'Delete a skill', (command) =>
     addCwd(command).option('--id <id>', 'Skill ID').option('--apply', 'Apply the deletion on the server', false),
+  );
+
+  const addPaging = (command: Command) =>
+    command.option('--page <number>', 'Page number').option('--page-size <number>', 'Page size');
+
+  addLeaf('share', 'Publish a skill to everyone, a team, or a link (dry-run without --apply)', (command) =>
+    addCwd(command)
+      .option('--id <id>', 'Skill ID')
+      .option('--scope <scope>', 'public, team, or link')
+      .option('--include-body', 'Include SKILL.md and other text files (server default: on)')
+      .option('--no-include-body', 'Expose metadata only, without file bodies')
+      .option('--include-executable', 'Also expose scripts/ and assets/ (default: off)')
+      .option('--no-allow-install', 'Forbid viewers from installing a copy')
+      .option('--expires-at <iso8601>', 'Expiry timestamp, e.g. 2026-12-31T00:00:00Z')
+      .option('--apply', 'Publish the share on the server (default: dry-run)', false),
+  );
+
+  addLeaf('unshare', 'Revoke a share (dry-run without --apply)', (command) =>
+    addCwd(command)
+      .option('--id <shareId>', 'Share ID')
+      .option('--skill <skillId>', 'Skill ID that owns the share')
+      .option('--apply', 'Revoke the share on the server (default: dry-run)', false),
+  );
+
+  addLeaf('shares', 'Show shares and install records of a skill', (command) =>
+    addPaging(addCwd(command).option('--id <id>', 'Skill ID')),
+  );
+
+  addLeaf('browse', 'Browse skills shared with this project (public and its team shares)', (command) =>
+    addPaging(addCwd(command).option('--search <keyword>', 'Filter by keyword')),
+  );
+
+  addLeaf('install', 'Copy a shared skill into this project (dry-run lists the files without --apply)', (command) =>
+    addCwd(command)
+      .option('--share <shareId>', 'Share ID from `skill browse` (public/team shares)')
+      .option('--token <linkToken>', 'Link token or full share URL (link shares)')
+      .option('--apply', 'Install on the server (default: dry-run)', false),
   );
 }

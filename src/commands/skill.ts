@@ -13,15 +13,25 @@ import {
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import {
   createSkill,
+  createSkillShare,
   deleteSkill,
   downloadSkill,
   fetchSkillAssetBytes,
+  getPublicSharedSkill,
+  getSharedSkill,
   getSkill,
+  installSharedSkill,
+  installSharedSkillByToken,
+  listSharedSkills,
+  listSkillInstalls,
+  listSkillShares,
   listSkills,
   putSkillAssetBytes,
   requestSkillAssetUploadUrls,
+  revokeSkillShare,
   updateSkill,
   type SkillFileBody,
+  type SkillShareCreateBody,
 } from '../api/skill.js';
 import { resolveSessionRunnerType } from '../utils/agentIdentity.js';
 import {
@@ -565,6 +575,235 @@ const toUpdateFileBodies = async (
   });
 };
 
+// ---- 공유(share/unshare/shares/browse/install) ----
+
+const SKILL_SHARE_SCOPES = ['PUBLIC', 'TEAM', 'LINK'] as const;
+type SkillShareScope = (typeof SKILL_SHARE_SCOPES)[number];
+
+/** `--scope public|team|link`. 소문자를 받아 서버 enum(UPPER_CASE)으로 보낸다. */
+const parseShareScope = (raw: unknown): SkillShareScope => {
+  if (typeof raw !== 'string' || raw.trim().length === 0) {
+    throw new Error('--scope is required (public, team, or link)');
+  }
+  const scope = raw.trim().toUpperCase();
+  if (!(SKILL_SHARE_SCOPES as readonly string[]).includes(scope)) {
+    throw new Error(`Invalid --scope: ${raw}. Use public, team, or link.`);
+  }
+  return scope as SkillShareScope;
+};
+
+const requireOption = (options: SkillOptions, key: string, flag: string): string => {
+  const value = options[key];
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    throw new Error(`${flag} is required`);
+  }
+  return value.trim();
+};
+
+const parseExpiresAt = (raw: unknown): string | undefined => {
+  if (raw === undefined || raw === null || raw === '') return undefined;
+  const date = new Date(String(raw));
+  if (!Number.isFinite(date.getTime())) {
+    throw new Error(`Invalid --expires-at: ${String(raw)}. Use an ISO 8601 timestamp (e.g. 2026-12-31T00:00:00Z).`);
+  }
+  if (date.getTime() <= Date.now()) {
+    throw new Error('--expires-at must be in the future');
+  }
+  return date.toISOString();
+};
+
+const pageParams = (options: SkillOptions): Record<string, number> => ({
+  ...(options.page ? { page: Number(options.page) } : {}),
+  ...(options.pageSize ? { pageSize: Number(options.pageSize) } : {}),
+});
+
+/** 발행 본문. 옵션을 안 준 필드는 싣지 않아 서버 기본값(body=on, executable=off, install=on)이 적용된다. */
+const buildShareBody = (options: SkillOptions): SkillShareCreateBody => {
+  const scope = parseShareScope(options.scope);
+  const expiresAt = parseExpiresAt(options.expiresAt);
+  return {
+    scope,
+    ...(typeof options.includeBody === 'boolean' ? { includeBody: options.includeBody } : {}),
+    ...(options.includeExecutable === true ? { includeExecutable: true } : {}),
+    ...(options.allowInstall === false ? { allowInstall: false } : {}),
+    ...(expiresAt ? { expiresAt } : {}),
+  };
+};
+
+/** dry-run 미리보기는 서버 기본값을 채워 실제로 적용될 값을 보여준다. */
+const previewShareBody = (body: SkillShareCreateBody) => ({
+  scope: body.scope,
+  includeBody: body.includeBody ?? true,
+  includeExecutable: body.includeExecutable ?? false,
+  allowInstall: body.allowInstall ?? true,
+  expiresAt: body.expiresAt ?? null,
+});
+
+const LINK_TOKEN_NOTICE =
+  'Copy the URL now. The link token is shown only this once and cannot be retrieved again; revoke and re-share to get a new one.';
+
+const isExecutableSkillPath = (relativePath: string): boolean =>
+  relativePath === 'scripts' ||
+  relativePath.startsWith('scripts/') ||
+  relativePath === 'assets' ||
+  relativePath.startsWith('assets/');
+
+const EXECUTABLE_WARNING =
+  'Warning: this share includes executable files (scripts/, assets/). Review them before running anything they contain.';
+
+const skillShare = async (
+  apiUrl: string,
+  projectId: string,
+  headers: Record<string, string>,
+  options: SkillOptions,
+) => {
+  const skillId = requireId(options);
+  const body = buildShareBody(options);
+
+  if (options.apply !== true) {
+    return {
+      dryRun: true,
+      skillId,
+      share: previewShareBody(body),
+      hint: 'Re-run with --apply to publish the share on the server.',
+    };
+  }
+
+  const response = await createSkillShare(apiUrl, projectId, headers, skillId, body);
+  const data = response?.data ?? {};
+  if (data.scope === 'LINK') {
+    // 평문 토큰은 data.token / data.url에만 한 번 실린다. message에 다시 넣지 않는다.
+    return {
+      ...response,
+      message: data.url
+        ? LINK_TOKEN_NOTICE
+        : `${LINK_TOKEN_NOTICE} The server did not return a public URL; check its public base URL setting.`,
+    };
+  }
+  return { ...response, message: `Skill shared (${String(data.scope ?? body.scope).toLowerCase()}).` };
+};
+
+const skillUnshare = async (
+  apiUrl: string,
+  projectId: string,
+  headers: Record<string, string>,
+  options: SkillOptions,
+) => {
+  const shareId = requireId(options);
+  const skillId = requireOption(options, 'skill', '--skill');
+  if (options.apply !== true) {
+    return { dryRun: true, skillId, shareId, hint: 'Re-run with --apply to revoke the share on the server.' };
+  }
+  await revokeSkillShare(apiUrl, projectId, headers, skillId, shareId);
+  return { skillId, shareId, revoked: true, message: 'Share revoked. Existing installs keep their copies.' };
+};
+
+const skillShares = async (
+  apiUrl: string,
+  projectId: string,
+  headers: Record<string, string>,
+  options: SkillOptions,
+) => {
+  const skillId = requireId(options);
+  const params = pageParams(options);
+  const [shares, installs] = await Promise.all([
+    listSkillShares(apiUrl, projectId, headers, skillId, params),
+    listSkillInstalls(apiUrl, projectId, headers, skillId, params),
+  ]);
+  return { skillId, shares, installs };
+};
+
+const skillBrowse = async (apiUrl: string, projectId: string, headers: Record<string, string>, options: SkillOptions) =>
+  listSharedSkills(apiUrl, projectId, headers, {
+    ...pageParams(options),
+    ...(options.search ? { search: String(options.search) } : {}),
+  });
+
+/**
+ * 공유 링크 URL이나 토큰 원문에서 링크 토큰을 뽑는다. URL이 아니면 원문 그대로 쓴다.
+ * `?token=` 쿼리가 없으면 빈 문자열이라 호출부가 `--token` 형식 오류로 닫는다.
+ */
+const extractShareToken = (raw: string): string => {
+  const trimmed = raw.trim();
+  if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(trimmed) && !trimmed.startsWith('/')) {
+    return trimmed;
+  }
+  try {
+    const url = new URL(trimmed, 'http://localhost');
+    return (url.searchParams.get('token') ?? '').trim();
+  } catch {
+    return '';
+  }
+};
+
+const skillInstall = async (
+  apiUrl: string,
+  projectId: string,
+  headers: Record<string, string>,
+  options: SkillOptions,
+) => {
+  const shareId = typeof options.share === 'string' && options.share.trim().length > 0 ? options.share.trim() : null;
+  const rawToken = typeof options.token === 'string' && options.token.trim().length > 0 ? options.token.trim() : null;
+  if (shareId && rawToken) {
+    throw new SkillPackageError('Use either --share <shareId> or --token <linkToken|shareUrl>, not both.');
+  }
+  // LINK 공유는 공유 ID로 열지 않는다. 링크 URL·토큰은 --token으로 받는다.
+  const shareToken = rawToken ? extractShareToken(rawToken) : null;
+  if (rawToken && !shareToken) {
+    throw new SkillPackageError('--token needs a link token or a share URL containing ?token=...');
+  }
+  if (!shareId && !shareToken) {
+    throw new Error('--share is required');
+  }
+  const detail = shareToken
+    ? ((await getPublicSharedSkill(apiUrl, shareToken))?.data ?? {})
+    : ((await getSharedSkill(apiUrl, projectId, headers, shareId!))?.data ?? {});
+  const files = (Array.isArray(detail.files) ? detail.files : []).map((file: any) => ({
+    relativePath: String(file.relativePath),
+    sizeBytes: Number(file.sizeBytes ?? 0),
+    ...(isExecutableSkillPath(String(file.relativePath)) ? { executable: true } : {}),
+  }));
+  const includesExecutable =
+    detail.includeExecutable === true || files.some((file: { executable?: boolean }) => file.executable === true);
+  // 토큰 미리보기 응답에는 공유 ID가 없고 ID 상세의 skill은 중첩이다. 표시용 식별자만 맞춘다.
+  const preview = {
+    ...(shareToken ? { shareToken: true } : { shareId }),
+    skill: detail.skill ?? (detail.slug ? { slug: detail.slug, title: detail.title } : null),
+    includeBody: detail.includeBody ?? null,
+    includeExecutable: detail.includeExecutable ?? null,
+    allowInstall: detail.allowInstall ?? null,
+    files,
+    ...(includesExecutable ? { warning: EXECUTABLE_WARNING } : {}),
+  };
+
+  if (detail.allowInstall === false) {
+    throw new SkillPackageError('This share does not allow installation (allowInstall=false).');
+  }
+  // 본문(SKILL.md)이 제외된 공유는 서버도 400으로 막는다. --apply 전에 안내한다.
+  if (!files.some((file: { relativePath: string }) => file.relativePath === SKILL_ENTRY_FILE)) {
+    throw new SkillPackageError(
+      `This share excludes ${SKILL_ENTRY_FILE}, so there is no package to install. Ask the publisher to share with the body included.`,
+    );
+  }
+
+  if (options.apply !== true) {
+    return { dryRun: true, ...preview, hint: 'Re-run with --apply to install a copy of this skill into the project.' };
+  }
+
+  const installed = shareToken
+    ? await installSharedSkillByToken(apiUrl, projectId, headers, shareToken)
+    : await installSharedSkill(apiUrl, projectId, headers, shareId!);
+  const installedId = installed?.data?.id;
+  const installedSlug = installed?.data?.slug;
+  return {
+    ...installed,
+    ...(includesExecutable ? { warning: EXECUTABLE_WARNING } : {}),
+    message:
+      `Installed '${String(installedSlug ?? detail.skill?.slug ?? detail.slug ?? shareId ?? 'shared skill')}' into this project. ` +
+      `Next: agentteams skill download${installedId ? ` --id ${String(installedId)}` : ''} to sync it into .agentteams/skills/.`,
+  };
+};
+
 export async function executeSkillCommand(
   apiUrl: string,
   projectId: string,
@@ -701,6 +940,21 @@ export async function executeSkillCommand(
       }
       return deleteSkill(apiUrl, projectId, headers, skillId);
     }
+
+    case 'share':
+      return skillShare(apiUrl, projectId, headers, options);
+
+    case 'unshare':
+      return skillUnshare(apiUrl, projectId, headers, options);
+
+    case 'shares':
+      return skillShares(apiUrl, projectId, headers, options);
+
+    case 'browse':
+      return skillBrowse(apiUrl, projectId, headers, options);
+
+    case 'install':
+      return skillInstall(apiUrl, projectId, headers, options);
 
     default:
       throw new Error(`Unknown skill action: ${action}`);
