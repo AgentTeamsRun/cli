@@ -1,6 +1,15 @@
-import { existsSync, readFileSync } from 'node:fs';
-import { basename, resolve } from 'node:path';
-import axios from '../utils/httpClient.js';
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { basename, dirname, join, resolve } from 'node:path';
+import {
+  createAttachment,
+  createAttachmentDraftUploadUrl,
+  deleteAttachment,
+  fetchAttachmentBytes,
+  getAttachmentDownloadUrl,
+  listAttachments,
+  putAttachmentBytes,
+  type AttachmentListTarget,
+} from '../api/attachment.js';
 import { printFileSizeInfo } from '../utils/spinner.js';
 
 const requireString = (value: unknown, name: string) => {
@@ -113,6 +122,63 @@ const resolveTarget = (
   throw new Error('Exactly one of --code-review-id, --completion-report-id, or --document-id is required.');
 };
 
+const LIST_TARGET_FLAGS = '--trigger-id, --document-id, --code-review-id, or --completion-report-id';
+
+const resolveListTarget = (
+  options: Record<string, unknown>,
+): { targetType: AttachmentListTarget; targetId: string } => {
+  const candidates: [AttachmentListTarget, string | undefined][] = [
+    ['daemonTrigger', optionalString(options.triggerId)],
+    ['document', optionalString(options.documentId)],
+    ['codeReview', optionalString(options.codeReviewId)],
+    ['completionReport', optionalString(options.completionReportId)],
+  ];
+  const targets = candidates.filter((candidate): candidate is [AttachmentListTarget, string] => !!candidate[1]);
+  if (targets.length > 1) {
+    throw new Error(`Use only one of ${LIST_TARGET_FLAGS}.`);
+  }
+  const target = targets[0];
+  if (!target) {
+    throw new Error(`Exactly one of ${LIST_TARGET_FLAGS} is required.`);
+  }
+  return { targetType: target[0], targetId: target[1] };
+};
+
+/**
+ * `Content-Disposition`에서 원본 파일명을 꺼낸다. RFC 5987 `filename*`(UTF-8, 한글 이름)을
+ * 우선하고, 없으면 ASCII 폴백 `filename`을 쓴다. 서버 형식은
+ * `api/src/services/attachment.ts`의 `attachmentContentDisposition`이다.
+ */
+export const parseContentDispositionFileName = (header: string | undefined): string | undefined => {
+  if (!header) return undefined;
+  const extended = /filename\*\s*=\s*UTF-8''([^;]+)/i.exec(header)?.[1];
+  if (extended) {
+    try {
+      return decodeURIComponent(extended.trim());
+    } catch {
+      // 잘못 인코딩된 값이면 ASCII 폴백으로 넘어간다.
+    }
+  }
+  return /filename\s*=\s*"([^"]*)"/i.exec(header)?.[1] ?? /filename\s*=\s*([^;]+)/i.exec(header)?.[1]?.trim();
+};
+
+/** 서버가 준 이름이 경로를 품어도 대상 디렉터리 밖으로 나가지 않도록 마지막 구성 요소만 남긴다. */
+const toSafeFileName = (name: string | undefined, fallback: string): string => {
+  const base = name ? basename(name.replace(/\\/g, '/')).trim() : '';
+  return base.length > 0 && base !== '.' && base !== '..' ? base : fallback;
+};
+
+/**
+ * `--dest`가 없으면 현재 디렉터리에 원본 이름으로, 기존 디렉터리(또는 `/`로 끝나는 경로)면 그 안에
+ * 원본 이름으로, 그 밖에는 파일 경로 그대로 저장한다.
+ */
+const resolveDownloadPath = (dest: string | undefined, fileName: string): string => {
+  if (!dest) return resolve(fileName);
+  const destPath = resolve(dest);
+  const isDirectory = /[\\/]$/.test(dest) || (existsSync(destPath) && statSync(destPath).isDirectory());
+  return isDirectory ? join(destPath, fileName) : destPath;
+};
+
 export async function executeAttachmentCommand(
   apiUrl: string,
   headers: Record<string, string>,
@@ -120,19 +186,8 @@ export async function executeAttachmentCommand(
   options: Record<string, unknown>,
 ): Promise<unknown> {
   if (action === 'list') {
-    const triggerId = optionalString(options.triggerId);
-    const documentId = optionalString(options.documentId);
-    if (triggerId && documentId) {
-      throw new Error('Use only one of --trigger-id or --document-id.');
-    }
-    if (!triggerId && !documentId) {
-      throw new Error('Exactly one of --trigger-id or --document-id is required.');
-    }
-    const path = documentId
-      ? `/api/documents/${documentId}/attachments`
-      : `/api/daemon-triggers/${triggerId}/attachments`;
-    const response = await axios.get(`${apiUrl}${path}`, { headers });
-    return response.data;
+    const { targetType, targetId } = resolveListTarget(options);
+    return listAttachments(apiUrl, headers, targetType, targetId);
   }
 
   if (action === 'create') {
@@ -156,28 +211,48 @@ export async function executeAttachmentCommand(
     printFileSizeInfo(filePathOption, buffer.length);
 
     // 1) Presigned draft 업로드 URL 발급
-    const draftResponse = await axios.post(
-      `${apiUrl}/api/attachments/draft-upload-url`,
-      { fileName, contentType, size: buffer.length, targetType },
-      { headers },
-    );
-    const { uploadUrl, key } = draftResponse.data.data as { uploadUrl: string; key: string };
+    const { uploadUrl, key } = await createAttachmentDraftUploadUrl(apiUrl, headers, {
+      fileName,
+      contentType,
+      size: buffer.length,
+      targetType,
+    });
 
     // 2) R2에 파일 바이트 직접 PUT (API 서버를 경유하지 않음)
-    await axios.put(uploadUrl, buffer, { headers: { 'Content-Type': contentType } });
+    await putAttachmentBytes(uploadUrl, buffer, contentType);
 
     // 3) 서버에 대상 기록과 연결 등록
-    const createResponse = await axios.post(
-      `${apiUrl}/api/attachments`,
-      { targetType, targetId, key, originalName: fileName },
-      { headers },
-    );
-    return createResponse.data;
+    return createAttachment(apiUrl, headers, { targetType, targetId, key, originalName: fileName });
   }
 
-  if (action === 'upload' || action === 'delete') {
+  if (action === 'download') {
+    const id = requireString(options.id, '--id');
+    const { downloadUrl } = await getAttachmentDownloadUrl(apiUrl, headers, id);
+    const { buffer, contentDisposition } = await fetchAttachmentBytes(downloadUrl);
+
+    const fileName = toSafeFileName(parseContentDispositionFileName(contentDisposition), `attachment-${id}`);
+    const outputPath = resolveDownloadPath(optionalString(options.dest), fileName);
+    if (existsSync(outputPath) && options.force !== true) {
+      throw new Error(`File already exists: ${outputPath}. Pass --force to overwrite.`);
+    }
+    mkdirSync(dirname(outputPath), { recursive: true });
+    writeFileSync(outputPath, buffer);
+
+    return {
+      message: `Downloaded attachment to ${outputPath}`,
+      data: { id, fileName, path: outputPath, size: buffer.length },
+    };
+  }
+
+  if (action === 'delete') {
+    const id = requireString(options.id, '--id');
+    await deleteAttachment(apiUrl, headers, id);
+    return { message: `Deleted attachment ${id}`, data: { id, deleted: true } };
+  }
+
+  if (action === 'upload') {
     throw new Error(
-      `'attachment ${action}' is not supported by the CLI. ` +
+      "'attachment upload' is not supported by the CLI. " +
         "Use 'attachment create' to upload, or attach during trigger creation via the web UI.",
     );
   }
