@@ -186,13 +186,14 @@ describe('나머지 리소스의 액션별 서브커맨드', () => {
     expect(program.commands.find((command) => command.name() === 'search')?.helpInformation()).toContain('--limit');
   });
 
-  it('attachment upload/delete를 안내 오류용 leaf로 등록한다', () => {
+  it('attachment upload는 안내 오류용 leaf로, download/delete는 --id를 받는 leaf로 등록한다', () => {
     expect(findAction('attachment', 'upload')).toBeDefined();
-    expect(findAction('attachment', 'delete')).toBeDefined();
+    expect(findAction('attachment', 'download').helpInformation()).toContain('--dest');
+    expect(findAction('attachment', 'delete').helpInformation()).toContain('--id');
   });
 
-  it.each(['upload', 'delete'])('attachment %s가 기존 안내 오류를 보존한다', async (action) => {
-    await expect(executeAttachmentCommand('https://example.test', {}, action, {})).rejects.toThrow(
+  it('attachment upload가 기존 안내 오류를 보존한다', async () => {
+    await expect(executeAttachmentCommand('https://example.test', {}, 'upload', {})).rejects.toThrow(
       'is not supported by the CLI',
     );
   });

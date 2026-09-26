@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it, expect, beforeEach, jest } from '@jest/globals';
@@ -45,10 +45,24 @@ describe('attachment command', () => {
     expect(result).toEqual({ data: [], meta: { total: 0 } });
   });
 
+  it.each([
+    ['code review', { codeReviewId: 'rev-1' }, 'code-reviews/rev-1'],
+    ['completion report', { completionReportId: 'rpt-1' }, 'completion-reports/rpt-1'],
+  ])('list hits the %s attachments route', async (_label, targetOptions, path) => {
+    axiosGetSpy.mockResolvedValueOnce({ data: { data: [], meta: { total: 0 } } } as any);
+
+    await executeAttachmentCommand(apiUrl, headers, 'list', targetOptions);
+
+    expect(axiosGetSpy).toHaveBeenCalledWith(`http://localhost:3001/api/${path}/attachments`, { headers });
+  });
+
   it('list requires exactly one supported target', async () => {
     await expect(executeAttachmentCommand(apiUrl, headers, 'list', {})).rejects.toThrow(
-      'Exactly one of --trigger-id or --document-id is required.',
+      'Exactly one of --trigger-id, --document-id, --code-review-id, or --completion-report-id is required.',
     );
+    await expect(
+      executeAttachmentCommand(apiUrl, headers, 'list', { codeReviewId: 'rev-1', completionReportId: 'rpt-1' }),
+    ).rejects.toThrow(/only one/i);
     await expect(
       executeAttachmentCommand(apiUrl, headers, 'list', { triggerId: 'trig-1', documentId: 'doc-1' }),
     ).rejects.toThrow(/only one/i);
@@ -219,6 +233,41 @@ describe('attachment command', () => {
     },
   );
 
+  it.each([
+    ['document', { documentId: 'doc-1' }],
+    ['codeReview', { codeReviewId: 'rev-1' }],
+    ['completionReport', { completionReportId: 'rpt-1' }],
+  ])('create maps text extensions such as .sql to text/plain for a %s', async (targetType, targetOptions) => {
+    const filePath = writeTempFile('schema.sql', 'select 1;');
+    const postSpy = jest.spyOn(axios, 'post');
+    const putSpy = jest.spyOn(axios, 'put');
+
+    postSpy.mockResolvedValueOnce({
+      data: { data: { uploadUrl: 'https://r2.example/sql?sig=1', key: 'drafts/member-1/schema.sql' } },
+    } as any);
+    putSpy.mockResolvedValueOnce({ status: 200 } as any);
+    postSpy.mockResolvedValueOnce({ data: { data: { id: 'att-sql-1' } } } as any);
+
+    await executeAttachmentCommand(apiUrl, headers, 'create', { file: filePath, ...targetOptions });
+
+    expect(postSpy).toHaveBeenNthCalledWith(
+      1,
+      'http://localhost:3001/api/attachments/draft-upload-url',
+      { fileName: 'schema.sql', contentType: 'text/plain', size: 9, targetType },
+      { headers },
+    );
+  });
+
+  it.each(['run.js', 'setup.sh', 'install.ps1'])('create keeps runnable script %s unsupported', async (fileName) => {
+    const filePath = writeTempFile(fileName, 'echo hi');
+    const postSpy = jest.spyOn(axios, 'post');
+
+    await expect(
+      executeAttachmentCommand(apiUrl, headers, 'create', { file: filePath, documentId: 'doc-1' }),
+    ).rejects.toThrow(/Unsupported attachment type/);
+    expect(postSpy).not.toHaveBeenCalled();
+  });
+
   it('create requires --file', async () => {
     await expect(executeAttachmentCommand(apiUrl, headers, 'create', { codeReviewId: 'rev-1' })).rejects.toThrow(
       '--file is required',
@@ -238,8 +287,92 @@ describe('attachment command', () => {
     ).rejects.toThrow(/not supported/i);
   });
 
-  it('delete is not supported (the CLI must not call removed API routes)', async () => {
-    await expect(executeAttachmentCommand(apiUrl, headers, 'delete', { id: 'a-1' })).rejects.toThrow(/not supported/i);
+  describe('download', () => {
+    const mockDownload = (contentDisposition: string | undefined, body = 'file-bytes') => {
+      axiosGetSpy
+        .mockResolvedValueOnce({
+          data: { data: { downloadUrl: 'https://r2.example/get?sig=1', expiresInSeconds: 300 } },
+        } as any)
+        .mockResolvedValueOnce({
+          data: Buffer.from(body),
+          headers: contentDisposition ? { 'content-disposition': contentDisposition } : {},
+        } as any);
+    };
+
+    it('saves the file under its original (UTF-8) name in --dest directory', async () => {
+      const dir = mkdtempSync(join(tmpdir(), 'attach-dl-'));
+      mockDownload(`inline; filename=".pdf"; filename*=UTF-8''${encodeURIComponent('설계 문서.pdf')}`);
+
+      const result = (await executeAttachmentCommand(apiUrl, headers, 'download', { id: 'att-1', dest: dir })) as any;
+
+      expect(axiosGetSpy).toHaveBeenNthCalledWith(1, 'http://localhost:3001/api/attachments/att-1/download-url', {
+        headers,
+      });
+      expect(axiosGetSpy).toHaveBeenNthCalledWith(2, 'https://r2.example/get?sig=1', { responseType: 'arraybuffer' });
+      const savedPath = join(dir, '설계 문서.pdf');
+      expect(readFileSync(savedPath, 'utf-8')).toBe('file-bytes');
+      expect(result.data).toEqual({ id: 'att-1', fileName: '설계 문서.pdf', path: savedPath, size: 10 });
+    });
+
+    it('writes to --dest as a file path when it is not a directory', async () => {
+      const dir = mkdtempSync(join(tmpdir(), 'attach-dl-'));
+      const target = join(dir, 'nested', 'out.bin');
+      mockDownload('inline; filename="report.pdf"');
+
+      await executeAttachmentCommand(apiUrl, headers, 'download', { id: 'att-1', dest: target });
+
+      expect(readFileSync(target, 'utf-8')).toBe('file-bytes');
+    });
+
+    it('keeps a path-bearing name inside the destination directory', async () => {
+      const dir = mkdtempSync(join(tmpdir(), 'attach-dl-'));
+      mockDownload(`inline; filename*=UTF-8''${encodeURIComponent('../../escape.txt')}`);
+
+      const result = (await executeAttachmentCommand(apiUrl, headers, 'download', { id: 'att-1', dest: dir })) as any;
+
+      expect(result.data.path).toBe(join(dir, 'escape.txt'));
+    });
+
+    it('falls back to attachment-<id> without Content-Disposition', async () => {
+      const dir = mkdtempSync(join(tmpdir(), 'attach-dl-'));
+      mockDownload(undefined);
+
+      const result = (await executeAttachmentCommand(apiUrl, headers, 'download', { id: 'att-9', dest: dir })) as any;
+
+      expect(result.data.fileName).toBe('attachment-att-9');
+    });
+
+    it('refuses to overwrite an existing file unless --force', async () => {
+      const dir = mkdtempSync(join(tmpdir(), 'attach-dl-'));
+      writeFileSync(join(dir, 'a.txt'), 'old', 'utf-8');
+      mockDownload('inline; filename="a.txt"', 'new');
+
+      await expect(executeAttachmentCommand(apiUrl, headers, 'download', { id: 'att-1', dest: dir })).rejects.toThrow(
+        /already exists/,
+      );
+      expect(readFileSync(join(dir, 'a.txt'), 'utf-8')).toBe('old');
+
+      mockDownload('inline; filename="a.txt"', 'new');
+      await executeAttachmentCommand(apiUrl, headers, 'download', { id: 'att-1', dest: dir, force: true });
+      expect(readFileSync(join(dir, 'a.txt'), 'utf-8')).toBe('new');
+    });
+
+    it('requires --id', async () => {
+      await expect(executeAttachmentCommand(apiUrl, headers, 'download', {})).rejects.toThrow('--id is required');
+    });
+  });
+
+  it('delete hits DELETE /api/attachments/:id', async () => {
+    const deleteSpy = jest.spyOn(axios, 'delete').mockResolvedValueOnce({ status: 204 } as any);
+
+    const result = await executeAttachmentCommand(apiUrl, headers, 'delete', { id: 'att-1' });
+
+    expect(deleteSpy).toHaveBeenCalledWith('http://localhost:3001/api/attachments/att-1', { headers });
+    expect(result).toEqual({ message: 'Deleted attachment att-1', data: { id: 'att-1', deleted: true } });
+  });
+
+  it('delete requires --id', async () => {
+    await expect(executeAttachmentCommand(apiUrl, headers, 'delete', {})).rejects.toThrow('--id is required');
   });
 
   it('rejects unknown actions', async () => {
