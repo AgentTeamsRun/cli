@@ -219,6 +219,41 @@ describe('attachment command', () => {
     },
   );
 
+  it.each([
+    ['document', { documentId: 'doc-1' }],
+    ['codeReview', { codeReviewId: 'rev-1' }],
+    ['completionReport', { completionReportId: 'rpt-1' }],
+  ])('create maps text extensions such as .sql to text/plain for a %s', async (targetType, targetOptions) => {
+    const filePath = writeTempFile('schema.sql', 'select 1;');
+    const postSpy = jest.spyOn(axios, 'post');
+    const putSpy = jest.spyOn(axios, 'put');
+
+    postSpy.mockResolvedValueOnce({
+      data: { data: { uploadUrl: 'https://r2.example/sql?sig=1', key: 'drafts/member-1/schema.sql' } },
+    } as any);
+    putSpy.mockResolvedValueOnce({ status: 200 } as any);
+    postSpy.mockResolvedValueOnce({ data: { data: { id: 'att-sql-1' } } } as any);
+
+    await executeAttachmentCommand(apiUrl, headers, 'create', { file: filePath, ...targetOptions });
+
+    expect(postSpy).toHaveBeenNthCalledWith(
+      1,
+      'http://localhost:3001/api/attachments/draft-upload-url',
+      { fileName: 'schema.sql', contentType: 'text/plain', size: 9, targetType },
+      { headers },
+    );
+  });
+
+  it.each(['run.js', 'setup.sh', 'install.ps1'])('create keeps runnable script %s unsupported', async (fileName) => {
+    const filePath = writeTempFile(fileName, 'echo hi');
+    const postSpy = jest.spyOn(axios, 'post');
+
+    await expect(
+      executeAttachmentCommand(apiUrl, headers, 'create', { file: filePath, documentId: 'doc-1' }),
+    ).rejects.toThrow(/Unsupported attachment type/);
+    expect(postSpy).not.toHaveBeenCalled();
+  });
+
   it('create requires --file', async () => {
     await expect(executeAttachmentCommand(apiUrl, headers, 'create', { codeReviewId: 'rev-1' })).rejects.toThrow(
       '--file is required',

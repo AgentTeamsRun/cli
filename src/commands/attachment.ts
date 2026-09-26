@@ -37,16 +37,56 @@ const CONTENT_TYPE_BY_EXTENSION: Record<string, string> = {
 
 const OFFICE_EXTENSIONS = new Set(['docx', 'pptx', 'xlsx']);
 
+/**
+ * 모든 첨부 대상에서 `text/plain`으로 받는 텍스트 확장자.
+ * `packages/runner-request/ui/types/attachment.ts`의 `textAttachmentExtensions`와 같은 값이다.
+ */
+const TEXT_EXTENSIONS = new Set([
+  'sql',
+  'csv',
+  'tsv',
+  'json',
+  'jsonl',
+  'yaml',
+  'yml',
+  'toml',
+  'xml',
+  'ini',
+  'log',
+  'diff',
+  'patch',
+  'ts',
+  'tsx',
+  'jsx',
+  'py',
+  'go',
+  'rs',
+  'java',
+  'kt',
+  'swift',
+  'c',
+  'h',
+  'cpp',
+  'hpp',
+  'cs',
+  'rb',
+  'php',
+  'css',
+  'scss',
+  'graphql',
+  'proto',
+  'prisma',
+]);
+
 const resolveExtension = (fileName: string): string =>
   fileName.includes('.') ? (fileName.split('.').pop()?.toLowerCase() ?? '') : '';
 
 const resolveContentType = (fileName: string): string => {
   const ext = resolveExtension(fileName);
-  const contentType = CONTENT_TYPE_BY_EXTENSION[ext];
+  const contentType = CONTENT_TYPE_BY_EXTENSION[ext] ?? (TEXT_EXTENSIONS.has(ext) ? 'text/plain' : undefined);
   if (!contentType) {
-    throw new Error(
-      `Unsupported attachment type ".${ext}". Allowed: ${Object.keys(CONTENT_TYPE_BY_EXTENSION).join(', ')}`,
-    );
+    const allowed = new Set([...Object.keys(CONTENT_TYPE_BY_EXTENSION), ...TEXT_EXTENSIONS]);
+    throw new Error(`Unsupported attachment type ".${ext}". Allowed: ${[...allowed].join(', ')}`);
   }
   return contentType;
 };
