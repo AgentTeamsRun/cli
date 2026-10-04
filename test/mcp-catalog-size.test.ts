@@ -42,6 +42,7 @@ describe('mcp catalog size after stage 4 write tools', () => {
 
     expect(byProfile.full?.totalChars).toBeGreaterThan(60_000);
     // 쓰기 응답 요약 투영 설명과 코멘트 생성 부모별 반환 계약 명시로 70.5k가 됐다(2026-10-04).
+    // guide-first를 세션당 한 번+해시 재사용 문구로 바꾸면서도 설명을 줄여 증가 없이 유지했다(2026-10-05).
     expect(byProfile.full?.totalChars).toBeLessThan(71_000);
     expect(byProfile.minimal?.totalChars).toBeLessThan(4_000);
   });

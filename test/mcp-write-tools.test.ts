@@ -195,6 +195,30 @@ describe('mcp write tools', () => {
     expect(payload.warning).toBeUndefined();
   });
 
+  it('returns only the guideHash without the body when hashOnly is true', async () => {
+    const call = await callTool('agentteams_guide_get', { recordKind: 'document', hashOnly: true });
+
+    expect(call.result?.isError).toBeFalsy();
+    const payload = JSON.parse(call.result?.content[0].text);
+    expect(payload.fileName).toBe('document-guide.md');
+    expect(payload.source).toBe('local');
+    expect(payload.guideHash).toBe('doc-hash');
+    expect(payload).not.toHaveProperty('content');
+    expect(payload.warning).toBeUndefined();
+  });
+
+  it('keeps the resync warning on a hashOnly response when the local guide hash is unknown', async () => {
+    rmSync(join(projectRoot, '.agentteams', 'conventions.manifest.json'));
+
+    const call = await callTool('agentteams_guide_get', { recordKind: 'document', hashOnly: true });
+
+    expect(call.result?.isError).toBeFalsy();
+    const payload = JSON.parse(call.result?.content[0].text);
+    expect(payload.guideHash).toBeNull();
+    expect(payload).not.toHaveProperty('content');
+    expect(payload.warning).toMatch(/agentteams convention download/);
+  });
+
   it('returns the local co-action and post-mortem guides with their hashes', async () => {
     const coAction = await callTool('agentteams_guide_get', { recordKind: 'co-action' });
     expect(coAction.result?.isError).toBeFalsy();
@@ -406,6 +430,57 @@ describe('mcp write tools', () => {
       const properties = withSchema.find((tool) => tool.name === name)?.inputSchema?.properties ?? {};
       expect(Object.keys(properties)).toEqual(expect.arrayContaining(['guideHash', 'idempotencyKey']));
     }
+  });
+
+  it('states the once-per-session guide rule with hash reuse in every write tool description', async () => {
+    const { client, handle } = connect();
+    openHandle = handle;
+
+    await discover(client);
+    const response = await client.request('tools/list', { _meta: MODERN_META });
+    const tools = (response.result?.tools ?? []) as Array<{ name: string; description: string }>;
+
+    // guide-first 지시는 유지하되 빈도만 세션당 한 번으로: 세 요소가 빠지면 토큰 절감 효과가 없다.
+    const guideFirstByKind: Array<{ kind: string; names: string[] }> = [
+      {
+        kind: 'document',
+        names: ['agentteams_document_create', 'agentteams_document_update', 'agentteams_document_delete'],
+      },
+      {
+        kind: 'comment',
+        names: [
+          'agentteams_comment_create',
+          'agentteams_comment_update',
+          'agentteams_comment_delete',
+          'agentteams_comment_reply_create',
+          'agentteams_comment_reply_update',
+          'agentteams_comment_reply_delete',
+        ],
+      },
+      {
+        kind: 'co-action',
+        names: ['agentteams_coaction_create', 'agentteams_coaction_update', 'agentteams_coaction_delete'],
+      },
+      { kind: 'post-mortem', names: ['agentteams_postmortem_create', 'agentteams_postmortem_update'] },
+      {
+        kind: 'code-review',
+        names: [
+          'agentteams_codereview_create',
+          'agentteams_codereview_update',
+          'agentteams_codereview_finding_status_set',
+        ],
+      },
+    ];
+    for (const { kind, names } of guideFirstByKind) {
+      for (const name of names) {
+        const description = tools.find((tool) => tool.name === name)?.description ?? '';
+        expect(description).toContain(`agentteams_guide_get("${kind}")`);
+        expect(description).toContain('once per session');
+        expect(description).toContain('guideHash');
+        expect(description).toContain('GUIDE_OUTDATED');
+      }
+    }
+    expect(tools.map((tool) => tool.description).join(' ')).not.toContain('first and follow that guide');
   });
   it('returns the local comment guide body and its hash', async () => {
     const call = await callTool('agentteams_guide_get', { recordKind: 'comment' });

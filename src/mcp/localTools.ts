@@ -74,7 +74,7 @@ const guideGetSpec: McpLocalToolSpec = {
     'Fetch the platform guide that governs a record type — how to write it, and the workflow around it.',
     'Reads this project’s local copy when the session sits in it, and falls back to the server otherwise.',
     'Returns the full guide body plus the guideHash to pass to the matching write tool.',
-    'Read this before creating, updating, or deleting any AgentTeams platform record — the rules it states (visibility, tag policy, structure) are enforced server-side.',
+    'Read it once per session before your first write of that kind and follow it; reuse the guideHash until GUIDE_OUTDATED.',
     'If it reports that the local guide hash is unknown, run `agentteams convention download` in the project.',
   ].join(' '),
   discovery: guideDiscovery,
@@ -84,6 +84,10 @@ const guideGetSpec: McpLocalToolSpec = {
       .describe(
         'Record type or workflow whose guide you need. "document", "comment", "co-action", "post-mortem" and "code-review" back MCP write contracts and return a guideHash the write tool compares; the rest are read-only references.',
       ),
+    hashOnly: z
+      .boolean()
+      .optional()
+      .describe('Return only the guideHash, without the body, for a guide already read this session.'),
   }),
   handler: async (args, context) => {
     const guide = await resolvePlatformGuide(args.recordKind as GuideRecordKind, {
@@ -92,6 +96,16 @@ const guideGetSpec: McpLocalToolSpec = {
       headers: await resolveToolHeaders(context),
     });
     const warning = describeMissingGuideHash(guide);
+    if (args.hashOnly === true) {
+      return {
+        recordKind: guide.recordKind,
+        fileName: guide.fileName,
+        source: guide.source,
+        ...(guide.filePath ? { filePath: guide.filePath } : {}),
+        guideHash: guide.guideHash,
+        ...(warning ? { warning } : {}),
+      };
+    }
     return {
       recordKind: guide.recordKind,
       fileName: guide.fileName,

@@ -40,22 +40,20 @@ import { resolveToolHeaders, type McpLocalToolSpec } from './localTools.js';
  */
 export type McpWriteToolSpec = McpLocalToolSpec;
 
-const GUIDE_FIRST = 'Call agentteams_guide_get("document") first and follow that guide.';
-const COMMENT_GUIDE_FIRST = 'Call agentteams_guide_get("comment") first and follow that guide.';
-const CO_ACTION_GUIDE_FIRST = 'Call agentteams_guide_get("co-action") first and follow that guide.';
-const POST_MORTEM_GUIDE_FIRST = 'Call agentteams_guide_get("post-mortem") first and follow that guide.';
-const CODE_REVIEW_GUIDE_FIRST = 'Call agentteams_guide_get("code-review") first and follow that guide.';
+const guideOncePerSession = (kind: string) =>
+  `Read agentteams_guide_get("${kind}") once per session and follow it; reuse its guideHash until GUIDE_OUTDATED.`;
+const GUIDE_FIRST = guideOncePerSession('document');
+const COMMENT_GUIDE_FIRST = guideOncePerSession('comment');
+const CO_ACTION_GUIDE_FIRST = guideOncePerSession('co-action');
+const POST_MORTEM_GUIDE_FIRST = guideOncePerSession('post-mortem');
+const CODE_REVIEW_GUIDE_FIRST = guideOncePerSession('code-review');
 const TAG_POLICY =
   'You cannot set confirmed tags. Anything you pass in suggestedTags is a suggestion for a human to confirm.';
 const PROJECT_SCOPE =
   'Scoped to the single project this MCP server is bound to. There is no projectId argument — a different project cannot be reached from here.';
 const FULL_RECORD_VIA_GET = 'Use the matching *_get tool when you need fields beyond this summary.';
 
-const guideHashField = z
-  .string()
-  .min(1)
-  .optional()
-  .describe('guideHash from agentteams_guide_get. If it is stale the server rejects the write with GUIDE_OUTDATED.');
+const guideHashField = z.string().min(1).optional().describe('guideHash from agentteams_guide_get.');
 
 const idempotencyKeyField = z
   .string()

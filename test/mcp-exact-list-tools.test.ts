@@ -391,6 +391,7 @@ describe('mcp exact list and missing detail tools', () => {
     // 4단계 write 도구 3종(code-review create/update + finding status set)이 합쳐져 65.9k가 됐다.
     // 플랜-문서 링크 write 도구 2종이 더해져 68.8k다(2026-09-10).
     // 쓰기 응답 요약 투영 설명과 코멘트 생성 부모별 반환 계약 명시로 70.5k가 됐다(2026-10-04).
+    // guide-first를 세션당 한 번+해시 재사용 문구로 바꾸면서도 설명을 줄여 증가 없이 유지했다(2026-10-05).
     expect(budget.totalChars).toBeLessThan(71_000);
     expect(budget.estimatedTokens).toBe(Math.ceil(budget.totalChars / 4));
     process.stderr.write(`[mcp catalog budget] ${JSON.stringify(budget)}\n`);
