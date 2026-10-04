@@ -24,6 +24,8 @@ const SKIPPED_EXAMPLES = new Set<string>(['agentteams resolve', 'agentteams mcp 
 const SYNTAX_PLACEHOLDERS = ['<command>', '<action>', '<subcommand>'];
 function isSyntaxSketch(command: string): boolean {
   if (SYNTAX_PLACEHOLDERS.some((placeholder) => command.includes(placeholder))) return true;
+  // 타입 대안의 |는 셸 파이프가 아니다. 토큰화가 이후 필수 옵션을 자르기 전에 구분한다.
+  if (/<[^<>]*\|[^<>]*>/.test(command)) return true;
   return commandArgs(command).some((token) => !token.startsWith('-') && token.includes('|'));
 }
 
@@ -133,6 +135,16 @@ async function parseExample(args: string[]): Promise<ParseOutcome> {
     return { ok, code: error.code, stderr: output.stderr };
   }
 }
+
+describe('문법 설명용 예시 판별', () => {
+  it('타입 대안 뒤에 필수 보고서 옵션이 있어도 문법 설명으로 분류한다', () => {
+    expect(isSyntaxSketch('agentteams plan quick --type <FEATURE | CHORE> --report-file ./report.md')).toBe(true);
+  });
+
+  it('구체적인 quick 예시는 파서 검증 대상에 남긴다', () => {
+    expect(isSyntaxSketch('agentteams plan quick --type CHORE --report-file ./report.md')).toBe(false);
+  });
+});
 
 describe('배포 가이드·공개 문서 CLI 예시', () => {
   const commands = extractCommands().filter(

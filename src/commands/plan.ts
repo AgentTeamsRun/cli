@@ -421,7 +421,7 @@ function extractCompletionReport(result: unknown): { id?: string; webUrl?: strin
 }
 
 // quick 플랜 결과 JSON. 기본 출력 포맷이 json이므로, 깊이 묻힌 최종 상태(DONE)와
-// 다음 단계를 최상위에 노출해 한눈에 보이게 한다(quick은 생성 즉시 DONE → 다음은 report create).
+// 보고서 정보를 최상위에 노출한다. 보고서가 없는 레거시 응답에는 등록 안내를 유지한다.
 export function buildQuickPlanResult(
   planId: string,
   createResult: unknown,
@@ -958,6 +958,11 @@ export async function executePlanCommand(
     }
     case 'quick': {
       if (!options.title) throw new Error('--title is required for plan quick');
+      const reportRequiredMessage =
+        '--report-file is required for plan quick. Provide a non-empty completion report file with --report-file <path>.';
+      if (typeof options.reportFile !== 'string' || options.reportFile.trim().length === 0) {
+        throw new Error(reportRequiredMessage);
+      }
       const quickSnapshot = resolveExecutionSnapshot(options);
       if (!quickSnapshot.runnerType || !quickSnapshot.model) {
         throw new Error('--runner-type and --model are required for plan quick.' + EXECUTION_SNAPSHOT_HINT);
@@ -1001,24 +1006,13 @@ export async function executePlanCommand(
         );
       }
 
-      // Finish the quick plan on the server in one request. This prevents a failed
-      // start/finish step from leaving a draft quick plan behind.
-      const includeCompletionReport = typeof options.reportFile === 'string' && options.reportFile.trim().length > 0;
+      // 작업 후 등록하므로 새 플랜의 startCommit을 기준으로 삼으면 HEAD..HEAD가 되어 지표가 사라진다.
+      const payload = parseReportOptions(options);
+      if (!payload) throw new Error(reportRequiredMessage);
 
       const quickAssignee = resolveAgentAssignee(options);
-      const quickBody: {
-        title: string;
-        content: string;
-        type?: string;
-        complexity: string;
-        priority: string;
-        repositoryRemoteUrl?: string;
-        assignedTo?: string;
-        runnerType: string;
-        model: string;
-        fastMode?: boolean;
-        completionReport?: any;
-      } = {
+      // 단일 요청으로 완료하여 중간 단계 실패로 미완료 플랜이 남지 않도록 한다.
+      const quickBody = {
         title: options.title,
         content: planContent,
         type: options.type,
@@ -1029,22 +1023,11 @@ export async function executePlanCommand(
         runnerType,
         model,
         fastMode: quickSnapshot.fastMode,
+        completionReport: {
+          ...payload,
+          ...(repositoryRemoteUrl ? { repositoryRemoteUrl } : {}),
+        },
       };
-
-      if (includeCompletionReport) {
-        // Quick plans are often registered after the work is already done. Using the just-created
-        // plan startCommit as the diff base would produce HEAD..HEAD and erase report metrics.
-        const payload = parseReportOptions(options);
-        if (payload) {
-          const repositoryRemoteUrl =
-            toNonEmptyString(options.repositoryRemoteUrl) ??
-            (options.git === false ? undefined : getGitRemoteOriginUrl());
-          quickBody.completionReport = {
-            ...payload,
-            ...(repositoryRemoteUrl ? { repositoryRemoteUrl } : {}),
-          };
-        }
-      }
 
       const quickResult = await withSpinner(
         'Completing quick log...',
