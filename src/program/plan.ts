@@ -139,7 +139,7 @@ export function registerPlanCommand(program: Command): void {
     command.option('--id <id>', 'Plan ID (omit to remove all downloaded plans)'),
   );
 
-  addLeaf('quick', 'Create and finish a quick log', (command) =>
+  addLeaf('quick', 'Create and finish a quick log with a completion report', (command) =>
     addCompletionReportMetricsOptions(command)
       .option('--title <title>', 'Plan title')
       .option('--content <content>', 'Plan content')
@@ -156,7 +156,7 @@ export function registerPlanCommand(program: Command): void {
       .option('--repository-remote-url <url>', 'Repository remote origin URL (defaults to git origin)')
       .option('--assigned-to <id>', 'Agent config ID or name')
       .option('--report-title <title>', 'Completion report title')
-      .option('--report-file <path>', 'Read completion report content from a local file')
+      .requiredOption('--report-file <path>', 'Read required completion report content from a local file')
       .option('--report-status <status>', 'Completion report status: COMPLETED, FAILED, PARTIAL')
       .option('--quality-score <n>', 'Quality score 0-100')
       .option('--review-recommendation <value>', 'Code review recommendation: REQUIRED or NOT_NEEDED')

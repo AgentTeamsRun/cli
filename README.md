@@ -338,8 +338,11 @@ agentteams plan create \
   # - `plan create` sends the current git origin URL by default.
   # - Use `--repository-remote-url <url>` to override it.
 
-# quick log: record already-done work (creates a plan + report in one shot)
-agentteams plan quick --title "Quick task" --content "Implemented X and verified with tests" --type CHORE
+# 퀵 로그: 완료한 작업의 플랜과 필수 완료보고서를 함께 등록
+agentteams plan quick --title "설정 안내 정리" \
+  --content "## TL;DR\n\n설정 안내를 정리해 초기 설정을 쉽게 합니다." --interpret-escapes \
+  --type CHORE --report-file ./report.md \
+  --runner-type CODEX --model <model-id>
 agentteams plan update --id <plan-id> --status TODO
 agentteams plan update --id <plan-id> --status IN_PROGRESS
 agentteams plan download --id <plan-id>
@@ -357,13 +360,15 @@ Priorities: `LOW`, `MEDIUM`, `HIGH`
 
 Plan template values (create): `refactor-minimal`, `quick-minimal`
 
-`plan quick` (quick log) behavior — the path for recording work you already finished without a pre-existing plan:
+`plan quick`은 기존 플랜 없이 이미 끝낸 작업을 기록합니다.
 
-- Creates a plan with `--content` as the plan body (`--content` or `--file` is required)
-- Uses `LOW` as the default priority (override with `--priority`)
-- Defaults to `MINIMAL` complexity (override with `--complexity`)
-- Starts and finishes the plan in one flow
-- Does not attach a completion report; use the full plan workflow for detailed reporting
+- `--content` 또는 `--file`로 플랜 본문을 제출합니다. `## TL;DR`에 의도와 범위를 적고, 결과와 검증은 보고서에 적습니다.
+- 기본 우선순위는 `LOW`이며 `--priority`로 바꿀 수 있습니다.
+- 기본 복잡도는 `MINIMAL`이며 `--complexity`로 바꿀 수 있습니다.
+- 플랜 생성·시작·완료와 필수 완료보고서 등록을 한 요청으로 처리합니다.
+- `--report-file`은 필수입니다. 누락·빈 경로·파일 부재·빈 본문·읽기 실패는 등록 전에 오류로 처리합니다.
+- `--report-title`을 생략하면 플랜 제목을 사용합니다. 품질 점수 등 다른 보고서 옵션은 선택 사항입니다.
+- 러너 세션은 `--runner-type`과 `--model`을 자동으로 채웁니다. 직접 실행할 때는 두 값을 지정합니다.
 
 `--include-deps` (get/show): also fetches dependency data and appends a `Dependencies` section in text output; in json output it adds `data.dependencies` with `blocking` and `dependents` arrays.
 
@@ -409,7 +414,7 @@ agentteams agent-config delete --id <config-id>
 
 Manage completion reports.
 
-A completion report is always tied to a plan, so `report create` **requires `--plan-id`** — there is no standalone (plan-less) report. To record work you already finished without a pre-existing plan, use a quick log (`agentteams plan quick`) instead.
+완료보고서는 항상 플랜에 연결되므로 `report create`에는 **`--plan-id`가 필수**입니다. 기존 플랜 없이 이미 끝낸 작업을 기록하려면 `agentteams plan quick --title "<title>" --content "## TL;DR\n\n<intent and scope>" --interpret-escapes --report-file ./report.md --runner-type <runner-type> --model <model-id>`로 플랜과 보고서를 함께 등록합니다.
 
 Tip: Include reproducible verification evidence (commands + outcomes), but keep outcomes short: `pass/fail + 1–3 lines of summary`. Do not paste long raw logs into the report body.
 

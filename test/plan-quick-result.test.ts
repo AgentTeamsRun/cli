@@ -45,4 +45,25 @@ describe('buildQuickPlanResult', () => {
     expect(result.reportWebUrl).toBe('http://report-url');
     expect('next' in result).toBe(false);
   });
+
+  it('단일 quick 응답의 플랜 상태와 보고서 링크를 노출한다', () => {
+    const quickResult = {
+      data: {
+        id: 'plan-1',
+        plan: { id: 'plan-1', status: 'DONE' },
+        completionReport: { id: 'r-1', webUrl: 'http://report-url' },
+      },
+    };
+    const result = buildQuickPlanResult('plan-1', quickResult, quickResult);
+    expect(result).toMatchObject({
+      planId: 'plan-1',
+      status: 'DONE',
+      reportCreated: true,
+      reportId: 'r-1',
+      reportWebUrl: 'http://report-url',
+      create: quickResult,
+      finish: quickResult,
+    });
+    expect('next' in result).toBe(false);
+  });
 });

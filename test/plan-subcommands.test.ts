@@ -25,6 +25,28 @@ async function parse(args: string[]): Promise<{ error?: CommanderError; stdout: 
 }
 
 describe('plan 액션별 서브커맨드', () => {
+  it('quick의 report-file 누락을 액션 실행 전에 거부한다', async () => {
+    const result = await parse(['plan', 'quick', '--title', 'Quick log', '--content', '## TL;DR']);
+    expect(result.error?.code).toBe('commander.missingMandatoryOptionValue');
+    expect(result.stderr).toContain("required option '--report-file <path>' not specified");
+  });
+
+  it('quick에서만 report-file을 필수 옵션으로 선언한다', () => {
+    const plan = createProgram('0.0.0').commands.find((command) => command.name() === 'plan');
+    const reportFileOption = (action: string) =>
+      plan?.commands
+        .find((command) => command.name() === action)
+        ?.options.find((option) => option.long === '--report-file');
+    expect(reportFileOption('quick')?.mandatory).toBe(true);
+    expect(reportFileOption('finish')?.mandatory).toBe(false);
+  });
+
+  it('quick 도움말에 필수 완료보고서를 안내한다', async () => {
+    const result = await parse(['plan', 'quick', '--help']);
+    expect(result.stdout).toContain('--report-file <path>');
+    expect(result.stdout).toContain('Read required completion report content');
+  });
+
   it('get 도움말을 660바이트 이하로 유지한다', async () => {
     const result = await parse(['plan', 'get', '--help']);
     expect(result.error?.code).toBe('commander.helpDisplayed');
@@ -50,7 +72,8 @@ describe('plan 액션별 서브커맨드', () => {
   it.each([['create'], ['update'], ['quick']] as const)(
     'plan %s는 --html-file을 unknown option으로 거부한다',
     async (action) => {
-      const result = await parse(['plan', action, '--html-file', 'x.html']);
+      const requiredArgs = action === 'quick' ? ['--report-file', 'report.md'] : [];
+      const result = await parse(['plan', action, ...requiredArgs, '--html-file', 'x.html']);
       expect(result.error?.exitCode).not.toBe(0);
       expect(result.stderr).toContain("unknown option '--html-file'");
     },
