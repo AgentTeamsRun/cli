@@ -41,7 +41,8 @@ describe('mcp catalog size after stage 4 write tools', () => {
     expect(byProfile.minimal?.toolCount).toBe(3);
 
     expect(byProfile.full?.totalChars).toBeGreaterThan(60_000);
-    expect(byProfile.full?.totalChars).toBeLessThan(70_000);
+    // 쓰기 응답 요약 투영 설명과 코멘트 생성 부모별 반환 계약 명시로 70.5k가 됐다(2026-10-04).
+    expect(byProfile.full?.totalChars).toBeLessThan(71_000);
     expect(byProfile.minimal?.totalChars).toBeLessThan(4_000);
   });
 });

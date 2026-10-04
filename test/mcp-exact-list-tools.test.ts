@@ -390,7 +390,8 @@ describe('mcp exact list and missing detail tools', () => {
     expect(budget.totalChars).toBeGreaterThan(43_000);
     // 4단계 write 도구 3종(code-review create/update + finding status set)이 합쳐져 65.9k가 됐다.
     // 플랜-문서 링크 write 도구 2종이 더해져 68.8k다(2026-09-10).
-    expect(budget.totalChars).toBeLessThan(70_000);
+    // 쓰기 응답 요약 투영 설명과 코멘트 생성 부모별 반환 계약 명시로 70.5k가 됐다(2026-10-04).
+    expect(budget.totalChars).toBeLessThan(71_000);
     expect(budget.estimatedTokens).toBe(Math.ceil(budget.totalChars / 4));
     process.stderr.write(`[mcp catalog budget] ${JSON.stringify(budget)}\n`);
   });

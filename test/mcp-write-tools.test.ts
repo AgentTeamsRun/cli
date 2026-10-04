@@ -17,9 +17,12 @@ const documentEnvelope = {
   data: {
     id: 'doc-1',
     title: '문서',
+    visibility: 'PROJECT',
+    tags: ['확정'],
+    suggestedTags: ['제안'],
     updatedAt: '2026-08-01T00:00:00.000Z',
     webUrl: 'https://agentteams.run/go?type=document&id=doc-1',
-    // 실제 API는 쓰기 응답에도 에디터 전용 미러를 싣는다. 픽스처가 이를 빼면
+    // 실제 API는 쓰기 응답에 본문과 에디터 전용 미러를 싣는다. 픽스처가 이를 빼면
     // "응답에서 제외한다"는 계약을 테스트가 전혀 검증하지 못한다.
     body: '본문',
     bodyTiptap: '{"type":"doc","content":[]}',
@@ -612,31 +615,342 @@ describe('mcp write tools', () => {
     );
   });
 
-  // 조회와 같은 규칙을 쓰기 응답에도 적용한다. 한쪽만 걷어내면 "읽기는 되는데
-  // 수정 응답에서 한도를 넘는" 비대칭이 남는다(실측 update 응답 65,297자).
-  it('omits bodyTiptap from the create response while keeping the write contract fields', async () => {
+  // 쓰기 응답은 식별·표시·동시성·링크만 남긴다. 본문(body) 자체가 컨텍스트를 채우므로
+  // 에디터 미러(bodyTiptap)와 함께 투영에서 제외한다(실측 update 응답 65,297자).
+  // 전체가 필요하면 agentteams_document_get으로 조회한다.
+  it('projects the create response to summary fields without body or bodyTiptap', async () => {
     jest.spyOn(axios, 'post').mockResolvedValue({ data: documentEnvelope } as never);
 
     const call = await callTool('agentteams_document_create', { title: '문서', body: '본문' });
 
     const payload = JSON.parse(call.result?.content[0].text);
     expect(payload.data).not.toHaveProperty('bodyTiptap');
-    expect(payload.data).toMatchObject({
+    expect(payload.data).not.toHaveProperty('body');
+    expect(payload.data).toEqual({
       id: 'doc-1',
-      body: '본문',
+      title: '문서',
+      visibility: 'PROJECT',
+      tags: ['확정'],
+      suggestedTags: ['제안'],
       updatedAt: '2026-08-01T00:00:00.000Z',
       webUrl: 'https://agentteams.run/go?type=document&id=doc-1',
     });
   });
 
-  it('omits bodyTiptap from the update response and keeps updatedAt for the next expectedUpdatedAt', async () => {
+  it('projects the update response the same way and keeps updatedAt for the next expectedUpdatedAt', async () => {
     jest.spyOn(axios, 'put').mockResolvedValue({ data: documentEnvelope } as never);
 
     const call = await callTool('agentteams_document_update', { id: 'doc-1', title: '수정' });
 
     const payload = JSON.parse(call.result?.content[0].text);
     expect(payload.data).not.toHaveProperty('bodyTiptap');
+    expect(payload.data).not.toHaveProperty('body');
     expect(payload.data.updatedAt).toBe('2026-08-01T00:00:00.000Z');
+  });
+
+  // finding 1건 전이에 리뷰 전체가 실리면 단일 항목 최대(실측 32.9KB/회)가 그대로 간다.
+  // findings 배열은 버리고 전이된 finding 하나만 finding 키로 붙인다.
+  it('projects finding status responses to the review summary plus the changed finding', async () => {
+    const reviewEnvelope = {
+      data: {
+        id: 'crv-1',
+        status: 'OPEN',
+        title: '리뷰 전체 제목',
+        diffSummary: '긴 diff 요약',
+        updatedAt: '2026-08-02T00:00:00.000Z',
+        webUrl: 'https://agentteams.run/go?type=code-review&id=crv-1',
+        findingCount: 2,
+        findings: [
+          {
+            id: 'f-1',
+            status: 'DISMISSED',
+            updatedAt: '2026-08-02T01:00:00.000Z',
+            title: '바뀐 finding',
+            problem: '긴 문제 설명',
+            suggestion: '긴 수정 제안',
+          },
+          { id: 'f-2', status: 'OPEN', updatedAt: '2026-08-02T00:30:00.000Z', title: '다른 finding' },
+        ],
+      },
+    };
+    jest.spyOn(axios, 'post').mockResolvedValue({ data: reviewEnvelope } as never);
+
+    const call = await callTool('agentteams_codereview_finding_status_set', {
+      codeReviewId: 'agentteams_rev_crv-1',
+      findingId: 'agentteams_rvf_f-1',
+      status: 'DISMISSED',
+    });
+
+    expect(call.result?.isError).toBeFalsy();
+    const payload = JSON.parse(call.result?.content[0].text);
+    expect(payload.data).not.toHaveProperty('findings');
+    expect(payload.data).not.toHaveProperty('title');
+    expect(payload.data).toEqual({
+      id: 'crv-1',
+      status: 'OPEN',
+      updatedAt: '2026-08-02T00:00:00.000Z',
+      webUrl: 'https://agentteams.run/go?type=code-review&id=crv-1',
+      finding: { id: 'f-1', status: 'DISMISSED', updatedAt: '2026-08-02T01:00:00.000Z' },
+    });
+  });
+
+  it('drops initial findings from the code review create response', async () => {
+    jest.spyOn(axios, 'post').mockResolvedValue({
+      data: {
+        data: {
+          id: 'crv-1',
+          status: 'OPEN',
+          title: '리뷰',
+          resultSummary: '긴 결론',
+          findingCount: 1,
+          findings: [{ id: 'f-1', status: 'OPEN', title: 'finding', problem: '문제', suggestion: '제안' }],
+          updatedAt: '2026-08-02T00:00:00.000Z',
+          webUrl: 'https://agentteams.run/go?type=code-review&id=crv-1',
+        },
+      },
+    } as never);
+
+    const call = await callTool('agentteams_codereview_create', { title: '리뷰' });
+
+    expect(call.result?.isError).toBeFalsy();
+    expect(JSON.parse(call.result?.content[0].text)).toEqual({
+      data: {
+        id: 'crv-1',
+        status: 'OPEN',
+        updatedAt: '2026-08-02T00:00:00.000Z',
+        webUrl: 'https://agentteams.run/go?type=code-review&id=crv-1',
+      },
+    });
+  });
+
+  it('passes through top-level keys outside data and drops content from comment responses', async () => {
+    // 플랜 코멘트 생성은 부모 화면 링크를 planWebUrl로 싣는다. 투영은 data만 건드려야 한다.
+    jest.spyOn(axios, 'post').mockResolvedValue({
+      data: {
+        data: {
+          id: 'comment-1',
+          type: 'RISK',
+          content: '위험 본문',
+          targetType: 'PLAN',
+          targetId: 'plan-1',
+          planId: 'plan-1',
+          updatedAt: '2026-08-01T00:00:00.000Z',
+        },
+        planWebUrl: 'https://agentteams.run/go?type=plan&id=plan-1',
+      },
+    } as never);
+
+    const call = await callTool('agentteams_comment_create', { planId: 'plan-1', type: 'RISK', content: '위험' });
+
+    expect(call.result?.isError).toBeFalsy();
+    const payload = JSON.parse(call.result?.content[0].text);
+    expect(payload.planWebUrl).toBe('https://agentteams.run/go?type=plan&id=plan-1');
+    expect(payload.data).toEqual({
+      id: 'comment-1',
+      targetType: 'PLAN',
+      targetId: 'plan-1',
+      planId: 'plan-1',
+      updatedAt: '2026-08-01T00:00:00.000Z',
+    });
+  });
+
+  it('keeps the document parent id and link while dropping the document comment body', async () => {
+    // 실제 문서 코멘트 생성 응답은 documentCommentDataEnvelopeSchema로 직렬화된다.
+    // data에는 documentId만 있고 targetType/targetId는 없으며, 링크는 최상위 documentWebUrl이다.
+    jest.spyOn(axios, 'post').mockResolvedValue({
+      data: {
+        data: {
+          id: 'doc-comment-1',
+          documentId: 'doc-1',
+          content: '문서 코멘트 본문',
+          replyCount: 0,
+          createdAt: '2026-08-01T00:00:00.000Z',
+          updatedAt: '2026-08-01T00:00:00.000Z',
+        },
+        documentWebUrl: 'https://agentteams.run/go?type=document&id=doc-1',
+      },
+    } as never);
+
+    const call = await callTool('agentteams_comment_create', { documentId: 'doc-1', content: '문서 코멘트' });
+
+    expect(call.result?.isError).toBeFalsy();
+    const payload = JSON.parse(call.result?.content[0].text);
+    expect(payload.documentWebUrl).toBe('https://agentteams.run/go?type=document&id=doc-1');
+    expect(payload.data).toEqual({
+      id: 'doc-comment-1',
+      documentId: 'doc-1',
+      updatedAt: '2026-08-01T00:00:00.000Z',
+    });
+  });
+
+  it('returns no link for task and finding comments and documents the per-parent contract', async () => {
+    // 태스크·finding 생성은 threadCommentDataEnvelopeSchema라 data만 돌려주고 링크가 없다.
+    jest
+      .spyOn(axios, 'post')
+      .mockResolvedValueOnce({
+        data: {
+          data: {
+            id: 'task-comment-1',
+            targetType: 'PLAN_TASK',
+            targetId: 'task-1',
+            content: '태스크 본문',
+            updatedAt: '2026-08-01T00:00:00.000Z',
+          },
+        },
+      } as never)
+      .mockResolvedValueOnce({
+        data: {
+          data: {
+            id: 'finding-comment-1',
+            targetType: 'FINDING',
+            targetId: 'finding-1',
+            content: 'finding 본문',
+            updatedAt: '2026-08-01T00:00:00.000Z',
+          },
+        },
+      } as never);
+
+    const taskCall = await callTool('agentteams_comment_create', { taskId: 'task-1', content: '태스크' });
+    expect(taskCall.result?.isError).toBeFalsy();
+    expect(JSON.parse(taskCall.result?.content[0].text)).toEqual({
+      data: {
+        id: 'task-comment-1',
+        targetType: 'PLAN_TASK',
+        targetId: 'task-1',
+        updatedAt: '2026-08-01T00:00:00.000Z',
+      },
+    });
+
+    const findingCall = await callTool('agentteams_comment_create', {
+      findingId: 'finding-1',
+      content: 'finding',
+    });
+    expect(findingCall.result?.isError).toBeFalsy();
+    expect(JSON.parse(findingCall.result?.content[0].text)).toEqual({
+      data: {
+        id: 'finding-comment-1',
+        targetType: 'FINDING',
+        targetId: 'finding-1',
+        updatedAt: '2026-08-01T00:00:00.000Z',
+      },
+    });
+
+    // 설명은 실제로 없는 필드를 약속하지 않는다 — 플랜·문서의 링크 키와
+    // 태스크·finding의 링크 부재를 함께 적는다.
+    const { client, handle } = connect(boundContext());
+    openHandle = handle;
+    await discover(client);
+    const response = await client.request('tools/list', { _meta: MODERN_META });
+    const description = (response.result?.tools ?? []).find(
+      (tool: { name: string }) => tool.name === 'agentteams_comment_create',
+    )?.description;
+
+    expect(description).toContain('planWebUrl');
+    expect(description).toContain('documentWebUrl');
+    expect(description).toContain('no link');
+  });
+
+  it('keeps the reply parent link and drops the reply body', async () => {
+    jest.spyOn(axios, 'post').mockResolvedValue({
+      data: {
+        data: {
+          id: 'reply-1',
+          content: '답글 본문',
+          parentId: 'comment-1',
+          targetType: 'PLAN',
+          targetId: 'plan-1',
+          updatedAt: '2026-08-01T00:00:00.000Z',
+        },
+        webUrl: 'https://agentteams.run/go?type=plan&id=plan-1',
+      },
+    } as never);
+
+    const call = await callTool('agentteams_comment_reply_create', { commentId: 'comment-1', content: '답글' });
+
+    expect(call.result?.isError).toBeFalsy();
+    const payload = JSON.parse(call.result?.content[0].text);
+    expect(payload.webUrl).toContain('plan-1');
+    expect(payload.data).toEqual({
+      id: 'reply-1',
+      targetType: 'PLAN',
+      targetId: 'plan-1',
+      parentId: 'comment-1',
+      updatedAt: '2026-08-01T00:00:00.000Z',
+    });
+  });
+
+  it('drops co-action and post-mortem bodies while keeping identity, status, and concurrency fields', async () => {
+    jest.spyOn(axios, 'post').mockResolvedValue({
+      data: {
+        data: {
+          id: 'act-1',
+          title: '핸드오프',
+          content: '긴 본문',
+          status: 'OPEN',
+          visibility: 'PROJECT',
+          updatedAt: '2026-08-01T00:00:00.000Z',
+          webUrl: 'https://agentteams.run/go?type=co-action&id=act-1',
+        },
+      },
+    } as never);
+
+    const created = await callTool('agentteams_coaction_create', {
+      title: '핸드오프',
+      content: '본문',
+      planId: 'plan-1',
+    });
+    expect(created.result?.isError).toBeFalsy();
+    expect(JSON.parse(created.result?.content[0].text)).toEqual({
+      data: {
+        id: 'act-1',
+        status: 'OPEN',
+        updatedAt: '2026-08-01T00:00:00.000Z',
+        webUrl: 'https://agentteams.run/go?type=co-action&id=act-1',
+      },
+    });
+
+    jest.spyOn(axios, 'put').mockResolvedValue({
+      data: {
+        data: {
+          id: 'pmt-1',
+          title: '사후분석',
+          content: '긴 본문',
+          actionItems: ['재발 방지'],
+          status: 'IN_PROGRESS',
+          updatedAt: '2026-08-03T00:00:00.000Z',
+          webUrl: 'https://agentteams.run/go?type=post-mortem&id=pmt-1',
+        },
+      },
+    } as never);
+
+    const updated = await callTool('agentteams_postmortem_update', { id: 'pmt-1', status: 'IN_PROGRESS' });
+    expect(updated.result?.isError).toBeFalsy();
+    expect(JSON.parse(updated.result?.content[0].text)).toEqual({
+      data: {
+        id: 'pmt-1',
+        status: 'IN_PROGRESS',
+        updatedAt: '2026-08-03T00:00:00.000Z',
+        webUrl: 'https://agentteams.run/go?type=post-mortem&id=pmt-1',
+      },
+    });
+  });
+
+  it('omits projected fields the server did not return instead of failing', async () => {
+    // 부분 응답처럼 status·updatedAt이 없어도 투영이 깨지지 않아야 한다.
+    jest.spyOn(axios, 'post').mockResolvedValue({
+      data: { data: { id: 'act-1', webUrl: 'https://agentteams.run/go?type=co-action&id=act-1' } },
+    } as never);
+
+    const call = await callTool('agentteams_coaction_create', {
+      title: '핸드오프',
+      content: '본문',
+      planId: 'plan-1',
+    });
+
+    expect(call.result?.isError).toBeFalsy();
+    expect(JSON.parse(call.result?.content[0].text)).toEqual({
+      data: { id: 'act-1', webUrl: 'https://agentteams.run/go?type=co-action&id=act-1' },
+    });
   });
 
   it('creates a traceable co-action without exposing source or projectId and returns id plus webUrl', async () => {

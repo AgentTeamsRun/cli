@@ -1,8 +1,4 @@
-import {
-  defineToolDiscoveryMetadata,
-  omitDocumentEditorMirror,
-  stripContextEntityIdPrefix,
-} from '@agentteams/context-tools';
+import { defineToolDiscoveryMetadata, stripContextEntityIdPrefix } from '@agentteams/context-tools';
 import { z } from 'zod';
 import {
   createComment,
@@ -53,6 +49,7 @@ const TAG_POLICY =
   'You cannot set confirmed tags. Anything you pass in suggestedTags is a suggestion for a human to confirm.';
 const PROJECT_SCOPE =
   'Scoped to the single project this MCP server is bound to. There is no projectId argument — a different project cannot be reached from here.';
+const FULL_RECORD_VIA_GET = 'Use the matching *_get tool when you need fields beyond this summary.';
 
 const guideHashField = z
   .string()
@@ -122,6 +119,84 @@ const requireOneOf = (toolName: string, args: Record<string, unknown>, fieldName
   if (!fieldNames.some((fieldName) => args[fieldName] !== undefined)) {
     throw new Error(`${toolName} requires at least one of: ${fieldNames.join(', ')}.`);
   }
+};
+
+/**
+ * 쓰기 응답 투영: envelope의 `data`만 지정 필드로 줄이고 나머지 최상위 키는 통과시킨다.
+ *
+ * 쓰기 핸들러는 API 응답을 그대로 돌려줘서 finding 1건 변경에 리뷰 전체가 실리는 식으로
+ * 에이전트 컨텍스트를 빠르게 채운다. `data`에 없는 필드는 생략하므로 서버 응답 형태가
+ * 바뀌어도 깨지지 않는다. `data` 외 최상위 키(`webUrl`, `planWebUrl` 등 부모 화면 링크)는
+ * 그대로 둔다 — 그 키가 없으면 모델이 결과 화면을 열 수 없다.
+ */
+const projectResponseFields = (data: unknown, fields: readonly string[]): unknown => {
+  if (data === null || typeof data !== 'object' || Array.isArray(data)) return data;
+  const source = data as Record<string, unknown>;
+  const picked: Record<string, unknown> = {};
+  for (const field of fields) {
+    if (source[field] !== undefined) {
+      picked[field] = source[field];
+    }
+  }
+  return picked;
+};
+
+const projectWriteResponse = (payload: unknown, fields: readonly string[]): unknown => {
+  if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) return payload;
+  const record = payload as Record<string, unknown>;
+  if (record.data === undefined) return payload;
+  return { ...record, data: projectResponseFields(record.data, fields) };
+};
+
+// 문서 본문(body)은 투영에서 제외한다. 전체가 필요하면 agentteams_document_get으로 조회한다.
+const DOCUMENT_SUMMARY_FIELDS = ['id', 'title', 'visibility', 'tags', 'suggestedTags', 'updatedAt', 'webUrl'] as const;
+
+// 코멘트·답글 본문(content)은 투영에서 제외한다. 부모 식별자는 targetType·targetId,
+// 플랜 코멘트의 planId 별칭, 문서 코멘트의 documentId, 답글의 parentId(원댓글 id) 중
+// 응답에 있는 것만 남는다.
+const COMMENT_SUMMARY_FIELDS = [
+  'id',
+  'targetType',
+  'targetId',
+  'parentId',
+  'planId',
+  'documentId',
+  'updatedAt',
+] as const;
+
+// 코액션·포스트모템·코드리뷰 create/update는 식별·상태·동시성·링크만 남긴다.
+const REVIEW_SUMMARY_FIELDS = ['id', 'status', 'updatedAt', 'webUrl'] as const;
+
+const FINDING_SUMMARY_FIELDS = ['id', 'status', 'updatedAt'] as const;
+
+/**
+ * finding 상태 전이 응답 투영: 리뷰는 식별·상태·동시성·링크만 남기고, findings 배열은
+ * 버리는 대신 전이된 finding 하나만 `finding` 키로 붙인다. 서버는 전이·재생 모두
+ * 리뷰 전체를 `{ data: review }`로 돌려주므로 둘 다 같은 투영을 거친다.
+ */
+const projectFindingStatusResponse = (payload: unknown, findingId: string): unknown => {
+  const projected = projectWriteResponse(payload, REVIEW_SUMMARY_FIELDS) as Record<string, unknown> | null;
+  if (projected === null || typeof projected !== 'object' || Array.isArray(projected)) return projected;
+  const record = payload as Record<string, unknown>;
+  const data = record.data as Record<string, unknown> | null | undefined;
+  const findings = data && Array.isArray(data.findings) ? (data.findings as Array<unknown>) : [];
+  const bareFindingId = stripContextEntityIdPrefix(findingId);
+  const changed = findings.find(
+    (finding) =>
+      finding !== null &&
+      typeof finding === 'object' &&
+      !Array.isArray(finding) &&
+      ((finding as Record<string, unknown>).id === bareFindingId ||
+        (finding as Record<string, unknown>).id === findingId),
+  );
+  if (changed === undefined) return projected;
+  return {
+    ...projected,
+    data: {
+      ...(projected.data as Record<string, unknown>),
+      finding: projectResponseFields(changed, FINDING_SUMMARY_FIELDS),
+    },
+  };
 };
 
 const CODE_REVIEW_TARGET_TYPE_VALUES = [
@@ -194,7 +269,8 @@ const documentCreateSpec: McpWriteToolSpec = {
     GUIDE_FIRST,
     TAG_POLICY,
     PROJECT_SCOPE,
-    'Returns the created document id and webUrl.',
+    'Returns the created document summary: id, title, visibility, tags, suggestedTags, updatedAt, and webUrl.',
+    FULL_RECORD_VIA_GET,
   ].join(' '),
   discovery: documentWriteDiscovery,
   inputSchema: z.strictObject({
@@ -206,9 +282,8 @@ const documentCreateSpec: McpWriteToolSpec = {
     idempotencyKey: idempotencyKeyField,
   }),
   handler: async (args, context) => {
-    // 쓰기 응답도 문서 상세와 같은 형태라 에디터 전용 bodyTiptap이 그대로 실린다.
-    // 조회와 같은 규칙을 공유해야 두 표면 중 한쪽만 부풀어 오르는 일이 없다.
-    return omitDocumentEditorMirror(
+    // 쓰기 응답은 식별·표시·동시성·링크만 남긴다. 본문이 필요하면 agentteams_document_get으로 조회한다.
+    return projectWriteResponse(
       await createDocument(
         context.apiUrl,
         context.projectId,
@@ -222,6 +297,7 @@ const documentCreateSpec: McpWriteToolSpec = {
           idempotencyKey: args.idempotencyKey,
         }),
       ),
+      DOCUMENT_SUMMARY_FIELDS,
     );
   },
 };
@@ -235,6 +311,8 @@ const documentUpdateSpec: McpWriteToolSpec = {
     TAG_POLICY,
     'Pass expectedUpdatedAt (from agentteams_document_get) so a concurrent edit is rejected rather than silently overwritten.',
     PROJECT_SCOPE,
+    'Returns the updated document summary: id, title, visibility, tags, suggestedTags, updatedAt, and webUrl.',
+    FULL_RECORD_VIA_GET,
   ].join(' '),
   discovery: documentWriteDiscovery,
   inputSchema: z.strictObject({
@@ -248,7 +326,7 @@ const documentUpdateSpec: McpWriteToolSpec = {
     idempotencyKey: idempotencyKeyField,
   }),
   handler: async (args, context) => {
-    return omitDocumentEditorMirror(
+    return projectWriteResponse(
       await updateDocument(
         context.apiUrl,
         context.projectId,
@@ -264,6 +342,7 @@ const documentUpdateSpec: McpWriteToolSpec = {
           idempotencyKey: args.idempotencyKey,
         }),
       ),
+      DOCUMENT_SUMMARY_FIELDS,
     );
   },
 };
@@ -473,7 +552,8 @@ const commentCreateSpec: McpWriteToolSpec = {
     COMMENT_GUIDE_FIRST,
     'Comments on a DONE or CANCELLED plan (and on its tasks) are rejected.',
     PROJECT_SCOPE,
-    'Returns the created comment id and the webUrl of the parent screen a human can open.',
+    'Returns the created comment id, its parent identifier, and updatedAt. A plan comment adds planWebUrl and a document comment adds documentWebUrl; task and finding comments return no link.',
+    FULL_RECORD_VIA_GET,
   ].join(' '),
   discovery: commentWriteDiscovery,
   inputSchema: commentTargetSchema,
@@ -489,46 +569,58 @@ const commentCreateSpec: McpWriteToolSpec = {
     });
 
     if (parent === 'planId') {
-      return createComment(
-        context.apiUrl,
-        context.projectId,
-        headers,
-        stripContextEntityIdPrefix(args.planId as string),
-        {
-          type: args.type as string,
-          content: args.content as string,
-          ...(args.affectedFiles ? { affectedFiles: args.affectedFiles as string[] } : {}),
-          ...contract,
-        },
+      return projectWriteResponse(
+        await createComment(
+          context.apiUrl,
+          context.projectId,
+          headers,
+          stripContextEntityIdPrefix(args.planId as string),
+          {
+            type: args.type as string,
+            content: args.content as string,
+            ...(args.affectedFiles ? { affectedFiles: args.affectedFiles as string[] } : {}),
+            ...contract,
+          },
+        ),
+        COMMENT_SUMMARY_FIELDS,
       );
     }
     if (parent === 'taskId') {
-      return createTaskComment(
-        context.apiUrl,
-        context.projectId,
-        headers,
-        stripContextEntityIdPrefix(args.taskId as string),
-        {
-          content: args.content as string,
-          ...contract,
-        },
+      return projectWriteResponse(
+        await createTaskComment(
+          context.apiUrl,
+          context.projectId,
+          headers,
+          stripContextEntityIdPrefix(args.taskId as string),
+          {
+            content: args.content as string,
+            ...contract,
+          },
+        ),
+        COMMENT_SUMMARY_FIELDS,
       );
     }
     if (parent === 'findingId') {
-      return createFindingComment(
+      return projectWriteResponse(
+        await createFindingComment(
+          context.apiUrl,
+          context.projectId,
+          headers,
+          stripContextEntityIdPrefix(args.findingId as string),
+          { content: args.content as string, ...contract },
+        ),
+        COMMENT_SUMMARY_FIELDS,
+      );
+    }
+    return projectWriteResponse(
+      await createDocumentComment(
         context.apiUrl,
         context.projectId,
         headers,
-        stripContextEntityIdPrefix(args.findingId as string),
+        stripContextEntityIdPrefix(args.documentId as string),
         { content: args.content as string, ...contract },
-      );
-    }
-    return createDocumentComment(
-      context.apiUrl,
-      context.projectId,
-      headers,
-      stripContextEntityIdPrefix(args.documentId as string),
-      { content: args.content as string, ...contract },
+      ),
+      COMMENT_SUMMARY_FIELDS,
     );
   },
 };
@@ -541,6 +633,8 @@ const commentUpdateSpec: McpWriteToolSpec = {
     COMMENT_GUIDE_FIRST,
     'Pass expectedUpdatedAt (from agentteams_comment_get) so a concurrent edit is rejected rather than silently overwritten.',
     PROJECT_SCOPE,
+    'Returns the updated comment id, its parent target, updatedAt, and the webUrl of the parent screen a human can open.',
+    FULL_RECORD_VIA_GET,
   ].join(' '),
   discovery: commentWriteDiscovery,
   inputSchema: z.strictObject({
@@ -556,19 +650,22 @@ const commentUpdateSpec: McpWriteToolSpec = {
     idempotencyKey: idempotencyKeyField,
   }),
   handler: async (args, context) => {
-    return updateComment(
-      context.apiUrl,
-      context.projectId,
-      await auth(context),
-      stripContextEntityIdPrefix(args.commentId as string),
-      definedFields({
-        content: args.content,
-        type: args.type,
-        affectedFiles: args.affectedFiles,
-        expectedUpdatedAt: args.expectedUpdatedAt,
-        guideHash: args.guideHash,
-        idempotencyKey: args.idempotencyKey,
-      }) as { content: string },
+    return projectWriteResponse(
+      await updateComment(
+        context.apiUrl,
+        context.projectId,
+        await auth(context),
+        stripContextEntityIdPrefix(args.commentId as string),
+        definedFields({
+          content: args.content,
+          type: args.type,
+          affectedFiles: args.affectedFiles,
+          expectedUpdatedAt: args.expectedUpdatedAt,
+          guideHash: args.guideHash,
+          idempotencyKey: args.idempotencyKey,
+        }) as { content: string },
+      ),
+      COMMENT_SUMMARY_FIELDS,
     );
   },
 };
@@ -616,7 +713,8 @@ const commentReplyCreateSpec: McpWriteToolSpec = {
     'Replies are one level deep — a reply cannot be the parent of another reply, and passing a reply id here is rejected.',
     COMMENT_GUIDE_FIRST,
     PROJECT_SCOPE,
-    'Returns the created reply id and the webUrl of the parent screen a human can open.',
+    'Returns the created reply id, its parent comment, updatedAt, and the webUrl of the parent screen a human can open.',
+    FULL_RECORD_VIA_GET,
   ].join(' '),
   discovery: commentWriteDiscovery,
   inputSchema: z.strictObject({
@@ -626,17 +724,20 @@ const commentReplyCreateSpec: McpWriteToolSpec = {
     idempotencyKey: idempotencyKeyField,
   }),
   handler: async (args, context) => {
-    return createReply(
-      context.apiUrl,
-      context.projectId,
-      await auth(context),
-      stripContextEntityIdPrefix(args.commentId as string),
-      definedFields({
-        content: args.content,
-        guideHash: args.guideHash,
-        idempotencyKey: args.idempotencyKey,
-        agentConfigId: context.agentConfigId,
-      }) as { content: string },
+    return projectWriteResponse(
+      await createReply(
+        context.apiUrl,
+        context.projectId,
+        await auth(context),
+        stripContextEntityIdPrefix(args.commentId as string),
+        definedFields({
+          content: args.content,
+          guideHash: args.guideHash,
+          idempotencyKey: args.idempotencyKey,
+          agentConfigId: context.agentConfigId,
+        }) as { content: string },
+      ),
+      COMMENT_SUMMARY_FIELDS,
     );
   },
 };
@@ -649,6 +750,8 @@ const commentReplyUpdateSpec: McpWriteToolSpec = {
     COMMENT_GUIDE_FIRST,
     'Pass expectedUpdatedAt (from agentteams_comment_reply_get) so a concurrent edit is rejected rather than silently overwritten.',
     PROJECT_SCOPE,
+    'Returns the updated reply id, its parent comment, updatedAt, and the webUrl of the parent screen a human can open.',
+    FULL_RECORD_VIA_GET,
   ].join(' '),
   discovery: commentWriteDiscovery,
   inputSchema: z.strictObject({
@@ -659,17 +762,20 @@ const commentReplyUpdateSpec: McpWriteToolSpec = {
     idempotencyKey: idempotencyKeyField,
   }),
   handler: async (args, context) => {
-    return updateReply(
-      context.apiUrl,
-      context.projectId,
-      await auth(context),
-      stripContextEntityIdPrefix(args.replyId as string),
-      definedFields({
-        content: args.content,
-        expectedUpdatedAt: args.expectedUpdatedAt,
-        guideHash: args.guideHash,
-        idempotencyKey: args.idempotencyKey,
-      }) as { content: string },
+    return projectWriteResponse(
+      await updateReply(
+        context.apiUrl,
+        context.projectId,
+        await auth(context),
+        stripContextEntityIdPrefix(args.replyId as string),
+        definedFields({
+          content: args.content,
+          expectedUpdatedAt: args.expectedUpdatedAt,
+          guideHash: args.guideHash,
+          idempotencyKey: args.idempotencyKey,
+        }) as { content: string },
+      ),
+      COMMENT_SUMMARY_FIELDS,
     );
   },
 };
@@ -716,7 +822,8 @@ const coActionCreateSpec: McpWriteToolSpec = {
     'Create a co-action (handoff record) in this project.',
     CO_ACTION_GUIDE_FIRST,
     PROJECT_SCOPE,
-    'Returns the created co-action id and webUrl.',
+    'Returns the created co-action id, status, updatedAt, and webUrl.',
+    FULL_RECORD_VIA_GET,
   ].join(' '),
   discovery: coActionWriteDiscovery,
   inputSchema: z.strictObject({
@@ -740,25 +847,28 @@ const coActionCreateSpec: McpWriteToolSpec = {
   }),
   handler: async (args, context) => {
     requireOneOf('agentteams_coaction_create', args, ['planId', 'completionReportId', 'postMortemId']);
-    return createCoAction(
-      context.apiUrl,
-      context.projectId,
-      await auth(context),
-      definedFields({
-        title: args.title,
-        content: args.content,
-        planId: typeof args.planId === 'string' ? stripContextEntityIdPrefix(args.planId as string) : undefined,
-        completionReportId:
-          typeof args.completionReportId === 'string'
-            ? stripContextEntityIdPrefix(args.completionReportId as string)
-            : undefined,
-        postMortemId:
-          typeof args.postMortemId === 'string' ? stripContextEntityIdPrefix(args.postMortemId as string) : undefined,
-        status: args.status,
-        visibility: args.visibility,
-        guideHash: args.guideHash,
-        idempotencyKey: args.idempotencyKey,
-      }),
+    return projectWriteResponse(
+      await createCoAction(
+        context.apiUrl,
+        context.projectId,
+        await auth(context),
+        definedFields({
+          title: args.title,
+          content: args.content,
+          planId: typeof args.planId === 'string' ? stripContextEntityIdPrefix(args.planId as string) : undefined,
+          completionReportId:
+            typeof args.completionReportId === 'string'
+              ? stripContextEntityIdPrefix(args.completionReportId as string)
+              : undefined,
+          postMortemId:
+            typeof args.postMortemId === 'string' ? stripContextEntityIdPrefix(args.postMortemId as string) : undefined,
+          status: args.status,
+          visibility: args.visibility,
+          guideHash: args.guideHash,
+          idempotencyKey: args.idempotencyKey,
+        }),
+      ),
+      REVIEW_SUMMARY_FIELDS,
     );
   },
 };
@@ -771,7 +881,8 @@ const coActionUpdateSpec: McpWriteToolSpec = {
     CO_ACTION_GUIDE_FIRST,
     'Pass expectedUpdatedAt (from agentteams_coaction_get) so a concurrent edit is rejected rather than silently overwritten.',
     PROJECT_SCOPE,
-    'Returns the updated co-action id, status, and webUrl.',
+    'Returns the updated co-action id, status, updatedAt, and webUrl.',
+    FULL_RECORD_VIA_GET,
   ].join(' '),
   discovery: coActionWriteDiscovery,
   inputSchema: z.strictObject({
@@ -786,20 +897,23 @@ const coActionUpdateSpec: McpWriteToolSpec = {
   }),
   handler: async (args, context) => {
     requireOneOf('agentteams_coaction_update', args, ['title', 'content', 'status', 'visibility']);
-    return updateCoAction(
-      context.apiUrl,
-      context.projectId,
-      await auth(context),
-      stripContextEntityIdPrefix(args.id as string),
-      definedFields({
-        title: args.title,
-        content: args.content,
-        status: args.status,
-        visibility: args.visibility,
-        expectedUpdatedAt: args.expectedUpdatedAt,
-        guideHash: args.guideHash,
-        idempotencyKey: args.idempotencyKey,
-      }),
+    return projectWriteResponse(
+      await updateCoAction(
+        context.apiUrl,
+        context.projectId,
+        await auth(context),
+        stripContextEntityIdPrefix(args.id as string),
+        definedFields({
+          title: args.title,
+          content: args.content,
+          status: args.status,
+          visibility: args.visibility,
+          expectedUpdatedAt: args.expectedUpdatedAt,
+          guideHash: args.guideHash,
+          idempotencyKey: args.idempotencyKey,
+        }),
+      ),
+      REVIEW_SUMMARY_FIELDS,
     );
   },
 };
@@ -846,7 +960,8 @@ const postMortemCreateSpec: McpWriteToolSpec = {
     'Create a plan-linked post-mortem or a standalone service-incident post-mortem. Create one only when a reproducible or systematic failure delayed or blocked the work and there is a preventable cause.',
     POST_MORTEM_GUIDE_FIRST,
     PROJECT_SCOPE,
-    'Returns the created post-mortem id and webUrl.',
+    'Returns the created post-mortem id, status, updatedAt, and webUrl.',
+    FULL_RECORD_VIA_GET,
   ].join(' '),
   discovery: postMortemWriteDiscovery,
   inputSchema: z.strictObject({
@@ -866,19 +981,22 @@ const postMortemCreateSpec: McpWriteToolSpec = {
     idempotencyKey: idempotencyKeyField,
   }),
   handler: async (args, context) => {
-    return createPostMortem(
-      context.apiUrl,
-      context.projectId,
-      await auth(context),
-      definedFields({
-        planId: typeof args.planId === 'string' ? stripContextEntityIdPrefix(args.planId as string) : undefined,
-        title: args.title,
-        content: args.content,
-        actionItems: args.actionItems,
-        status: args.status,
-        guideHash: args.guideHash,
-        idempotencyKey: args.idempotencyKey,
-      }),
+    return projectWriteResponse(
+      await createPostMortem(
+        context.apiUrl,
+        context.projectId,
+        await auth(context),
+        definedFields({
+          planId: typeof args.planId === 'string' ? stripContextEntityIdPrefix(args.planId as string) : undefined,
+          title: args.title,
+          content: args.content,
+          actionItems: args.actionItems,
+          status: args.status,
+          guideHash: args.guideHash,
+          idempotencyKey: args.idempotencyKey,
+        }),
+      ),
+      REVIEW_SUMMARY_FIELDS,
     );
   },
 };
@@ -891,7 +1009,8 @@ const postMortemUpdateSpec: McpWriteToolSpec = {
     POST_MORTEM_GUIDE_FIRST,
     'Pass expectedUpdatedAt (from agentteams_postmortem_get) so a concurrent edit is rejected rather than silently overwritten.',
     PROJECT_SCOPE,
-    'Returns the updated post-mortem id and webUrl.',
+    'Returns the updated post-mortem id, status, updatedAt, and webUrl.',
+    FULL_RECORD_VIA_GET,
   ].join(' '),
   discovery: postMortemWriteDiscovery,
   inputSchema: z.strictObject({
@@ -906,20 +1025,23 @@ const postMortemUpdateSpec: McpWriteToolSpec = {
   }),
   handler: async (args, context) => {
     requireOneOf('agentteams_postmortem_update', args, ['title', 'content', 'actionItems', 'status']);
-    return updatePostMortem(
-      context.apiUrl,
-      context.projectId,
-      await auth(context),
-      stripContextEntityIdPrefix(args.id as string),
-      definedFields({
-        title: args.title,
-        content: args.content,
-        actionItems: args.actionItems,
-        status: args.status,
-        expectedUpdatedAt: args.expectedUpdatedAt,
-        guideHash: args.guideHash,
-        idempotencyKey: args.idempotencyKey,
-      }),
+    return projectWriteResponse(
+      await updatePostMortem(
+        context.apiUrl,
+        context.projectId,
+        await auth(context),
+        stripContextEntityIdPrefix(args.id as string),
+        definedFields({
+          title: args.title,
+          content: args.content,
+          actionItems: args.actionItems,
+          status: args.status,
+          expectedUpdatedAt: args.expectedUpdatedAt,
+          guideHash: args.guideHash,
+          idempotencyKey: args.idempotencyKey,
+        }),
+      ),
+      REVIEW_SUMMARY_FIELDS,
     );
   },
 };
@@ -931,7 +1053,8 @@ const codeReviewCreateSpec: McpWriteToolSpec = {
     'Create a code review for local diffs, git commit ranges, or pull requests. Findings can be supplied upfront when already known.',
     CODE_REVIEW_GUIDE_FIRST,
     PROJECT_SCOPE,
-    'Returns the created code review id, status, and webUrl.',
+    'Returns the created code review id, status, updatedAt, and webUrl.',
+    FULL_RECORD_VIA_GET,
   ].join(' '),
   discovery: codeReviewWriteDiscovery,
   inputSchema: z.strictObject({
@@ -990,36 +1113,39 @@ const codeReviewCreateSpec: McpWriteToolSpec = {
   handler: async (args, context) => {
     validateInitialCodeReviewFindings(args);
     validateInitialCodeReviewResultSummary(args);
-    return createCodeReview(
-      context.apiUrl,
-      context.projectId,
-      await auth(context),
-      definedFields({
-        title: args.title,
-        targetType: args.targetType,
-        targetRef: args.targetRef,
-        repositoryRemoteUrl: args.repositoryRemoteUrl,
-        sourcePlanId:
-          typeof args.sourcePlanId === 'string' ? stripContextEntityIdPrefix(args.sourcePlanId as string) : undefined,
-        sourceCompletionReportId:
-          typeof args.sourceCompletionReportId === 'string'
-            ? stripContextEntityIdPrefix(args.sourceCompletionReportId as string)
-            : undefined,
-        sourceCommitStart: args.sourceCommitStart,
-        sourceCommitEnd: args.sourceCommitEnd,
-        sourceBranchName: args.sourceBranchName,
-        baseBranchName: args.baseBranchName,
-        diffSummary: args.diffSummary,
-        testSummary: args.testSummary,
-        reviewerContext: args.reviewerContext,
-        recommendationReason: args.recommendationReason,
-        runnerType: args.runnerType,
-        model: args.model,
-        resultSummary: args.resultSummary,
-        findings: args.findings,
-        guideHash: args.guideHash,
-        idempotencyKey: args.idempotencyKey,
-      }),
+    return projectWriteResponse(
+      await createCodeReview(
+        context.apiUrl,
+        context.projectId,
+        await auth(context),
+        definedFields({
+          title: args.title,
+          targetType: args.targetType,
+          targetRef: args.targetRef,
+          repositoryRemoteUrl: args.repositoryRemoteUrl,
+          sourcePlanId:
+            typeof args.sourcePlanId === 'string' ? stripContextEntityIdPrefix(args.sourcePlanId as string) : undefined,
+          sourceCompletionReportId:
+            typeof args.sourceCompletionReportId === 'string'
+              ? stripContextEntityIdPrefix(args.sourceCompletionReportId as string)
+              : undefined,
+          sourceCommitStart: args.sourceCommitStart,
+          sourceCommitEnd: args.sourceCommitEnd,
+          sourceBranchName: args.sourceBranchName,
+          baseBranchName: args.baseBranchName,
+          diffSummary: args.diffSummary,
+          testSummary: args.testSummary,
+          reviewerContext: args.reviewerContext,
+          recommendationReason: args.recommendationReason,
+          runnerType: args.runnerType,
+          model: args.model,
+          resultSummary: args.resultSummary,
+          findings: args.findings,
+          guideHash: args.guideHash,
+          idempotencyKey: args.idempotencyKey,
+        }),
+      ),
+      REVIEW_SUMMARY_FIELDS,
     );
   },
 };
@@ -1032,7 +1158,8 @@ const codeReviewUpdateSpec: McpWriteToolSpec = {
     CODE_REVIEW_GUIDE_FIRST,
     'Pass expectedUpdatedAt (from agentteams_codereview_get) so a concurrent edit is rejected rather than silently overwritten.',
     PROJECT_SCOPE,
-    'Returns the updated code review id, status, and webUrl.',
+    'Returns the updated code review id, status, updatedAt, and webUrl.',
+    FULL_RECORD_VIA_GET,
   ].join(' '),
   discovery: codeReviewWriteDiscovery,
   inputSchema: z.strictObject({
@@ -1060,40 +1187,46 @@ const codeReviewUpdateSpec: McpWriteToolSpec = {
     validateCodeReviewCancellation(args);
     const reviewId = stripContextEntityIdPrefix(args.id as string);
     if (args.status === 'CANCELLED') {
-      return cancelCodeReview(
+      return projectWriteResponse(
+        await cancelCodeReview(
+          context.apiUrl,
+          context.projectId,
+          await auth(context),
+          reviewId,
+          definedFields({
+            guideHash: args.guideHash,
+            idempotencyKey: args.idempotencyKey,
+          }),
+        ),
+        REVIEW_SUMMARY_FIELDS,
+      );
+    }
+    return projectWriteResponse(
+      await updateCodeReview(
         context.apiUrl,
         context.projectId,
         await auth(context),
         reviewId,
         definedFields({
+          title: args.title,
+          targetType: args.targetType,
+          targetRef: args.targetRef,
+          sourceCommitStart: args.sourceCommitStart,
+          sourceCommitEnd: args.sourceCommitEnd,
+          sourceBranchName: args.sourceBranchName,
+          baseBranchName: args.baseBranchName,
+          diffSummary: args.diffSummary,
+          testSummary: args.testSummary,
+          reviewerContext: args.reviewerContext,
+          recommendationReason: args.recommendationReason,
+          runnerType: args.runnerType,
+          model: args.model,
+          expectedUpdatedAt: args.expectedUpdatedAt,
           guideHash: args.guideHash,
           idempotencyKey: args.idempotencyKey,
         }),
-      );
-    }
-    return updateCodeReview(
-      context.apiUrl,
-      context.projectId,
-      await auth(context),
-      reviewId,
-      definedFields({
-        title: args.title,
-        targetType: args.targetType,
-        targetRef: args.targetRef,
-        sourceCommitStart: args.sourceCommitStart,
-        sourceCommitEnd: args.sourceCommitEnd,
-        sourceBranchName: args.sourceBranchName,
-        baseBranchName: args.baseBranchName,
-        diffSummary: args.diffSummary,
-        testSummary: args.testSummary,
-        reviewerContext: args.reviewerContext,
-        recommendationReason: args.recommendationReason,
-        runnerType: args.runnerType,
-        model: args.model,
-        expectedUpdatedAt: args.expectedUpdatedAt,
-        guideHash: args.guideHash,
-        idempotencyKey: args.idempotencyKey,
-      }),
+      ),
+      REVIEW_SUMMARY_FIELDS,
     );
   },
 };
@@ -1106,7 +1239,8 @@ const codeReviewFindingStatusSetSpec: McpWriteToolSpec = {
     CODE_REVIEW_GUIDE_FIRST,
     'Pass expectedUpdatedAt (from agentteams_codereview_finding_get) so a concurrent transition is rejected rather than silently overwritten.',
     PROJECT_SCOPE,
-    'Returns the updated code review.',
+    'Returns the parent review id, status, updatedAt, and webUrl, plus the changed finding id, status, and updatedAt.',
+    FULL_RECORD_VIA_GET,
   ].join(' '),
   discovery: codeReviewWriteDiscovery,
   inputSchema: z.strictObject({
@@ -1129,13 +1263,24 @@ const codeReviewFindingStatusSetSpec: McpWriteToolSpec = {
     });
     const headers = await auth(context);
 
+    // findingId 원본(args, prefix 포함 가능)을 넘긴다. 서버 응답 안 finding id는 bare라
+    // 투영 헬퍼 안에서 prefix를 벗겨 대조한다.
     if (args.status === 'DISMISSED') {
-      return dismissCodeReviewFinding(context.apiUrl, context.projectId, headers, codeReviewId, findingId, body);
+      return projectFindingStatusResponse(
+        await dismissCodeReviewFinding(context.apiUrl, context.projectId, headers, codeReviewId, findingId, body),
+        args.findingId as string,
+      );
     }
     if (args.status === 'OPEN') {
-      return undismissCodeReviewFinding(context.apiUrl, context.projectId, headers, codeReviewId, findingId, body);
+      return projectFindingStatusResponse(
+        await undismissCodeReviewFinding(context.apiUrl, context.projectId, headers, codeReviewId, findingId, body),
+        args.findingId as string,
+      );
     }
-    return resolveCodeReviewFinding(context.apiUrl, context.projectId, headers, codeReviewId, findingId, body);
+    return projectFindingStatusResponse(
+      await resolveCodeReviewFinding(context.apiUrl, context.projectId, headers, codeReviewId, findingId, body),
+      args.findingId as string,
+    );
   },
 };
 
