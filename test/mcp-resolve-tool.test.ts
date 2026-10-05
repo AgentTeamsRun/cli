@@ -527,7 +527,9 @@ describe('agentteams_resolve MCP tool', () => {
     // 명시(plan planWebUrl·문서 documentWebUrl·태스크/finding 링크 없음)가 71자 증가했다.
     // 2026-10-05 guide-first를 세션당 한 번+해시 재사용으로 바꾸며 guideHash 필드의 중복 안내를
     // 덜어내 255자 감소했다(guide_get hashOnly 추가 포함).
-    expect(withResolve.totalChars).toBe(70_258);
+    // 2026-10-05 plan_get에 view(full/summary) 입력과 summary 용도 설명을 추가해
+    // 403자 증가했다(minimal은 3,921자로 상한 4,000자 이내).
+    expect(withResolve.totalChars).toBe(70_661);
     process.stderr.write(`[agentteams_resolve budget] ${JSON.stringify({ delta, full: withResolve.totalChars })}\n`);
   });
 });

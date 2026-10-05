@@ -25,6 +25,48 @@ const planRunbookResponse = {
   },
 };
 
+// summary 투영 검증용 런북: 본문·태스크 상세·연결 문서·최상위 키를 모두 갖춘 형태.
+const richPlanRunbookResponse = {
+  meta: { requestId: 'req-1' },
+  data: {
+    plan: {
+      id: 'plan-1',
+      title: 'MCP Phase 1',
+      status: 'IN_PROGRESS',
+      contentTokenCount: 128,
+      contentMarkdown: '## TL;DR\n\nRead tools + resources.',
+    },
+    tasks: [
+      {
+        id: 'task-1',
+        number: 1,
+        title: 'First',
+        detail: 'Long execution detail for the first task.',
+        status: 'DONE',
+        orderIndex: 0,
+        wave: 1,
+        category: null,
+        completionReportId: null,
+        dependsOnTaskIds: [],
+      },
+      {
+        id: 'task-2',
+        number: 2,
+        title: 'Second',
+        detail: 'Long execution detail for the second task.',
+        status: 'TODO',
+        orderIndex: 1,
+        wave: 2,
+        category: null,
+        completionReportId: null,
+        dependsOnTaskIds: ['task-1'],
+      },
+    ],
+    progress: { total: 2, completed: 1, percent: 50 },
+    documentLinks: [{ id: 'doc-1', title: 'Design note' }],
+  },
+};
+
 const documentResponse = {
   data: {
     id: 'doc-1',
@@ -195,6 +237,108 @@ describe('mcp entity read tools', () => {
     expect(payload.data.tasks[1].dependsOnTaskIds).toEqual(['task-1']);
     expect(payload.data.progress).toEqual({ total: 2, completed: 1, percent: 50 });
     expect(payload.data.plan.contentMarkdown).toContain('Read tools');
+  });
+
+  it('advertises the optional plan_get view without changing the required id contract', async () => {
+    const { client, handle } = connect();
+    openHandle = handle;
+
+    await discover(client);
+    const list = await client.request('tools/list', { _meta: MODERN_META });
+    const tool = (list.result?.tools ?? []).find((entry: any) => entry.name === 'agentteams_plan_get');
+
+    expect(tool.inputSchema.required).toEqual(['id']);
+    expect(Object.keys(tool.inputSchema.properties).sort()).toEqual(['id', 'view']);
+    expect(tool.inputSchema.properties.view.enum).toEqual(['full', 'summary']);
+    expect(tool.description).toContain('view=summary');
+    expect(tool.description).toContain('view=full');
+  });
+
+  it.each([{}, { view: 'full' }])('returns the runbook verbatim for plan_get arguments %j', async (args) => {
+    jest.spyOn(axios, 'get').mockResolvedValue({ data: richPlanRunbookResponse } as never);
+    const { client, handle } = connect();
+    openHandle = handle;
+
+    await discover(client);
+    const call = await client.request('tools/call', {
+      name: 'agentteams_plan_get',
+      arguments: { id: 'plan-1', ...args },
+      _meta: MODERN_META,
+    });
+
+    expect(call.result?.isError).toBeFalsy();
+    expect(JSON.parse(call.result?.content[0].text)).toEqual(richPlanRunbookResponse);
+  });
+
+  it('projects a lightweight summary for plan_get view=summary', async () => {
+    jest.spyOn(axios, 'get').mockResolvedValue({ data: richPlanRunbookResponse } as never);
+    const { client, handle } = connect();
+    openHandle = handle;
+
+    await discover(client);
+    const call = await client.request('tools/call', {
+      name: 'agentteams_plan_get',
+      arguments: { id: 'plan-1', view: 'summary' },
+      _meta: MODERN_META,
+    });
+
+    expect(call.result?.isError).toBeFalsy();
+    const payload = JSON.parse(call.result?.content[0].text);
+
+    // data 밖 최상위 키·progress·documentLinks는 그대로 통과한다.
+    expect(payload.meta).toEqual(richPlanRunbookResponse.meta);
+    expect(payload.data.progress).toEqual(richPlanRunbookResponse.data.progress);
+    expect(payload.data.documentLinks).toEqual(richPlanRunbookResponse.data.documentLinks);
+
+    // 플랜 본문은 빠지고 식별·진행 메타는 남는다.
+    expect(payload.data.plan).not.toHaveProperty('contentMarkdown');
+    expect(payload.data.plan.id).toBe('plan-1');
+    expect(payload.data.plan.status).toBe('IN_PROGRESS');
+
+    // 태스크는 목록 확인용 키만 남고 상세 본문은 빠진다.
+    expect(payload.data.tasks).toEqual([
+      {
+        id: 'task-1',
+        number: 1,
+        title: 'First',
+        status: 'DONE',
+        orderIndex: 0,
+        wave: 1,
+        dependsOnTaskIds: [],
+      },
+      {
+        id: 'task-2',
+        number: 2,
+        title: 'Second',
+        status: 'TODO',
+        orderIndex: 1,
+        wave: 2,
+        dependsOnTaskIds: ['task-1'],
+      },
+    ]);
+    for (const task of payload.data.tasks) {
+      expect(task).not.toHaveProperty('detail');
+    }
+
+    // 원본 목 응답을 변경하지 않는다.
+    expect(richPlanRunbookResponse.data.plan).toHaveProperty('contentMarkdown');
+    expect(richPlanRunbookResponse.data.tasks[0]).toHaveProperty('detail');
+  });
+
+  it('rejects an unknown plan_get view without calling upstream', async () => {
+    const getSpy = jest.spyOn(axios, 'get').mockResolvedValue({ data: richPlanRunbookResponse } as never);
+    const { client, handle } = connect();
+    openHandle = handle;
+
+    await discover(client);
+    const call = await client.request('tools/call', {
+      name: 'agentteams_plan_get',
+      arguments: { id: 'plan-1', view: 'brief' },
+      _meta: MODERN_META,
+    });
+
+    expect(call.result?.isError).toBe(true);
+    expect(getSpy).not.toHaveBeenCalled();
   });
 
   it('preserves the document body in document_get responses', async () => {

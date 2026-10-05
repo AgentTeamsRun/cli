@@ -29,7 +29,7 @@ const expectedContract = [
       'type',
     ],
   },
-  { name: 'agentteams_plan_get', required: ['id'], properties: ['id'] },
+  { name: 'agentteams_plan_get', required: ['id'], properties: ['id', 'view'] },
   {
     name: 'agentteams_report_list',
     required: [],

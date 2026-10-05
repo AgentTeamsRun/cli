@@ -8,7 +8,7 @@ const tscPath = join(cliRoot, 'node_modules', 'typescript', 'bin', 'tsc');
 const fixturePath = join(cliRoot, 'test', 'fixtures', 'context-tools-types.ts');
 
 describe('context-tools public type contract', () => {
-  it('does not expose bodyTiptap after omitting the document editor mirror', () => {
+  it('does not expose omitted document mirrors or plan summary fields', () => {
     expect(() =>
       execFileSync(
         process.execPath,
