@@ -34,6 +34,23 @@ export function parseReviewRecommendation(value: unknown): string | undefined {
   return undefined;
 }
 
+/**
+ * 완료보고서 파일을 읽어 trim한 본문을 돌려준다. 파일이 없거나 비어 있으면 요청 전에 멈춘다.
+ * parseReportOptions와 task finish의 태스크 보고서 경로가 공유한다.
+ */
+export function readReportFile(fileOption: string): string {
+  const filePath = resolve(fileOption);
+  if (!existsSync(filePath)) {
+    throw new Error(`File not found: ${fileOption}`);
+  }
+  const content = readFileSync(filePath, 'utf-8');
+  printFileInfo(fileOption, content);
+  if (!content || content.trim().length === 0) {
+    throw new Error('Report file is empty.');
+  }
+  return content.trim();
+}
+
 export function parseReportOptions(
   options: any,
   {
@@ -49,15 +66,7 @@ export function parseReportOptions(
     return undefined;
   }
 
-  const filePath = resolve(fileOption);
-  if (!existsSync(filePath)) {
-    throw new Error(`File not found: ${fileOption}`);
-  }
-  const content = readFileSync(filePath, 'utf-8');
-  printFileInfo(fileOption, content);
-  if (!content || content.trim().length === 0) {
-    throw new Error('Report file is empty.');
-  }
+  const content = readReportFile(fileOption);
 
   const title = (options.reportTitle ?? options.title ?? options.summary) as string | undefined;
   if (!title || title.trim().length === 0) {
@@ -85,7 +94,7 @@ export function parseReportOptions(
 
   const payload: ReportPayload = {
     title: title.trim(),
-    content: content.trim(),
+    content,
   };
 
   if (status !== undefined) payload.status = status;

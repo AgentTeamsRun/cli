@@ -33,6 +33,31 @@ export type PlanTaskFinishGit = {
   commitOnRemote: boolean | null;
 };
 
+// 태스크 보고서. title을 생략하면 서버가 `Task {N}. {태스크 제목}`으로 채운다.
+export type PlanTaskFinishReport = {
+  title?: string;
+  content: string;
+  status: string;
+  repositoryRemoteUrl?: string;
+  commitHash?: string;
+  commitStart?: string;
+  commitEnd?: string;
+  branchName?: string;
+  filesModified?: number;
+  linesAdded?: number;
+  linesDeleted?: number;
+  qualityScore?: number;
+  reviewRecommendation?: string;
+  reviewReason?: string;
+};
+
+export type PlanTaskFinishReportAttachment = {
+  completionReport: PlanTaskFinishReport;
+  runnerType: string;
+  model: string;
+  fastMode?: boolean;
+};
+
 export async function finishPlanTask(
   apiUrl: string,
   projectId: string,
@@ -41,9 +66,10 @@ export async function finishPlanTask(
   taskId: string,
   status: string,
   git?: PlanTaskFinishGit,
+  report?: PlanTaskFinishReportAttachment,
 ): Promise<unknown> {
   const baseUrl = `${apiUrl}/api/projects/${projectId}/plans`;
-  const body = git ? { status, git } : { status };
+  const body = { status, ...(git ? { git } : {}), ...(report ?? {}) };
   const response = await httpClient.post(`${baseUrl}/${planId}/tasks/${taskId}/finish`, body, { headers });
   return response.data;
 }

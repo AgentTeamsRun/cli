@@ -1,5 +1,8 @@
-import { describe, it, expect, afterEach, jest } from '@jest/globals';
+import { describe, it, expect, afterEach, beforeAll, afterAll, jest } from '@jest/globals';
 import axios from 'axios';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { executeTaskCommand } from '../src/commands/task.js';
 
 const apiUrl = 'http://localhost:3001';
@@ -253,5 +256,305 @@ describe('task lifecycle commands', () => {
       { headers },
     );
     expect(result).toMatchObject({ message: 'Task finished (task-1: DONE)', status: 'DONE' });
+  });
+});
+
+describe('task finish --report-file', () => {
+  const reportContent = '## Summary\n\nTask report body that is long enough for the server minimum.';
+  const git = { commit: 'dddddddddddddddddddddddddddddddddddddddd', branch: 'feat/task-report', commitOnRemote: true };
+  let dir = '';
+  let reportPath = '';
+  let emptyPath = '';
+  let tempDir = '';
+
+  beforeAll(() => {
+    dir = mkdtempSync(join(tmpdir(), 'task-report-'));
+    reportPath = join(dir, 'report.md');
+    emptyPath = join(dir, 'empty.md');
+    tempDir = join(dir, '.agentteams', 'cli', 'temp');
+    mkdirSync(tempDir, { recursive: true });
+    writeFileSync(reportPath, reportContent);
+    writeFileSync(emptyPath, '   \n');
+  });
+
+  afterAll(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  const finishDeps = (overrides: Record<string, unknown> = {}) => ({
+    collectTaskFinishGitSnapshot: () => git,
+    collectGitMetrics: jest.fn(() => ({ commitHash: git.commit, filesModified: 3, linesAdded: 10, linesDeleted: 2 })),
+    getGitRemoteOriginUrl: () => 'git@github.com:acme/repo.git',
+    env: {},
+    ...overrides,
+  });
+
+  const mockFinish = () => {
+    jest.spyOn(console, 'log').mockImplementation(() => undefined);
+    return jest.spyOn(axios, 'post').mockResolvedValue({
+      data: {
+        data: {
+          planStatus: 'IN_PROGRESS',
+          tasks: [],
+          progress: null,
+          completionReport: {
+            id: 'report-1',
+            title: 'Task 1. Task A',
+            status: 'PARTIAL',
+            webUrl: 'https://agentteams.run/go?type=completion-report&id=report-1',
+          },
+        },
+      },
+    } as never);
+  };
+
+  const finishBody = (postSpy: ReturnType<typeof mockFinish>) =>
+    (postSpy.mock.calls[0] as unknown[])[1] as Record<string, any>;
+
+  it('keeps the report-less body unchanged', async () => {
+    const postSpy = mockFinish();
+    await executeTaskCommand(
+      apiUrl,
+      projectId,
+      headers,
+      'finish',
+      { planId: 'plan-1', taskId: 'task-1', status: 'DONE', runnerType: 'CLAUDE_CODE', model: 'claude-opus-5-5' },
+      finishDeps(),
+    );
+    expect(finishBody(postSpy)).toEqual({ status: 'DONE', git });
+  });
+
+  it('derives the report status from the task status instead of sending the task status', async () => {
+    const postSpy = mockFinish();
+    const result = await executeTaskCommand(
+      apiUrl,
+      projectId,
+      headers,
+      'finish',
+      {
+        planId: 'plan-1',
+        taskId: 'task-1',
+        status: 'BLOCKED',
+        reportFile: reportPath,
+        runnerType: 'CLAUDE_CODE',
+        model: 'claude-opus-5-5',
+      },
+      finishDeps(),
+    );
+    const body = finishBody(postSpy);
+    expect(body.status).toBe('BLOCKED');
+    expect(body.completionReport.status).toBe('PARTIAL');
+    expect(body.completionReport).toMatchObject({
+      content: reportContent,
+      commitHash: git.commit,
+      branchName: git.branch,
+      repositoryRemoteUrl: 'git@github.com:acme/repo.git',
+    });
+    expect(body.completionReport).not.toHaveProperty('title');
+    expect(body).toMatchObject({ runnerType: 'CLAUDE_CODE', model: 'claude-opus-5-5' });
+    expect(result).toMatchObject({ webUrl: 'https://agentteams.run/go?type=completion-report&id=report-1' });
+  });
+
+  it('passes an explicit --report-status and --report-title through', async () => {
+    const postSpy = mockFinish();
+    await executeTaskCommand(
+      apiUrl,
+      projectId,
+      headers,
+      'finish',
+      {
+        planId: 'plan-1',
+        taskId: 'task-1',
+        status: 'DONE',
+        reportFile: reportPath,
+        reportStatus: 'FAILED',
+        reportTitle: 'Custom title',
+        runnerType: 'CLAUDE_CODE',
+        model: 'claude-opus-5-5',
+      },
+      finishDeps(),
+    );
+    expect(finishBody(postSpy).completionReport).toMatchObject({ status: 'FAILED', title: 'Custom title' });
+  });
+
+  it('requires runner-type and model when no session environment provides them', async () => {
+    const postSpy = jest.spyOn(axios, 'post');
+    await expect(
+      executeTaskCommand(
+        apiUrl,
+        projectId,
+        headers,
+        'finish',
+        { planId: 'plan-1', taskId: 'task-1', status: 'DONE', reportFile: reportPath },
+        finishDeps(),
+      ),
+    ).rejects.toThrow('In a runner session these are filled in automatically from the environment.');
+    expect(postSpy).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the runner session environment for runner-type and model', async () => {
+    const postSpy = mockFinish();
+    await executeTaskCommand(
+      apiUrl,
+      projectId,
+      headers,
+      'finish',
+      { planId: 'plan-1', taskId: 'task-1', status: 'DONE', reportFile: reportPath },
+      finishDeps({ env: { AGENTTEAMS_RUNNER_TYPE: 'CODEX', AGENTTEAMS_MODEL: 'gpt-6-astra' } }),
+    );
+    expect(finishBody(postSpy)).toMatchObject({ runnerType: 'CODEX', model: 'gpt-6-astra' });
+  });
+
+  it('rejects a missing or empty report file before calling the API', async () => {
+    const postSpy = jest.spyOn(axios, 'post');
+    jest.spyOn(console, 'log').mockImplementation(() => undefined);
+    const base = { planId: 'plan-1', taskId: 'task-1', status: 'DONE', runnerType: 'CLAUDE_CODE', model: 'm' };
+    await expect(
+      executeTaskCommand(
+        apiUrl,
+        projectId,
+        headers,
+        'finish',
+        { ...base, reportFile: join(dir, 'nope.md') },
+        finishDeps(),
+      ),
+    ).rejects.toThrow('File not found');
+    await expect(
+      executeTaskCommand(apiUrl, projectId, headers, 'finish', { ...base, reportFile: emptyPath }, finishDeps()),
+    ).rejects.toThrow('Report file is empty.');
+    await expect(
+      executeTaskCommand(apiUrl, projectId, headers, 'finish', { ...base, reportFile: '  ' }, finishDeps()),
+    ).rejects.toThrow('--report-file requires a non-empty path');
+    expect(postSpy).not.toHaveBeenCalled();
+  });
+
+  it('collects line and file counts only when --commit-start is given', async () => {
+    const postSpy = mockFinish();
+    const deps = finishDeps();
+    const base = {
+      planId: 'plan-1',
+      taskId: 'task-1',
+      status: 'DONE',
+      reportFile: reportPath,
+      runnerType: 'CLAUDE_CODE',
+      model: 'claude-opus-5-5',
+    };
+
+    await executeTaskCommand(apiUrl, projectId, headers, 'finish', base, deps);
+    const withoutStart = finishBody(postSpy).completionReport;
+    expect(withoutStart).not.toHaveProperty('linesAdded');
+    expect(withoutStart).not.toHaveProperty('linesDeleted');
+    expect(withoutStart).not.toHaveProperty('filesModified');
+    expect(withoutStart).not.toHaveProperty('commitStart');
+    expect(deps.collectGitMetrics).not.toHaveBeenCalled();
+
+    await executeTaskCommand(apiUrl, projectId, headers, 'finish', { ...base, commitStart: 'abc123' }, deps);
+    const withStart = ((postSpy.mock.calls[1] as unknown[])[1] as Record<string, any>).completionReport;
+    expect(deps.collectGitMetrics).toHaveBeenCalledWith(undefined, { startCommit: 'abc123' });
+    expect(withStart).toMatchObject({ commitStart: 'abc123', filesModified: 3, linesAdded: 10, linesDeleted: 2 });
+  });
+
+  it.each([
+    { scenario: 'missing-report', completionReport: undefined },
+    {
+      scenario: 'url-without-id',
+      completionReport: {
+        title: 'Task 1. Task A',
+        webUrl: 'https://agentteams.run/go?type=completion-report&id=report-1',
+      },
+    },
+  ])(
+    'preserves the temp report and shows its path when creation is not confirmed: $scenario',
+    async ({ scenario, completionReport }) => {
+      const tempReportPath = join(tempDir, `${scenario}.md`);
+      writeFileSync(tempReportPath, reportContent);
+      const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+      jest.spyOn(console, 'log').mockImplementation(() => undefined);
+      jest.spyOn(axios, 'post').mockResolvedValue({
+        data: { data: { planStatus: 'IN_PROGRESS', tasks: [], progress: null, completionReport } },
+      } as never);
+
+      const result = await executeTaskCommand(
+        apiUrl,
+        projectId,
+        headers,
+        'finish',
+        {
+          planId: 'plan-1',
+          taskId: 'task-1',
+          status: 'DONE',
+          reportFile: tempReportPath,
+          runnerType: 'CLAUDE_CODE',
+          model: 'claude-opus-5-5',
+        },
+        finishDeps(),
+      );
+
+      expect(result).not.toHaveProperty('webUrl');
+      expect(existsSync(tempReportPath)).toBe(true);
+      expect(readFileSync(tempReportPath, 'utf-8')).toBe(reportContent);
+      expect(result).toMatchObject({
+        warning: expect.stringContaining(`The report file was preserved at: ${tempReportPath}`),
+      });
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining(`The report file was preserved at: ${tempReportPath}`),
+      );
+    },
+  );
+
+  it('deletes the temp report after the server confirms report creation', async () => {
+    mockFinish();
+    const tempReportPath = join(tempDir, 'created.md');
+    writeFileSync(tempReportPath, reportContent);
+
+    const result = await executeTaskCommand(
+      apiUrl,
+      projectId,
+      headers,
+      'finish',
+      {
+        planId: 'plan-1',
+        taskId: 'task-1',
+        status: 'DONE',
+        reportFile: tempReportPath,
+        runnerType: 'CLAUDE_CODE',
+        model: 'claude-opus-5-5',
+      },
+      finishDeps(),
+    );
+
+    expect(existsSync(tempReportPath)).toBe(false);
+    expect(result).toMatchObject({ webUrl: 'https://agentteams.run/go?type=completion-report&id=report-1' });
+    expect(result).not.toHaveProperty('warning');
+  });
+
+  it('preserves the temp report after creation when --keep-temp is set', async () => {
+    mockFinish();
+    const tempReportPath = join(tempDir, 'keep.md');
+    writeFileSync(tempReportPath, reportContent);
+
+    await executeTaskCommand(
+      apiUrl,
+      projectId,
+      headers,
+      'finish',
+      {
+        planId: 'plan-1',
+        taskId: 'task-1',
+        status: 'DONE',
+        reportFile: tempReportPath,
+        keepTemp: true,
+        runnerType: 'CLAUDE_CODE',
+        model: 'claude-opus-5-5',
+      },
+      finishDeps(),
+    );
+
+    expect(existsSync(tempReportPath)).toBe(true);
+    expect(readFileSync(tempReportPath, 'utf-8')).toBe(reportContent);
   });
 });
