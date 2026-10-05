@@ -201,7 +201,32 @@ export async function sessionSync(options?: { cwd?: string }): Promise<SessionSy
 }
 
 /**
- * 원격 변경이 있을 때만 다운로드한다. 충돌한 패키지는 보존하고 해결 안내를 notes에 전달한다.
+ * 충돌 안내를 한 줄로 요약한다. 패키지마다 미러 경로 전체가 붙던 기존 형태는 세션 시작 출력의
+ * 대부분을 차지했으므로(실측 96%), slug 목록과 해결 명령만 남긴다. 상세(보존 경로)는
+ * `skill download` 출력에서 그대로 확인할 수 있다.
+ *
+ * 반환은 항상 0개 또는 1개다. `conflicts`가 비어 있는데 `conflictNotes`만 있는 비정상 입력에는
+ * 정보를 잃지 않도록 기존 목록을 그대로 돌려준다.
+ */
+export const summarizeSkillConflicts = (
+  conflicts: { slug: string }[] | undefined | null,
+  fallbackNotes: string[] | undefined | null,
+): string[] => {
+  if (!Array.isArray(conflicts) || conflicts.length === 0) return [...(fallbackNotes ?? [])];
+  const slugs = conflicts.map((conflict) => conflict.slug).join(', ');
+  return [
+    `${conflicts.length} skill package(s) kept local changes and were not updated: ${slugs}. ` +
+      `Run 'agentteams skill download --id <id> --force' per package, or ` +
+      `'agentteams skill download --force --all' to replace all with the server state. ` +
+      `Preserved paths are listed in the 'agentteams skill download' output.`,
+  ];
+};
+
+/**
+ * 원격 변경이 있을 때만 다운로드한다. 충돌한 패키지는 보존하고, 패키지별 상세(경로 목록) 대신
+ * slug 목록과 해결 명령만 담은 한 줄을 notes에 전달한다. 상세는 `skill download` 명령의 출력이
+ * 그대로 보여주므로(`commands/skill.ts`의 conflictNotes는 수정하지 않음), 요약 줄에서 그쪽을
+ * 안내한다. `skill status`는 충돌 경로를 보여주지 않아 상세 경로로 쓸 수 없다.
  */
 async function syncSkills(cwd: string, synced: { skills: boolean }, notes: string[]): Promise<number> {
   let apiContext: { apiUrl: string; headers: Record<string, string>; projectId: string };
@@ -242,7 +267,7 @@ async function syncSkills(cwd: string, synced: { skills: boolean }, notes: strin
   try {
     const result = await executeSkillCommand(apiUrl, projectId, headers, 'download', { cwd, updatesOnly: true });
     synced.skills = result.downloaded.length > 0 || result.removed.length > 0;
-    notes.push(...result.conflictNotes);
+    notes.push(...summarizeSkillConflicts(result.conflicts, result.conflictNotes));
     return result.conflicts?.length ?? 0;
   } catch (error) {
     notes.push(`Skill download failed: ${describeError(error)}`);

@@ -523,7 +523,13 @@ describe('agentteams_resolve MCP tool', () => {
     // 2026-09-10 플랜-문서 링크 쓰기 도구 2종(full 전용)이 추가되어 1,846자가 증가했다.
     // 플랜·문서 읽기 도구에 연결 필드 설명을 추가해 66자가 증가했다.
     // 중복 연결 응답 계약을 명시해 76자가 증가했다.
-    expect(withResolve.totalChars).toBe(68_899);
+    // 2026-10-04 쓰기 응답 요약 투영 설명이 1,543자, 코멘트 생성의 부모별 반환 계약
+    // 명시(plan planWebUrl·문서 documentWebUrl·태스크/finding 링크 없음)가 71자 증가했다.
+    // 2026-10-05 guide-first를 세션당 한 번+해시 재사용으로 바꾸며 guideHash 필드의 중복 안내를
+    // 덜어내 255자 감소했다(guide_get hashOnly 추가 포함).
+    // 2026-10-05 plan_get에 view(full/summary) 입력과 summary 용도 설명을 추가해
+    // 403자 증가했다(minimal은 3,921자로 상한 4,000자 이내).
+    expect(withResolve.totalChars).toBe(70_661);
     process.stderr.write(`[agentteams_resolve budget] ${JSON.stringify({ delta, full: withResolve.totalChars })}\n`);
   });
 });
