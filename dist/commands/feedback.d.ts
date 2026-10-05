@@ -1,0 +1,2 @@
+export declare function executeFeedbackCommand(apiUrl: string, headers: Record<string, string>, action: string, options: Record<string, unknown>): Promise<unknown>;
+//# sourceMappingURL=feedback.d.ts.map

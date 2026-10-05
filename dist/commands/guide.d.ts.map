@@ -1,0 +1,1 @@
+{"version":3,"file":"guide.d.ts","sourceRoot":"","sources":["../../src/commands/guide.ts"],"names":[],"mappings":"AAWA;;;;;;;GAOG;AACH,wBAAsB,QAAQ,CAAC,OAAO,EAAE;IAAE,UAAU,CAAC,EAAE,OAAO,CAAC;IAAC,GAAG,CAAC,EAAE,MAAM,CAAA;CAAE,GAAG,OAAO,CAAC,OAAO,CAAC,CA+BhG;AAED,wBAAsB,mBAAmB,CAAC,MAAM,EAAE,MAAM,EAAE,OAAO,EAAE,GAAG,GAAG,OAAO,CAAC,OAAO,CAAC,CAWxF"}
