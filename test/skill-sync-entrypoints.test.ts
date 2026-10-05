@@ -24,12 +24,13 @@ jest.unstable_mockModule('../src/utils/config.js', () => ({
   }),
 }));
 let version = 'v1';
+let healthyVersion = 'v1';
 let downloadedIds: string[] = [];
 jest.unstable_mockModule('../src/api/skill.js', () => ({
   listSkills: async () => ({
     data: [
       { id: 'skill-id', slug: 'example', version },
-      { id: 'healthy-id', slug: 'healthy', version: 'v1' },
+      { id: 'healthy-id', slug: 'healthy', version: healthyVersion },
     ],
     meta: { totalPages: 1 },
   }),
@@ -67,6 +68,7 @@ beforeEach(async () => {
   mkdirSync(join(projectRoot, '.agentteams'));
   writeFileSync(join(projectRoot, '.agentteams/config.json'), JSON.stringify({ projectId: 'project', teamId: 'team' }));
   version = 'v1';
+  healthyVersion = 'v1';
   await executeSkillCommand('https://example.test', 'project', {}, 'download', { cwd: projectRoot });
   writeFileSync(join(projectRoot, '.agentteams/skills/example/SKILL.md'), '비공개 편집');
   version = 'v2';
@@ -79,14 +81,34 @@ afterEach(() => {
 });
 
 describe('동기화 진입점의 기본 보존', () => {
-  it('session sync는 충돌 경로와 해결 방법을 notes에 전달한다', async () => {
+  it('session sync는 충돌 안내를 slug 목록 한 줄로 요약한다', async () => {
     const result = await sessionSync({ cwd: projectRoot });
     expect(result.synced.skills).toBe(false);
+    expect(result.skillConflicts).toBe(1);
     expect(result.summary).toContain('1 skill package(s) preserved');
-    expect(result.notes.join('\n')).toContain('.agentteams/skills/example/SKILL.md');
-    expect(result.notes.join('\n')).toContain('skill download --id skill-id --force');
+    const conflictNotes = result.notes.filter((note) => note.includes('kept local changes'));
+    expect(conflictNotes).toHaveLength(1);
+    expect(conflictNotes[0]).toContain('example');
+    expect(conflictNotes[0]).toContain('skill download --force --all');
+    // 패키지별 상세(보존 경로)는 요약 줄에 들어가지 않는다 — 상세는 skill download 출력에서 본다.
+    expect(result.notes.join('\n')).not.toContain('.agentteams/skills/example/SKILL.md');
     expect(JSON.stringify(result)).not.toContain('비공개 편집');
     expect(readFileSync(join(projectRoot, '.agentteams/skills/example/SKILL.md'), 'utf8')).toBe('비공개 편집');
+  });
+
+  it('충돌이 여러 건이어도 notes의 충돌 안내는 한 줄이다', async () => {
+    writeFileSync(join(projectRoot, '.agentteams/skills/healthy/SKILL.md'), '로컬 편집');
+    healthyVersion = 'v2';
+
+    const result = await sessionSync({ cwd: projectRoot });
+    expect(result.skillConflicts).toBe(2);
+    expect(result.summary).toContain('2 skill package(s) preserved');
+    const conflictNotes = result.notes.filter((note) => note.includes('kept local changes'));
+    expect(conflictNotes).toHaveLength(1);
+    expect(conflictNotes[0]).toContain('example');
+    expect(conflictNotes[0]).toContain('healthy');
+    expect(conflictNotes[0]).toContain('skill download --force --all');
+    expect(readFileSync(join(projectRoot, '.agentteams/skills/healthy/SKILL.md'), 'utf8')).toBe('로컬 편집');
   });
 
   it('convention router의 sync도 암묵적으로 강제하지 않는다', async () => {

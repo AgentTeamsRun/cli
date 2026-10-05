@@ -7,6 +7,7 @@ import {
   formatClaudeCodeSessionStartHook,
   sessionSync,
   snapshotConventionFiles,
+  summarizeSkillConflicts,
   type SessionSyncResult,
 } from '../src/commands/session.js';
 
@@ -174,6 +175,42 @@ describe('sessionSync', () => {
   });
 });
 
+describe('summarizeSkillConflicts', () => {
+  // 실측 2026-10-05: 충돌 9건의 기존 notes는 7,266자. 요약 후에는 slug 목록 한 줄만 남는다.
+  const nineSlugs = [
+    'dev-cli',
+    'dev-cron',
+    'dev-daemon',
+    'dev-desktop',
+    'dev-mcp',
+    'docs-product-manual',
+    'impeccable-guide',
+    'triage-coactions',
+    'add-entity-fullstack',
+  ];
+
+  it('collapses nine conflicts into exactly one note carrying every slug and the --force --all remedy', () => {
+    const notes = summarizeSkillConflicts(
+      nineSlugs.map((slug) => ({ slug })),
+      [],
+    );
+
+    expect(notes).toHaveLength(1);
+    for (const slug of nineSlugs) expect(notes[0]).toContain(slug);
+    expect(notes[0]).toContain('--force --all');
+    expect(notes[0]).toContain('skill download');
+  });
+
+  it('returns no note when there is nothing to preserve', () => {
+    expect(summarizeSkillConflicts([], [])).toEqual([]);
+  });
+
+  // conflicts가 비어 있는데 notes만 있는 비정상 입력은 정보를 버리지 않고 그대로 돌려준다.
+  it('passes notes through when conflicts are missing but notes exist', () => {
+    expect(summarizeSkillConflicts(undefined, ['legacy note'])).toEqual(['legacy note']);
+  });
+});
+
 const syncResult = (overrides: Partial<SessionSyncResult> = {}): SessionSyncResult => ({
   reread: [],
   invalidated: [],
@@ -239,6 +276,19 @@ describe('formatClaudeCodeSessionStartHook', () => {
 
     for (const text of expected) expect(context).toContain(text);
     expect(context).not.toContain('SUMMARY-MARKER');
+  });
+
+  // session sync가 충돌 안내를 한 줄로 요약하므로, 훅 출력에도 충돌 상세는 정확히 한 번만 나온다.
+  it('carries a summarized conflict note exactly once', () => {
+    const [note] = summarizeSkillConflicts(
+      ['dev-cli', 'dev-daemon', 'dev-mcp'].map((slug) => ({ slug })),
+      [],
+    );
+    const context = parseHook(syncResult({ skillConflicts: 3, notes: [note], summary: 'SUMMARY-MARKER' }));
+
+    expect(context.split('kept local changes').length - 1).toBe(1);
+    expect(context).toContain('dev-cli, dev-daemon, dev-mcp');
+    expect(context).toContain('--force --all');
   });
 
   // 전역 설치는 사용자 판단이다. 에이전트에게는 사용자에게 알리라고만 한다.
