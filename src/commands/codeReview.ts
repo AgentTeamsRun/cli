@@ -18,7 +18,11 @@ import {
 } from '../api/codeReview.js';
 import { getGitRemoteOriginUrl } from '../utils/git.js';
 import { toNonEmptyString, toPositiveInteger } from '../utils/parsers.js';
-import { EXECUTION_SNAPSHOT_HINT, resolveExecutionSnapshot } from '../utils/agentIdentity.js';
+import {
+  EXECUTION_SNAPSHOT_HINT,
+  resolveExecutionSnapshot,
+  resolvePairedExecutionSnapshot,
+} from '../utils/agentIdentity.js';
 import { withSpinner } from '../utils/spinner.js';
 import { mutationContractFields, writeContractFields } from '../utils/writeContract.js';
 
@@ -293,12 +297,15 @@ export async function executeCodeReviewCommand(
       const resultSummary =
         toNonEmptyString(options.resultSummary) ?? toNonEmptyString(readOptionalFile(options.resultSummaryFile));
       const errorMessage = toNonEmptyString(options.errorMessage);
+      const { runnerType, model } = resolvePairedExecutionSnapshot(options);
 
       const body: Record<string, unknown> = {};
       if (status) body.status = status;
       if (findings !== undefined) body.findings = findings;
       if (resultSummary) body.resultSummary = resultSummary;
       if (errorMessage) body.errorMessage = errorMessage;
+      if (runnerType) body.runnerType = runnerType;
+      if (model) body.model = model;
 
       return withSpinner(
         'Submitting code review result...',

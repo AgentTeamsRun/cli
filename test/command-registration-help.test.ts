@@ -96,5 +96,7 @@ describe('커맨드 등록 모듈 분할', () => {
     const output = await renderNestedHelp('code-review', 'submit-result');
     expect(output).toContain('--result-summary-file <path>');
     expect(output).toContain('takes precedence over --result-summary-file');
+    expect(output).toContain('--runner-type <type>');
+    expect(output).toContain('--model <model>');
   });
 });

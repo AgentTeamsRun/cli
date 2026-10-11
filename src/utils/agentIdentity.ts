@@ -1,4 +1,5 @@
 import { toNonEmptyString } from './parsers.js';
+import { normalizeRunnerType } from './runnerTypeAliases.js';
 
 /**
  * Environment variable every daemon runner sets to the agentConfigId of the
@@ -81,6 +82,36 @@ export function resolveExecutionSnapshot(
     model: toNonEmptyString(options.model) ?? resolveSessionModel(env),
     fastMode: options.fast === true || resolveSessionFastMode(env),
   };
+}
+
+// Known aliases (`claude`, `kimi`, …) count as the same engine; unknown values fall back to a
+// case- and separator-insensitive comparison.
+const sameRunnerType = (a: string, b: string): boolean => {
+  const left = normalizeRunnerType(a) ?? a.trim().toUpperCase().replace(/-/g, '_');
+  const right = normalizeRunnerType(b) ?? b.trim().toUpperCase().replace(/-/g, '_');
+  return left === right;
+};
+
+/**
+ * Engine and model are one pair. `resolveExecutionSnapshot` fills each from the session independently, so
+ * passing only `--runner-type` for a different engine would pair it with the session engine's model. When the
+ * explicit engine differs from the session engine and no model was given, leave the model out instead.
+ */
+export function resolvePairedExecutionSnapshot(
+  options: ExecutionSnapshotOptions,
+  env: NodeJS.ProcessEnv = process.env,
+): ExecutionSnapshot {
+  const snapshot = resolveExecutionSnapshot(options, env);
+  const explicitRunnerType = toNonEmptyString(options.runnerType);
+  const sessionRunnerType = resolveSessionRunnerType(env);
+  if (
+    explicitRunnerType &&
+    !toNonEmptyString(options.model) &&
+    (!sessionRunnerType || !sameRunnerType(explicitRunnerType, sessionRunnerType))
+  ) {
+    return { ...snapshot, model: undefined };
+  }
+  return snapshot;
 }
 
 /**
