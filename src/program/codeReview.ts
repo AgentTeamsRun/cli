@@ -120,7 +120,9 @@ export function registerCodeReviewCommand(program: Command): void {
       .option('--findings-file <path>', 'Read findings JSON array from a local file')
       .option('--result-summary <text>', 'Review result summary (takes precedence over --result-summary-file)')
       .option('--result-summary-file <path>', 'Read review result summary from a local file')
-      .option('--error-message <text>', 'Failure reason when status is FAILED'),
+      .option('--error-message <text>', 'Failure reason when status is FAILED')
+      .option('--runner-type <type>', RUNNER_TYPE_OPTION_DESCRIPTION)
+      .option('--model <model>', 'Model ID snapshot'),
   );
   addLeaf('cancel', 'Cancel a code review', (command) =>
     addWriteContractOptions(command, 'code review').option('--id <id>', 'Code review ID'),

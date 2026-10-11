@@ -322,14 +322,102 @@ describe('code-review submit-result with --findings-file', () => {
   let axiosPostSpy: jest.SpiedFunction<typeof axios.post>;
   let tempDir: string;
 
+  let originalRunnerType: string | undefined;
+  let originalModel: string | undefined;
+
   beforeEach(() => {
     jest.restoreAllMocks();
     axiosPostSpy = jest.spyOn(axios, 'post');
     tempDir = mkdtempSync(join(tmpdir(), 'cli-codereview-result-test-'));
+    originalRunnerType = process.env.AGENTTEAMS_RUNNER_TYPE;
+    originalModel = process.env.AGENTTEAMS_MODEL;
+    delete process.env.AGENTTEAMS_RUNNER_TYPE;
+    delete process.env.AGENTTEAMS_MODEL;
   });
 
   afterEach(() => {
     rmSync(tempDir, { recursive: true, force: true });
+    if (originalRunnerType === undefined) delete process.env.AGENTTEAMS_RUNNER_TYPE;
+    else process.env.AGENTTEAMS_RUNNER_TYPE = originalRunnerType;
+    if (originalModel === undefined) delete process.env.AGENTTEAMS_MODEL;
+    else process.env.AGENTTEAMS_MODEL = originalModel;
+  });
+
+  it('실행 환경의 리뷰어 엔진과 모델을 결과 본문에 전송한다', async () => {
+    axiosPostSpy.mockResolvedValueOnce({ data: { data: { id: 'cdr_abc', status: 'COMPLETED' } } } as any);
+    process.env.AGENTTEAMS_RUNNER_TYPE = 'CODEX';
+    process.env.AGENTTEAMS_MODEL = 'gpt-6-astra';
+
+    await executeCodeReviewCommand(apiUrl, projectId, headers, 'submit-result', { id: 'cdr_abc' });
+
+    expect(axiosPostSpy.mock.calls[0][1]).toEqual({ runnerType: 'CODEX', model: 'gpt-6-astra' });
+  });
+
+  it('명시 옵션의 리뷰어 엔진과 모델이 환경 값보다 우선한다', async () => {
+    axiosPostSpy.mockResolvedValueOnce({ data: { data: { id: 'cdr_abc', status: 'COMPLETED' } } } as any);
+    process.env.AGENTTEAMS_RUNNER_TYPE = 'CLAUDE_CODE';
+    process.env.AGENTTEAMS_MODEL = 'claude-opus-4-7';
+
+    await executeCodeReviewCommand(apiUrl, projectId, headers, 'submit-result', {
+      id: 'cdr_abc',
+      runnerType: 'CODEX',
+      model: 'gpt-6-astra',
+    });
+
+    expect(axiosPostSpy.mock.calls[0][1]).toEqual({ runnerType: 'CODEX', model: 'gpt-6-astra' });
+  });
+
+  it('엔진만 다른 값으로 지정하면 세션 엔진의 모델을 함께 보내지 않는다', async () => {
+    axiosPostSpy.mockResolvedValueOnce({ data: { data: { id: 'cdr_abc', status: 'COMPLETED' } } } as any);
+    process.env.AGENTTEAMS_RUNNER_TYPE = 'CLAUDE_CODE';
+    process.env.AGENTTEAMS_MODEL = 'claude-opus-4-7';
+
+    await executeCodeReviewCommand(apiUrl, projectId, headers, 'submit-result', { id: 'cdr_abc', runnerType: 'CODEX' });
+
+    expect(axiosPostSpy.mock.calls[0][1]).toEqual({ runnerType: 'CODEX' });
+  });
+
+  it('세션과 같은 엔진을 표기만 달리 지정하면 세션 모델을 유지한다', async () => {
+    axiosPostSpy.mockResolvedValueOnce({ data: { data: { id: 'cdr_abc', status: 'COMPLETED' } } } as any);
+    process.env.AGENTTEAMS_RUNNER_TYPE = 'CLAUDE_CODE';
+    process.env.AGENTTEAMS_MODEL = 'claude-opus-4-7';
+
+    await executeCodeReviewCommand(apiUrl, projectId, headers, 'submit-result', {
+      id: 'cdr_abc',
+      runnerType: 'claude-code',
+    });
+
+    expect(axiosPostSpy.mock.calls[0][1]).toEqual({ runnerType: 'claude-code', model: 'claude-opus-4-7' });
+  });
+
+  it('세션 엔진의 알려진 별칭을 지정하면 세션 모델을 유지한다', async () => {
+    axiosPostSpy.mockResolvedValueOnce({ data: { data: { id: 'cdr_abc', status: 'COMPLETED' } } } as any);
+    process.env.AGENTTEAMS_RUNNER_TYPE = 'CLAUDE_CODE';
+    process.env.AGENTTEAMS_MODEL = 'claude-opus-4-7';
+
+    await executeCodeReviewCommand(apiUrl, projectId, headers, 'submit-result', {
+      id: 'cdr_abc',
+      runnerType: 'claude',
+    });
+
+    expect(axiosPostSpy.mock.calls[0][1]).toEqual({ runnerType: 'claude', model: 'claude-opus-4-7' });
+  });
+
+  it('실행 스냅샷이 없으면 리뷰어 필드를 생략한다', async () => {
+    axiosPostSpy.mockResolvedValueOnce({ data: { data: { id: 'cdr_abc', status: 'COMPLETED' } } } as any);
+
+    await executeCodeReviewCommand(apiUrl, projectId, headers, 'submit-result', { id: 'cdr_abc' });
+
+    expect(axiosPostSpy.mock.calls[0][1]).toEqual({});
+  });
+
+  it('실행 스냅샷에서 확인된 필드만 전송한다', async () => {
+    axiosPostSpy.mockResolvedValueOnce({ data: { data: { id: 'cdr_abc', status: 'COMPLETED' } } } as any);
+    process.env.AGENTTEAMS_MODEL = 'gpt-6-astra';
+
+    await executeCodeReviewCommand(apiUrl, projectId, headers, 'submit-result', { id: 'cdr_abc' });
+
+    expect(axiosPostSpy.mock.calls[0][1]).toEqual({ model: 'gpt-6-astra' });
   });
 
   it('forwards OTHER impactArea in submitted findings', async () => {
