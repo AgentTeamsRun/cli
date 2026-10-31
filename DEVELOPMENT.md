@@ -4,7 +4,7 @@ This guide is for contributors and developers who want to work on the CLI itself
 
 ## Prerequisites
 
-- Node.js 24+
+- Node.js 26+
 - npm 10+
 - Access to a running AgentTeams API server
 

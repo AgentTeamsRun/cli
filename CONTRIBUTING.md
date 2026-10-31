@@ -18,7 +18,7 @@ This repository is managed as a public mirror of the CLI source-of-truth in the 
 
 ## Development
 
-- Runtime: Node.js 24+
+- Runtime: Node.js 26+
 - Package manager: npm 10+
 
 ```bash
