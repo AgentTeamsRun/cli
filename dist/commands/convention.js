@@ -1,0 +1,973 @@
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, unlinkSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { atomicWriteFileSync } from '../utils/atomicWrite.js';
+import { basename, join, relative, resolve, sep } from 'node:path';
+import httpClient from '../utils/httpClient.js';
+import { isAxiosError } from 'axios';
+import { downloadAllConventions, listConventions } from '../api/convention.js';
+import matter from 'gray-matter';
+import { diffLines, createTwoFilesPatch } from 'diff';
+import { loadConfigWithCredential, findProjectConfig, getConfigurationNotFoundMessage } from '../utils/config.js';
+import { withSpinner } from '../utils/spinner.js';
+import { withoutJsonContentType } from '../utils/httpHeaders.js';
+import { compareVersions, getLatestCliVersion } from '../utils/updateCheck.js';
+import { buildAuthHeaders } from '../utils/apiContext.js';
+import { SKILL_PACKAGE_DIR } from '../utils/skillPackage.js';
+const require = createRequire(import.meta.url);
+const pkg = require('../../package.json');
+export const CONVENTION_DIR = '.agentteams';
+const LEGACY_CONVENTION_DOWNLOAD_DIR = 'conventions';
+export const CONVENTION_INDEX_FILE = 'convention.md';
+/** Exported so `init` can tell "never downloaded" from "up to date" without a second copy of the name. */
+export const CONVENTION_MANIFEST_FILE = 'conventions.manifest.json';
+export function findProjectRoot(cwd) {
+    const configPath = findProjectConfig(cwd ?? process.cwd());
+    if (!configPath)
+        return null;
+    // configPath = /path/.agentteams/config.json → resolve up 2 levels to project root
+    return resolve(configPath, '..', '..');
+}
+function getApiBaseUrl(apiUrl) {
+    return apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl;
+}
+export async function getApiConfigOrThrow(options) {
+    // Credential-aware: a personal-token project keeps no `apiKey` on disk, and
+    // the conventions these commands sync become always-on agent rules — reading
+    // "not initialized" there would silently freeze a project's rules.
+    const config = options?.config ?? (await loadConfigWithCredential());
+    if (!config) {
+        throw new Error(getConfigurationNotFoundMessage(options?.cwd));
+    }
+    return {
+        config,
+        apiUrl: getApiBaseUrl(config.apiUrl),
+        headers: {
+            ...buildAuthHeaders(config.apiKey),
+            'Content-Type': 'application/json',
+        },
+    };
+}
+function normalizeRelativePath(input) {
+    return input.replaceAll('\\', '/');
+}
+function resolveConventionFileAbsolutePath(projectRoot, cwd, fileInput) {
+    // If absolute path, keep as-is.
+    const resolvedFromCwd = resolve(cwd, fileInput);
+    if (resolvedFromCwd === fileInput && existsSync(fileInput)) {
+        return validatePathBoundary(fileInput, projectRoot);
+    }
+    // Common usage: pass `.agentteams/...` from any working directory.
+    if (fileInput.startsWith(`${CONVENTION_DIR}/`) || fileInput.startsWith(`${CONVENTION_DIR}\\`)) {
+        return validatePathBoundary(resolve(projectRoot, fileInput), projectRoot);
+    }
+    // Fallback: if the cwd-based resolution exists, use it.
+    if (existsSync(resolvedFromCwd)) {
+        return validatePathBoundary(resolvedFromCwd, projectRoot);
+    }
+    // Otherwise, return cwd-based resolution to preserve a stable error path.
+    return validatePathBoundary(resolvedFromCwd, projectRoot);
+}
+function validatePathBoundary(absolutePath, projectRoot) {
+    const normalized = resolve(absolutePath);
+    if (!normalized.startsWith(resolve(projectRoot) + sep)) {
+        throw new Error('Path traversal detected: file must be within project root');
+    }
+    return normalized;
+}
+function buildManifestPath(projectRoot) {
+    return join(projectRoot, CONVENTION_DIR, CONVENTION_MANIFEST_FILE);
+}
+function loadManifestOrThrow(projectRoot) {
+    const manifestPath = buildManifestPath(projectRoot);
+    if (!existsSync(manifestPath)) {
+        throw new Error(`Download manifest not found: ${manifestPath}\nRun 'agentteams convention download' first.`);
+    }
+    const raw = readFileSync(manifestPath, 'utf-8');
+    const parsed = JSON.parse(raw);
+    if (parsed?.version !== 1 || !Array.isArray(parsed.entries)) {
+        throw new Error(`Invalid manifest format: ${manifestPath}`);
+    }
+    return parsed;
+}
+/**
+ * 매니페스트에 기록된 배포 경로 목록. `session sync`가 다운로드 전후로 같은 목록을 떠서
+ * 내용이 바뀐 파일을 가려내는 데 쓴다.
+ *
+ * ⚠️ `convention.md`는 이 목록에 **없다** — 매니페스트 엔트리가 아니라 별도 경로
+ * (`downloadReportingTemplate`)로 받아오기 때문이다. 재독 대상을 매니페스트만 보고
+ * 만들면 always_on인 그 파일이 조용히 빠진다. 호출부가 따로 더해야 한다.
+ */
+export function readDeployedConventionPaths(projectRoot) {
+    try {
+        return loadManifestOrCreate(projectRoot).entries.map((entry) => entry.fileRelativePath);
+    }
+    catch {
+        // 매니페스트가 깨졌으면 "배포된 파일 없음"으로 읽는다. 여기서 던지면 세션 시작이 막힌다.
+        return [];
+    }
+}
+function loadManifestOrCreate(projectRoot) {
+    const manifestPath = buildManifestPath(projectRoot);
+    if (!existsSync(manifestPath)) {
+        return {
+            version: 1,
+            generatedAt: new Date().toISOString(),
+            entries: [],
+        };
+    }
+    const raw = readFileSync(manifestPath, 'utf-8');
+    const parsed = JSON.parse(raw);
+    if (parsed?.version !== 1 || !Array.isArray(parsed.entries)) {
+        throw new Error(`Invalid manifest format: ${manifestPath}`);
+    }
+    return parsed;
+}
+function writeManifest(projectRoot, manifest) {
+    const manifestPath = buildManifestPath(projectRoot);
+    atomicWriteFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n', 'utf-8');
+}
+function removeStaleManifestFiles(projectRoot, previous, next) {
+    const livePaths = new Set(next.entries.map((entry) => normalizeRelativePath(entry.fileRelativePath)));
+    const conventionRoot = resolve(projectRoot, CONVENTION_DIR);
+    const skillRoot = resolve(conventionRoot, SKILL_PACKAGE_DIR);
+    for (const entry of previous.entries) {
+        const relativePath = normalizeRelativePath(entry.fileRelativePath);
+        if (livePaths.has(relativePath)) {
+            continue;
+        }
+        const absolutePath = resolve(projectRoot, relativePath);
+        // manifest가 손상됐더라도 프로젝트 밖이나 skill download 소유 경로는 절대 건드리지 않는다.
+        if (!absolutePath.startsWith(`${conventionRoot}${sep}`) ||
+            absolutePath === skillRoot ||
+            absolutePath.startsWith(`${skillRoot}${sep}`)) {
+            continue;
+        }
+        if (existsSync(absolutePath)) {
+            unlinkSync(absolutePath);
+        }
+    }
+}
+function findUnmanagedConventionFiles(projectRoot, manifest) {
+    const conventionRoot = join(projectRoot, CONVENTION_DIR);
+    const managedPaths = new Set(manifest.entries.map((entry) => normalizeRelativePath(entry.fileRelativePath)));
+    const excludedDirectories = new Set(['platform', SKILL_PACKAGE_DIR, LEGACY_CONVENTION_DOWNLOAD_DIR]);
+    const unmanagedFiles = [];
+    for (const category of readdirSync(conventionRoot, { withFileTypes: true })) {
+        if (!category.isDirectory() || excludedDirectories.has(category.name)) {
+            continue;
+        }
+        const categoryPath = join(conventionRoot, category.name);
+        for (const file of readdirSync(categoryPath, { withFileTypes: true })) {
+            if (!file.isFile() || !file.name.toLowerCase().endsWith('.md')) {
+                continue;
+            }
+            const relativePath = normalizeRelativePath(relative(projectRoot, join(categoryPath, file.name)));
+            if (!managedPaths.has(relativePath)) {
+                unmanagedFiles.push(relativePath);
+            }
+        }
+    }
+    return unmanagedFiles.sort();
+}
+function toFileList(input) {
+    return Array.isArray(input) ? input : [input];
+}
+function hasAnyDiff(a, b) {
+    const parts = diffLines(a, b);
+    return parts.some((p) => p.added || p.removed);
+}
+function createUnifiedDiff(fileLabel, serverText, localText) {
+    return createTwoFilesPatch(`${fileLabel} (server)`, `${fileLabel} (local)`, serverText, localText, '', '', {
+        context: 3,
+    });
+}
+function toOptionalString(value) {
+    return typeof value === 'string' ? value : undefined;
+}
+function fileNameToTitle(fileName) {
+    return fileName.replace(/\.md$/i, '').replace(/[-_]+/g, ' ').replace(/\s+/g, ' ').trim();
+}
+function parseCategoryFromAgentteamsPath(fileRelativePath) {
+    const normalized = normalizeRelativePath(fileRelativePath);
+    const parts = normalized.split('/');
+    const agentteamsIndex = parts.indexOf(CONVENTION_DIR);
+    if (agentteamsIndex === -1) {
+        throw new Error(`Convention create requires a file under ${CONVENTION_DIR}/<category>/: ${fileRelativePath}`);
+    }
+    const category = parts[agentteamsIndex + 1];
+    if (!category || category.length === 0) {
+        throw new Error(`Convention create requires a category directory under ${CONVENTION_DIR}/: ${fileRelativePath}`);
+    }
+    if (category === 'platform' || category === 'active-plan') {
+        throw new Error(`Convention create does not allow reserved directories under ${CONVENTION_DIR}/: ${category}`);
+    }
+    return category;
+}
+async function fetchAllConventions(apiUrl, projectId, headers) {
+    const pageSize = 100;
+    let page = 1;
+    let totalPages;
+    const items = [];
+    while (true) {
+        const envelope = await listConventions(apiUrl, projectId, headers, { page, pageSize });
+        const data = envelope?.data;
+        if (!Array.isArray(data)) {
+            break;
+        }
+        items.push(...data);
+        const meta = envelope?.meta;
+        if (typeof meta?.totalPages === 'number') {
+            totalPages = meta.totalPages;
+        }
+        if (totalPages !== undefined) {
+            if (page >= totalPages)
+                break;
+            page += 1;
+            continue;
+        }
+        // Fallback if meta is missing: stop when we got less than a full page.
+        if (data.length < pageSize)
+            break;
+        page += 1;
+    }
+    return items;
+}
+async function fetchConventionsWithContent(apiUrl, projectId, headers) {
+    const envelope = await downloadAllConventions(apiUrl, projectId, headers);
+    const data = envelope?.data;
+    if (!Array.isArray(data)) {
+        throw new Error('Invalid download-all response format');
+    }
+    return data;
+}
+async function fetchPlatformGuidesHash(apiUrl, headers) {
+    const response = await httpClient.get(`${apiUrl}/api/platform/guides/hash`, { headers });
+    const hash = response.data?.data?.hash;
+    if (typeof hash !== 'string' || hash.length === 0) {
+        throw new Error('Invalid platform guides hash response format');
+    }
+    return hash;
+}
+/**
+ * 다운로드 경로 전용: 이 엔드포인트가 없는 구버전 서버(404)면 "해시 없음"으로 계속한다.
+ * 그 외 실패는 그대로 던진다 — 조용히 넘기면 파일과 해시가 어긋난 manifest가 남는다.
+ */
+async function fetchPlatformGuidesHashIfAvailable(apiUrl, headers) {
+    try {
+        return await fetchPlatformGuidesHash(apiUrl, headers);
+    }
+    catch (error) {
+        if (isAxiosError(error) && error.response?.status === 404) {
+            return undefined;
+        }
+        throw error;
+    }
+}
+function toConventionName(convention) {
+    const title = typeof convention.title === 'string' ? convention.title.trim() : '';
+    if (title.length > 0)
+        return title;
+    const fileName = typeof convention.fileName === 'string' ? convention.fileName.trim() : '';
+    if (fileName.length > 0)
+        return fileName;
+    return convention.id;
+}
+function toConventionNameFromManifest(entry) {
+    const title = typeof entry.title === 'string' ? entry.title.trim() : '';
+    if (title.length > 0)
+        return title;
+    const fileName = typeof entry.fileName === 'string' ? entry.fileName.trim() : '';
+    if (fileName.length > 0)
+        return fileName;
+    return entry.conventionId;
+}
+function toOptionalStringOrNullIfPresent(data, key) {
+    if (!Object.prototype.hasOwnProperty.call(data, key)) {
+        return undefined;
+    }
+    const value = data[key];
+    if (value === null) {
+        return null;
+    }
+    if (typeof value === 'string') {
+        const trimmed = value.trim();
+        return trimmed.length > 0 ? trimmed : null;
+    }
+    return undefined;
+}
+export async function conventionShow() {
+    const { config, apiUrl, headers } = await getApiConfigOrThrow();
+    const conventions = await fetchConventionsWithContent(apiUrl, config.projectId, headers);
+    if (!conventions || conventions.length === 0) {
+        throw new Error('No conventions found for this project. Create one via the web dashboard first.');
+    }
+    const sections = [];
+    for (const convention of conventions) {
+        const contentMarkdown = typeof convention.contentMarkdown === 'string' ? convention.contentMarkdown : '';
+        const sectionHeader = `# ${convention.title ?? 'untitled'}\ncategory: ${convention.category ?? 'uncategorized'}\nid: ${convention.id}`;
+        sections.push(`${sectionHeader}\n\n${contentMarkdown}`);
+    }
+    return sections.join('\n\n---\n\n');
+}
+export async function checkConventionFreshness(apiUrl, projectId, headers, projectRoot) {
+    const manifestPath = buildManifestPath(projectRoot);
+    if (!existsSync(manifestPath)) {
+        return {
+            platformGuidesChanged: false,
+            conventionChanges: [],
+        };
+    }
+    const manifest = loadManifestOrThrow(projectRoot);
+    const currentPlatformGuidesHash = await fetchPlatformGuidesHash(apiUrl, headers);
+    const platformGuidesChanged = typeof manifest.platformGuidesHash === 'string' &&
+        manifest.platformGuidesHash.length > 0 &&
+        manifest.platformGuidesHash !== currentPlatformGuidesHash;
+    const serverConventions = await fetchAllConventions(apiUrl, projectId, headers);
+    const serverById = new Map(serverConventions.map((item) => [item.id, item]));
+    const localById = new Map(manifest.entries.map((entry) => [entry.conventionId, entry]));
+    const conventionChanges = [];
+    for (const serverConvention of serverConventions) {
+        const local = localById.get(serverConvention.id);
+        if (!local) {
+            conventionChanges.push({
+                id: serverConvention.id,
+                type: 'new',
+                title: toConventionName(serverConvention),
+                fileName: serverConvention.fileName ?? undefined,
+            });
+            continue;
+        }
+        if (typeof serverConvention.updatedAt === 'string' &&
+            typeof local.updatedAt === 'string' &&
+            serverConvention.updatedAt !== local.updatedAt) {
+            conventionChanges.push({
+                id: serverConvention.id,
+                type: 'updated',
+                title: toConventionName(serverConvention),
+                fileName: serverConvention.fileName ?? local.fileName,
+            });
+        }
+    }
+    for (const localEntry of manifest.entries) {
+        if (serverById.has(localEntry.conventionId))
+            continue;
+        conventionChanges.push({
+            id: localEntry.conventionId,
+            type: 'deleted',
+            title: toConventionNameFromManifest(localEntry),
+            fileName: localEntry.fileName,
+        });
+    }
+    return {
+        platformGuidesChanged,
+        conventionChanges,
+    };
+}
+export function buildStatusSummary(result) {
+    const parts = [];
+    if (result.platformGuidesChanged)
+        parts.push('platform guides');
+    const counts = { new: 0, updated: 0, deleted: 0 };
+    for (const change of result.conventionChanges)
+        counts[change.type] += 1;
+    if (counts.new > 0)
+        parts.push(`${counts.new} new`);
+    if (counts.updated > 0)
+        parts.push(`${counts.updated} updated`);
+    if (counts.deleted > 0)
+        parts.push(`${counts.deleted} deleted`);
+    if (parts.length === 0)
+        return '✓ Conventions/platform guides up to date';
+    return `ACTION REQUIRED: Convention updates available (${parts.join(', ')}). Run 'agentteams convention download' now, then re-read .agentteams/convention.md and changed rule files.`;
+}
+function buildCliSummary(currentCliVersion, latestCliVersion, cliUpdateAvailable) {
+    if (cliUpdateAvailable && latestCliVersion) {
+        return `ACTION REQUIRED: AgentTeams CLI update available (${currentCliVersion} → ${latestCliVersion}). Run 'npm install -g @agentteams/cli' before continuing.`;
+    }
+    if (!latestCliVersion) {
+        return `⚠ AgentTeams CLI latest-version check unavailable. Current CLI: ${currentCliVersion}. Run 'npm view @agentteams/cli version' to verify manually.`;
+    }
+    return `✓ AgentTeams CLI up to date (${currentCliVersion})`;
+}
+function buildCombinedStatusSummary(params) {
+    if (params.conventionUpdateAvailable || params.cliUpdateAvailable) {
+        return [params.cliSummary, params.conventionSummary].join(' ');
+    }
+    return `${params.cliSummary}; ${params.conventionSummary}`;
+}
+async function resolveCliUpdateStatus(options) {
+    const currentCliVersion = options?.currentCliVersion ?? pkg.version;
+    const latestCliVersion = options && 'latestCliVersion' in options ? (options.latestCliVersion ?? null) : await getLatestCliVersion();
+    const cliUpdateAvailable = latestCliVersion ? compareVersions(currentCliVersion, latestCliVersion) : false;
+    return { currentCliVersion, latestCliVersion, cliUpdateAvailable };
+}
+function buildStatusResult(params) {
+    const conventionUpdateAvailable = params.freshness.platformGuidesChanged || params.freshness.conventionChanges.length > 0;
+    const conventionSummary = buildStatusSummary(params.freshness);
+    const cliSummary = buildCliSummary(params.currentCliVersion, params.latestCliVersion, params.cliUpdateAvailable);
+    const actions = {
+        updateCli: params.cliUpdateAvailable ? 'npm install -g @agentteams/cli' : null,
+        syncConventions: conventionUpdateAvailable ? 'agentteams convention download' : null,
+    };
+    const hints = [];
+    if (params.cliUpdateAvailable && params.latestCliVersion) {
+        hints.push(`ACTION REQUIRED: Update AgentTeams CLI first: ${actions.updateCli} (current ${params.currentCliVersion}, latest ${params.latestCliVersion}).`);
+    }
+    else if (!params.latestCliVersion) {
+        hints.push(`WARNING: CLI latest-version check was unavailable. Current CLI is ${params.currentCliVersion}; verify with 'npm view @agentteams/cli version' if freshness matters.`);
+    }
+    else {
+        hints.push(`OK: AgentTeams CLI is up to date (${params.currentCliVersion}).`);
+    }
+    if (conventionUpdateAvailable) {
+        hints.push(`ACTION REQUIRED: Sync conventions now: ${actions.syncConventions}. After syncing, re-read .agentteams/convention.md and any changed rule files before continuing.`);
+    }
+    else if (params.credentialProblem) {
+        hints.push(`WARNING: Convention freshness was NOT checked — ${params.credentialProblem} Conventions may be stale; fix the login, then re-run 'agentteams convention status'.`);
+    }
+    else {
+        hints.push('OK: Conventions and platform guides are up to date.');
+    }
+    return {
+        ...(params.credentialProblem ? { credentialProblem: params.credentialProblem } : {}),
+        updateAvailable: conventionUpdateAvailable,
+        conventionUpdateAvailable,
+        platformGuidesChanged: params.freshness.platformGuidesChanged,
+        conventionChanges: params.freshness.conventionChanges,
+        cliUpdateAvailable: params.cliUpdateAvailable,
+        currentCliVersion: params.currentCliVersion,
+        latestCliVersion: params.latestCliVersion,
+        actionRequired: conventionUpdateAvailable || params.cliUpdateAvailable || Boolean(params.credentialProblem),
+        actions,
+        hints,
+        summary: buildCombinedStatusSummary({
+            conventionSummary,
+            cliSummary,
+            conventionUpdateAvailable,
+            cliUpdateAvailable: params.cliUpdateAvailable,
+        }),
+    };
+}
+/**
+ * Read-only freshness check exposed as `agentteams convention status`.
+ *
+ * Compares the local download manifest against the server and reports whether an
+ * update is available — it never downloads or mutates anything. Degrades gracefully
+ * (exit 0, updateAvailable=false) when the project is not configured or has no local
+ * conventions yet, so callers can safely "check then skip when unavailable".
+ *
+ * "Not configured" and "configured but the credential failed" are reported
+ * differently on purpose. The platform convention makes this the session-start
+ * freshness gate, so a project whose login is broken must say so instead of
+ * quietly claiming its rules are current.
+ */
+export async function conventionStatus(options) {
+    const projectRoot = findProjectRoot(options?.cwd);
+    const cliStatus = await resolveCliUpdateStatus(options);
+    let config = options?.config ?? null;
+    let credentialProblem;
+    if (!config) {
+        try {
+            config = await loadConfigWithCredential();
+        }
+        catch (error) {
+            credentialProblem = error instanceof Error ? error.message : String(error);
+        }
+    }
+    // Not configured or no local conventions → nothing to compare; treat as up to date.
+    if (!config || !projectRoot) {
+        return buildStatusResult({
+            freshness: { platformGuidesChanged: false, conventionChanges: [] },
+            ...cliStatus,
+            // Only a project that exists locally can have a credential problem worth
+            // reporting; without a project root there is nothing to be stale.
+            ...(credentialProblem && projectRoot ? { credentialProblem } : {}),
+        });
+    }
+    const apiUrl = getApiBaseUrl(config.apiUrl);
+    const headers = {
+        ...buildAuthHeaders(config.apiKey),
+        'Content-Type': 'application/json',
+    };
+    const freshness = await checkConventionFreshness(apiUrl, config.projectId, headers, projectRoot);
+    return buildStatusResult({ freshness, ...cliStatus });
+}
+export async function conventionList() {
+    const { config, apiUrl, headers } = await getApiConfigOrThrow();
+    const conventions = await fetchAllConventions(apiUrl, config.projectId, headers);
+    if (!Array.isArray(conventions)) {
+        return { data: conventions };
+    }
+    return {
+        data: conventions.map((item) => ({
+            id: item.id,
+            title: item.title,
+            category: item.category,
+            fileName: item.fileName,
+            updatedAt: item.updatedAt,
+            createdAt: item.createdAt,
+        })),
+        meta: {
+            total: conventions.length,
+            page: 1,
+            pageSize: conventions.length,
+            totalPages: 1,
+        },
+    };
+}
+function toSafeFileName(input) {
+    return input
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 60);
+}
+function toSafeDirectoryName(input) {
+    const normalized = toSafeFileName(input);
+    return normalized.length > 0 ? normalized : 'uncategorized';
+}
+function buildConventionFileName(convention) {
+    if (convention.fileName && convention.fileName.trim().length > 0) {
+        return convention.fileName.trim();
+    }
+    const titleSegment = convention.title ? toSafeFileName(convention.title) : '';
+    const prefix = titleSegment.length > 0 ? titleSegment : 'convention';
+    return `${prefix}.md`;
+}
+function normalizeMarkdownFileName(input) {
+    const trimmed = input.trim();
+    const base = trimmed.toLowerCase().endsWith('.md') ? trimmed.slice(0, -3) : trimmed;
+    const safeBase = toSafeFileName(base);
+    const resolvedBase = safeBase.length > 0 ? safeBase : 'guide';
+    return `${resolvedBase}.md`;
+}
+function buildPlatformGuideFileName(guide) {
+    if (typeof guide.fileName === 'string' && guide.fileName.trim().length > 0) {
+        return normalizeMarkdownFileName(guide.fileName);
+    }
+    if (typeof guide.title === 'string' && guide.title.trim().length > 0) {
+        return `${toSafeFileName(guide.title)}.md`;
+    }
+    return 'guide.md';
+}
+async function downloadPlatformGuides(projectRoot, apiUrl, headers) {
+    try {
+        const response = await httpClient.get(`${apiUrl}/api/platform/guides`, { headers });
+        const guides = response.data?.data;
+        if (!Array.isArray(guides) || guides.length === 0) {
+            return { written: 0, hashes: {} };
+        }
+        const baseDir = join(projectRoot, CONVENTION_DIR, 'platform');
+        rmSync(baseDir, { recursive: true, force: true });
+        mkdirSync(baseDir, { recursive: true });
+        const fileNameCount = new Map();
+        const hashes = {};
+        let written = 0;
+        for (const guide of guides) {
+            if (!guide || typeof guide.content !== 'string') {
+                continue;
+            }
+            const baseFileName = buildPlatformGuideFileName(guide);
+            const seenCount = fileNameCount.get(baseFileName) ?? 0;
+            fileNameCount.set(baseFileName, seenCount + 1);
+            const fileName = seenCount === 0 ? baseFileName : baseFileName.replace(/\.md$/, `-${seenCount + 1}.md`);
+            const filePath = join(baseDir, fileName);
+            atomicWriteFileSync(filePath, guide.content, 'utf-8');
+            if (typeof guide.hash === 'string' && guide.hash.trim().length > 0) {
+                hashes[fileName] = guide.hash.trim();
+            }
+            written += 1;
+        }
+        return { written, hashes };
+    }
+    catch (error) {
+        if (isAxiosError(error) && error.response?.status === 404) {
+            return { written: 0, hashes: {} };
+        }
+        throw error;
+    }
+}
+/**
+ * 이번 다운로드의 플랫폼 가이드 해시를 manifest에 보존한다.
+ *
+ * 컨벤션 다운로드 블록은 프로젝트 컨벤션이 하나도 없으면 manifest를 쓰지 않고 빠져나가므로,
+ * 그 경로에서도 해시가 남도록 별도로 load-or-create 해서 병합한다.
+ *
+ * 두 해시를 **항상 함께** 기록한다. 집계 해시(`platformGuidesHash`)가 비면
+ * `checkConventionFreshness`가 가이드 변경을 영원히 감지하지 못하고(문자열일 때만 비교한다),
+ * 가이드별 해시(`platformGuideHashes`)가 낡으면 방금 덮어쓴 본문과 짝이 맞지 않는 해시를
+ * `guideHash`로 보내 원인 파악이 어려운 GUIDE_OUTDATED가 난다.
+ * 그래서 해시를 못 받은 경우(구버전 서버)는 조기 반환이 아니라 키 삭제로 처리한다 —
+ * 파일 내용과 해시는 언제나 같은 다운로드에서 나와야 한다.
+ */
+function persistPlatformGuideHashes(projectRoot, hashes, platformGuidesHash) {
+    const manifest = loadManifestOrCreate(projectRoot);
+    if (platformGuidesHash) {
+        manifest.platformGuidesHash = platformGuidesHash;
+    }
+    else {
+        delete manifest.platformGuidesHash;
+    }
+    if (Object.keys(hashes).length > 0) {
+        manifest.platformGuideHashes = hashes;
+    }
+    else {
+        delete manifest.platformGuideHashes;
+    }
+    writeManifest(projectRoot, manifest);
+}
+/**
+ * 컨벤션 템플릿(`.agentteams/convention.md`)을 한 번 내려받아 덮어쓴다.
+ *
+ * `agentConfigId`를 아는 호출부(`init`)는 그 값을 넘겨 목록 조회를 통째로 건너뛴다.
+ */
+/**
+ * 어떤 에이전트를 쓸지 모를 때의 폴백: 프로젝트의 첫 AgentConfig를 고른다.
+ *
+ * `agentteams convention download`를 직접 실행하는 사용자에게는 고를 근거가 없어서 남겨둔 경로다.
+ * `/convention` 본문의 PERSONAL 항목은 URL의 AgentConfig가 아니라 **호출자 자격증명**으로
+ * 걸러진다. 폴백으로 아무 config를 골라도 개인 항목 노출 범위는 달라지지 않는다.
+ *
+ * 남은 config 의존성은 존재 여부뿐이다. 존재하지 않는 id면 404이고, 호출자 축을 해석하지
+ * 못하면 대상 AgentConfig 소유자로 폴백하지 않고 PROJECT만 실린다.
+ */
+async function resolveFallbackAgentConfigId(config, apiUrl, headers) {
+    const agentConfigResponse = await httpClient.get(`${apiUrl}/api/projects/${config.projectId}/agent-configs`, {
+        headers,
+    });
+    const agentConfigs = agentConfigResponse.data?.data;
+    if (!Array.isArray(agentConfigs) || agentConfigs.length === 0) {
+        return null;
+    }
+    const firstAgentConfig = agentConfigs[0];
+    if (!firstAgentConfig?.id || typeof firstAgentConfig.id !== 'string') {
+        return null;
+    }
+    return firstAgentConfig.id;
+}
+async function downloadReportingTemplate(projectRoot, config, apiUrl, headers, agentConfigId) {
+    const resolvedAgentConfigId = agentConfigId ?? (await resolveFallbackAgentConfigId(config, apiUrl, headers));
+    if (!resolvedAgentConfigId) {
+        return false;
+    }
+    const templateResponse = await httpClient.get(`${apiUrl}/api/projects/${config.projectId}/agent-configs/${resolvedAgentConfigId}/convention`, { headers });
+    const content = templateResponse.data?.data?.content;
+    if (typeof content !== 'string') {
+        return false;
+    }
+    const conventionPath = join(projectRoot, CONVENTION_DIR, CONVENTION_INDEX_FILE);
+    atomicWriteFileSync(conventionPath, content, 'utf-8');
+    return true;
+}
+export async function conventionDownload(options) {
+    const { config, apiUrl, headers } = await getApiConfigOrThrow(options);
+    const projectRoot = findProjectRoot(options?.cwd);
+    if (!projectRoot) {
+        throw new Error("No .agentteams directory found. Run 'agentteams init' first.");
+    }
+    const conventionRoot = join(projectRoot, CONVENTION_DIR);
+    if (!existsSync(conventionRoot)) {
+        throw new Error(`Convention directory not found: ${conventionRoot}\nRun 'agentteams init' first.`);
+    }
+    const hasReportingTemplate = await withSpinner('Downloading reporting template...', () => downloadReportingTemplate(projectRoot, config, apiUrl, headers, options?.agentConfigId));
+    // `agentConfigId`를 명시한 호출부(`init`)에게 이 다운로드는 선택이 아니다. 예전 init은
+    // 템플릿 응답이 어긋나면 그 자리에서 실패했는데, 기록을 이쪽으로 넘기면서 조용히 넘어가면
+    // init은 성공으로 끝나고 `✓ Convention saved`까지 출력하지만 `.agentteams/convention.md`는
+    // 없는 상태가 된다. 모든 러너가 always_on으로 읽는 파일이라 그 거짓 성공의 대가가 크다.
+    // (agentConfigId를 모르는 직접 실행은 "고를 에이전트가 없음"이 정상 상태라 그대로 둔다.)
+    if (options?.agentConfigId && !hasReportingTemplate) {
+        throw new Error('Invalid convention template response from server.');
+    }
+    const platformGuides = await withSpinner('Downloading platform guides...', () => downloadPlatformGuides(projectRoot, apiUrl, headers));
+    const platformGuideCount = platformGuides.written;
+    // 컨벤션 유무와 무관하게 가이드 해시를 확보한다. 컨벤션 블록 안에서만 가져오면
+    // 컨벤션이 없는 프로젝트의 manifest에는 집계 해시가 영원히 비고,
+    // `convention status`가 플랫폼 가이드 변경을 절대 감지하지 못한다.
+    const platformGuidesHash = await fetchPlatformGuidesHashIfAvailable(apiUrl, headers);
+    const conventions = await withSpinner('Downloading conventions...', async () => {
+        const conventionList = await fetchConventionsWithContent(apiUrl, config.projectId, headers);
+        const previousManifest = loadManifestOrCreate(projectRoot);
+        const legacyDir = join(projectRoot, CONVENTION_DIR, LEGACY_CONVENTION_DOWNLOAD_DIR);
+        rmSync(legacyDir, { recursive: true, force: true });
+        const fileNameCount = new Map();
+        const manifest = {
+            version: 1,
+            generatedAt: new Date().toISOString(),
+            platformGuidesHash,
+            ...(Object.keys(platformGuides.hashes).length > 0 ? { platformGuideHashes: platformGuides.hashes } : {}),
+            entries: [],
+        };
+        for (const convention of conventionList) {
+            const contentMarkdown = typeof convention.contentMarkdown === 'string' ? convention.contentMarkdown : '';
+            const baseFileName = buildConventionFileName(convention);
+            const categoryName = typeof convention.category === 'string' ? convention.category : '';
+            const categoryDir = toSafeDirectoryName(categoryName);
+            const duplicateKey = `${categoryDir}/${baseFileName}`;
+            const seenCount = fileNameCount.get(duplicateKey) ?? 0;
+            fileNameCount.set(duplicateKey, seenCount + 1);
+            const fileName = seenCount === 0 ? baseFileName : baseFileName.replace(/\.md$/, `-${seenCount + 1}.md`);
+            const filePath = join(projectRoot, CONVENTION_DIR, categoryDir, fileName);
+            mkdirSync(join(projectRoot, CONVENTION_DIR, categoryDir), { recursive: true });
+            atomicWriteFileSync(filePath, contentMarkdown, 'utf-8');
+            manifest.entries.push({
+                conventionId: String(convention.id),
+                fileRelativePath: normalizeRelativePath(relative(projectRoot, filePath)),
+                fileName,
+                categoryDir,
+                title: toOptionalString(convention.title),
+                category: toOptionalString(convention.category),
+                scope: toOptionalString(convention.scope),
+                updatedAt: toOptionalString(convention.updatedAt),
+                downloadedAt: new Date().toISOString(),
+            });
+        }
+        // 새 목록에 없는 파일만 이전 manifest의 소유권 기록으로 지운다. 디렉터리를 스윕하면
+        // 사용자가 같은 카테고리에 둔 파일까지 지워지고, 빈 서버 응답에서는 정리 자체가 빠진다.
+        removeStaleManifestFiles(projectRoot, previousManifest, manifest);
+        writeManifest(projectRoot, manifest);
+        return conventionList;
+    });
+    // 컨벤션 유무와 무관하게 이번 다운로드의 플랫폼 가이드 해시를 manifest에 반영한다.
+    persistPlatformGuideHashes(projectRoot, platformGuides.hashes, platformGuidesHash);
+    const unmanagedFiles = findUnmanagedConventionFiles(projectRoot, loadManifestOrCreate(projectRoot));
+    const warning = unmanagedFiles.length > 0
+        ? `Unmanaged convention files are still present: ${unmanagedFiles.join(', ')}. ` +
+            `They were not deleted because they are not recorded in ${CONVENTION_MANIFEST_FILE}. Remove them manually if they are stale.`
+        : undefined;
+    if (!conventions || conventions.length === 0) {
+        if (hasReportingTemplate) {
+            const platformLine = platformGuideCount > 0
+                ? `\nDownloaded ${platformGuideCount} platform guide file(s) into ${CONVENTION_DIR}/platform`
+                : '';
+            return {
+                message: `Convention sync completed.\nUpdated ${CONVENTION_DIR}/${CONVENTION_INDEX_FILE}\nNo project conventions found.${platformLine}`,
+                ...(warning ? { unmanagedFiles, warning } : {}),
+            };
+        }
+        throw new Error('No conventions found for this project. Create one via the web dashboard first.');
+    }
+    const reportingLine = hasReportingTemplate ? `Updated ${CONVENTION_DIR}/${CONVENTION_INDEX_FILE}\n` : '';
+    const platformLine = platformGuideCount > 0
+        ? `Downloaded ${platformGuideCount} platform guide file(s) into ${CONVENTION_DIR}/platform\n`
+        : '';
+    return {
+        message: `Convention sync completed.\n${reportingLine}${platformLine}Downloaded ${conventions.length} file(s) into category directories under ${CONVENTION_DIR}`,
+        ...(warning ? { unmanagedFiles, warning } : {}),
+    };
+}
+function parseConventionMarkdown(fileRelativePath, markdown) {
+    try {
+        return matter(markdown);
+    }
+    catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        throw new Error(`Failed to parse frontmatter YAML for ${fileRelativePath}: ${reason}`);
+    }
+}
+export async function conventionCreate(options) {
+    const { config, apiUrl, headers } = await getApiConfigOrThrow(options);
+    const projectRoot = findProjectRoot(options?.cwd);
+    if (!projectRoot) {
+        throw new Error("No .agentteams directory found. Run 'agentteams init' first.");
+    }
+    const manifest = loadManifestOrCreate(projectRoot);
+    const files = toFileList(options.file);
+    const results = [];
+    for (const fileInput of files) {
+        const cwd = options.cwd ?? process.cwd();
+        const absolutePath = resolveConventionFileAbsolutePath(projectRoot, cwd, fileInput);
+        if (!existsSync(absolutePath)) {
+            throw new Error(`File not found: ${normalizeRelativePath(relative(projectRoot, absolutePath))}`);
+        }
+        const fileRelativePath = normalizeRelativePath(relative(projectRoot, absolutePath));
+        const category = parseCategoryFromAgentteamsPath(fileRelativePath);
+        const fileName = basename(absolutePath);
+        if (!fileName.toLowerCase().endsWith('.md')) {
+            throw new Error(`Convention create requires a .md file: ${fileRelativePath}`);
+        }
+        const existingEntry = manifest.entries.find((e) => e.fileRelativePath === fileRelativePath);
+        if (existingEntry) {
+            throw new Error(`File is already tracked in the manifest (use update instead): ${fileRelativePath}\n` +
+                `- conventionId: ${existingEntry.conventionId}`);
+        }
+        const localMarkdown = readFileSync(absolutePath, 'utf-8');
+        const parsed = parseConventionMarkdown(fileRelativePath, localMarkdown);
+        const frontmatter = (parsed.data ?? {});
+        const bodyMarkdown = String(parsed.content ?? '');
+        const content = bodyMarkdown;
+        const title = toOptionalString(frontmatter.title)?.trim() || fileNameToTitle(fileName);
+        const payload = {
+            title,
+            category,
+            fileName,
+            content,
+        };
+        const trigger = toOptionalString(frontmatter.trigger)?.trim();
+        const description = toOptionalString(frontmatter.description)?.trim();
+        const agentInstruction = toOptionalString(frontmatter.agentInstruction);
+        const scope = toOptionalString(options.scope)?.trim() || toOptionalString(frontmatter.scope)?.trim();
+        if (trigger)
+            payload.trigger = trigger;
+        if (description)
+            payload.description = description;
+        if (typeof agentInstruction === 'string' && agentInstruction.trim().length > 0) {
+            payload.agentInstruction = agentInstruction.trimEnd();
+        }
+        if (scope)
+            payload.scope = scope;
+        const response = await withSpinner(`Creating convention for ${fileRelativePath}...`, () => httpClient.post(`${apiUrl}/api/projects/${config.projectId}/conventions`, payload, { headers }));
+        const created = response.data?.data;
+        const createdId = typeof created?.id === 'string' ? created.id : 'unknown';
+        const createdUpdatedAt = typeof created?.updatedAt === 'string' ? created.updatedAt : undefined;
+        const createdWebUrl = typeof created?.webUrl === 'string' ? created.webUrl : undefined;
+        const now = new Date().toISOString();
+        manifest.generatedAt = now;
+        manifest.entries.push({
+            conventionId: createdId,
+            fileRelativePath,
+            fileName,
+            categoryDir: category,
+            title,
+            category,
+            ...(createdUpdatedAt ? { updatedAt: createdUpdatedAt } : {}),
+            downloadedAt: now,
+            lastUploadedAt: now,
+            ...(createdUpdatedAt ? { lastKnownUpdatedAt: createdUpdatedAt } : {}),
+        });
+        writeManifest(projectRoot, manifest);
+        results.push(`[OK] ${fileRelativePath}: Created. (conventionId=${createdId})`);
+        if (createdWebUrl) {
+            results.push(`webUrl: ${createdWebUrl}`);
+        }
+        results.push(`[OK] ${CONVENTION_DIR}/${CONVENTION_MANIFEST_FILE}: Updated.`);
+        results.push(`[NEXT] Run 'agentteams convention download' to refresh convention.md and canonical markdown.`);
+    }
+    return results.join('\n');
+}
+export async function conventionUpdate(options) {
+    const { config, apiUrl, headers } = await getApiConfigOrThrow(options);
+    const projectRoot = findProjectRoot(options?.cwd);
+    if (!projectRoot) {
+        throw new Error("No .agentteams directory found. Run 'agentteams init' first.");
+    }
+    const manifest = loadManifestOrThrow(projectRoot);
+    const files = toFileList(options.file);
+    const apply = options.apply === true;
+    const results = [];
+    for (const fileInput of files) {
+        const cwd = options.cwd ?? process.cwd();
+        const absolutePath = resolveConventionFileAbsolutePath(projectRoot, cwd, fileInput);
+        const fileRelativePath = normalizeRelativePath(relative(projectRoot, absolutePath));
+        const manifestEntry = manifest.entries.find((e) => e.fileRelativePath === fileRelativePath);
+        if (!manifestEntry) {
+            const available = manifest.entries
+                .map((e) => e.fileRelativePath)
+                .sort()
+                .slice(0, 30);
+            throw new Error(`Only downloaded convention files can be updated: ${fileInput}\n` +
+                `- resolved: ${fileRelativePath}\n` +
+                `Run 'agentteams convention download' first, or pass a file path listed in the manifest.\n` +
+                (available.length > 0 ? `Examples (partial):\n- ${available.join('\n- ')}` : ''));
+        }
+        const conventionId = manifestEntry.conventionId;
+        const [serverDetail, serverMarkdown, localMarkdown] = await withSpinner(`Preparing update for ${fileRelativePath}...`, async () => {
+            const detailResponse = await httpClient.get(`${apiUrl}/api/projects/${config.projectId}/conventions/${conventionId}`, { headers });
+            const downloadResponse = await httpClient.get(`${apiUrl}/api/projects/${config.projectId}/conventions/${conventionId}/download`, { headers, responseType: 'text' });
+            const local = readFileSync(absolutePath, 'utf-8');
+            return [detailResponse.data?.data, String(downloadResponse.data), local];
+        });
+        if (!hasAnyDiff(serverMarkdown, localMarkdown)) {
+            results.push(`[SKIP] ${fileRelativePath}: No changes detected.`);
+            continue;
+        }
+        const diffText = createUnifiedDiff(fileRelativePath, serverMarkdown, localMarkdown);
+        results.push(diffText.trimEnd());
+        if (!apply) {
+            results.push(`[DRY-RUN] ${fileRelativePath}: Printed diff only (no server changes).`);
+            continue;
+        }
+        const parsed = parseConventionMarkdown(fileRelativePath, localMarkdown);
+        const frontmatter = (parsed.data ?? {});
+        const bodyMarkdown = String(parsed.content ?? '');
+        const content = bodyMarkdown;
+        if (typeof serverDetail?.updatedAt !== 'string' || serverDetail.updatedAt.length === 0) {
+            throw new Error(`[ERROR] ${fileRelativePath}: Server response is missing updatedAt.`);
+        }
+        const payload = {
+            updatedAt: serverDetail.updatedAt,
+            content,
+        };
+        const trigger = toOptionalStringOrNullIfPresent(frontmatter, 'trigger');
+        const description = toOptionalStringOrNullIfPresent(frontmatter, 'description');
+        const agentInstruction = toOptionalStringOrNullIfPresent(frontmatter, 'agentInstruction');
+        if (trigger !== undefined)
+            payload.trigger = trigger;
+        if (description !== undefined)
+            payload.description = description;
+        if (agentInstruction !== undefined)
+            payload.agentInstruction = agentInstruction;
+        const updatedResponse = await withSpinner(`Uploading ${fileRelativePath}...`, () => httpClient.put(`${apiUrl}/api/projects/${config.projectId}/conventions/${conventionId}`, payload, { headers }));
+        const newUpdatedAt = updatedResponse.data?.data?.updatedAt;
+        const newWebUrl = typeof updatedResponse.data?.data?.webUrl === 'string' ? updatedResponse.data.data.webUrl : undefined;
+        const now = new Date().toISOString();
+        manifestEntry.lastUploadedAt = now;
+        if (typeof newUpdatedAt === 'string') {
+            manifestEntry.lastKnownUpdatedAt = newUpdatedAt;
+        }
+        writeManifest(projectRoot, manifest);
+        results.push(`[OK] ${fileRelativePath}: Update applied. (conventionId=${conventionId})`);
+        if (newWebUrl) {
+            results.push(`webUrl: ${newWebUrl}`);
+        }
+    }
+    return results.join('\n\n');
+}
+export async function conventionDelete(options) {
+    const { config, apiUrl, headers } = await getApiConfigOrThrow(options);
+    const projectRoot = findProjectRoot(options?.cwd);
+    if (!projectRoot) {
+        throw new Error("No .agentteams directory found. Run 'agentteams init' first.");
+    }
+    const manifest = loadManifestOrThrow(projectRoot);
+    const files = toFileList(options.file);
+    const apply = options.apply === true;
+    const results = [];
+    for (const fileInput of files) {
+        const cwd = options.cwd ?? process.cwd();
+        const absolutePath = resolveConventionFileAbsolutePath(projectRoot, cwd, fileInput);
+        const fileRelativePath = normalizeRelativePath(relative(projectRoot, absolutePath));
+        const entryIndex = manifest.entries.findIndex((e) => e.fileRelativePath === fileRelativePath);
+        if (entryIndex === -1) {
+            const available = manifest.entries
+                .map((e) => e.fileRelativePath)
+                .sort()
+                .slice(0, 30);
+            throw new Error(`Only downloaded convention files can be deleted: ${fileInput}\n` +
+                `- resolved: ${fileRelativePath}\n` +
+                `Run 'agentteams convention download' first, or pass a file path listed in the manifest.\n` +
+                (available.length > 0 ? `Examples (partial):\n- ${available.join('\n- ')}` : ''));
+        }
+        const entry = manifest.entries[entryIndex];
+        const conventionId = entry.conventionId;
+        results.push(`[PLAN] ${fileRelativePath}: Will delete conventionId=${conventionId}`);
+        if (!apply) {
+            results.push(`[DRY-RUN] ${fileRelativePath}: Planned only (no server delete).`);
+            continue;
+        }
+        await withSpinner(`Deleting convention for ${fileRelativePath}...`, () => httpClient.delete(`${apiUrl}/api/projects/${config.projectId}/conventions/${conventionId}`, {
+            headers: withoutJsonContentType(headers),
+        }));
+        // After a successful server delete, also clean up local files/manifest.
+        try {
+            unlinkSync(absolutePath);
+        }
+        catch {
+            // ignore
+        }
+        manifest.entries.splice(entryIndex, 1);
+        writeManifest(projectRoot, manifest);
+        results.push(`[OK] ${fileRelativePath}: Deleted. (conventionId=${conventionId})`);
+    }
+    return results.join('\n');
+}
+//# sourceMappingURL=convention.js.map
