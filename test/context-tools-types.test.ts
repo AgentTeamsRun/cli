@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const cliRoot = fileURLToPath(new URL('..', import.meta.url));
-const tscPath = join(cliRoot, 'node_modules', 'typescript', 'bin', 'tsc');
+const tscPath = join(cliRoot, 'node_modules', 'typescript-7', 'bin', 'tsc');
 const fixturePath = join(cliRoot, 'test', 'fixtures', 'context-tools-types.ts');
 
 describe('context-tools public type contract', () => {

@@ -76,7 +76,7 @@ describe('agentteams mcp — built CLI entry point', () => {
   beforeAll(() => {
     // Built here rather than assumed present, so the smoke runs in CI (which has
     // no build step) exactly as it does locally.
-    execFileSync(process.execPath, [join(cliRoot, 'node_modules', 'typescript', 'bin', 'tsc')], {
+    execFileSync(process.execPath, [join(cliRoot, 'node_modules', 'typescript-7', 'bin', 'tsc')], {
       cwd: cliRoot,
       stdio: 'inherit',
     });

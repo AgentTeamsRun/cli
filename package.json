@@ -1,6 +1,6 @@
 {
   "name": "@agentteams/cli",
-  "version": "0.1.127",
+  "version": "0.1.128",
   "description": "CLI tool for AgentTeams API",
   "type": "module",
   "main": "dist/index.js",
@@ -43,7 +43,7 @@
     "node": ">=20.12.0"
   },
   "dependencies": {
-    "@agentteams/context-tools": "0.1.11",
+    "@agentteams/context-tools": "0.1.12",
     "@clack/prompts": "^1.4.0",
     "@modelcontextprotocol/server": "2.0.0",
     "axios": "^1.16.1",
@@ -59,13 +59,14 @@
     "@eslint/js": "^9.39.4",
     "@jest/globals": "^29.7.0",
     "@types/jest": "^29.5.14",
-    "@types/node": "^25.9.1",
+    "@types/node": "^26.6.6",
     "eslint": "^9.39.4",
     "eslint-plugin-import": "^2.32.0",
     "jest": "^29.7.0",
     "prettier": "^3.8.4",
     "ts-jest": "^29.4.11",
-    "typescript": "^6.0.3",
+    "typescript": "npm:@typescript/typescript6@^6.0.2",
+    "typescript-7": "npm:typescript@^7.0.2",
     "typescript-eslint": "^8.61.0"
   }
 }
