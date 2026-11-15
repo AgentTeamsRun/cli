@@ -1174,17 +1174,15 @@ async function runConfiguredProjectInit(
   // would be ignored on this path alone, and a leftover legacy `apiKey` would be
   // read as an *explicit* key — skipping the migration warning and the refresh
   // slot. `apiUrl` follows the same env-first rule as `resolveApiUrl()`.
-  const runtimeConfig = await loadConfigWithCredential({
-    teamId: projectConfig.teamId,
-    projectId: projectConfig.projectId,
-    apiUrl: normalizeApiUrl(process.env.AGENTTEAMS_API_URL || projectConfig.apiUrl || DEFAULT_API_URL),
-    // `loadConfigWithCredential` normally discovers the project from
-    // `process.cwd()`, but init may repair an explicit `options.cwd`. An empty
-    // override is intentional: it prevents a legacy key from an unrelated
-    // ambient project from becoming this binding's fallback credential.
-    apiKey: process.env.AGENTTEAMS_API_KEY || projectConfig.apiKey || '',
-    ...(projectConfig.authMode ? { authMode: projectConfig.authMode } : {}),
-  });
+  const runtimeConfig = await loadConfigWithCredential(
+    {
+      teamId: projectConfig.teamId,
+      projectId: projectConfig.projectId,
+      apiUrl: normalizeApiUrl(process.env.AGENTTEAMS_API_URL || projectConfig.apiUrl || DEFAULT_API_URL),
+      ...(projectConfig.authMode ? { authMode: projectConfig.authMode } : {}),
+    },
+    { cwd },
+  );
   if (!runtimeConfig) {
     throw new Error("The existing project binding has no usable credential. Run 'agentteams auth login'.");
   }

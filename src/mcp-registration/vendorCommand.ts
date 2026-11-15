@@ -1,4 +1,5 @@
 import { spawnSync } from 'node:child_process';
+import { resolveWindowsShimSpawn } from './windowsShim.js';
 
 export interface VendorCommandResult {
   status: number | null;
@@ -23,6 +24,7 @@ type SpawnSyncVendorCommand = (
     encoding: BufferEncoding;
     shell: boolean;
     windowsHide: boolean;
+    windowsVerbatimArguments?: boolean;
     input: string;
     timeout: number;
   },
@@ -39,15 +41,20 @@ type SpawnSyncVendorCommand = (
  * word-splitting and to shell history/tracing.
  */
 export const createVendorRunner =
-  (spawnSyncFn: SpawnSyncVendorCommand = spawnSync as SpawnSyncVendorCommand): VendorRunner =>
+  (
+    spawnSyncFn: SpawnSyncVendorCommand = spawnSync as SpawnSyncVendorCommand,
+    platform: NodeJS.Platform = process.platform,
+  ): VendorRunner =>
   (executable, args, options) => {
+    const resolved = resolveWindowsShimSpawn(executable, args, options.env, platform);
     // windows-hide-guard: child-process-alias spawnSyncFn
-    const result = spawnSyncFn(executable, args, {
+    const result = spawnSyncFn(resolved.executable, resolved.args, {
       cwd: options.cwd,
       env: options.env,
       encoding: 'utf-8',
       shell: false,
       windowsHide: true,
+      ...(resolved.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
       // Some registration commands prompt when they detect a TTY; an explicit
       // empty stdin keeps them non-interactive.
       input: '',

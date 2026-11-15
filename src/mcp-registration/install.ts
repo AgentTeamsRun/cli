@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs';
 import type { ToolProfile } from '@agentteams/context-tools';
 import { PROJECT_SCOPE_FILE_MODE, USER_SCOPE_FILE_MODE, writeConfigFileAtomically } from './atomicWrite.js';
 import { findClient, MCP_CLIENTS } from './clients.js';
@@ -132,15 +132,30 @@ function installViaJsonMerge(options: InstallClientOptions, configPath: string, 
     scope,
   });
 
+  let writePath = configPath;
+  try {
+    // Atomic rename replaces a symlink itself; resolve to the real target first.
+    if (lstatSync(configPath, { throwIfNoEntry: false })?.isSymbolicLink()) {
+      writePath = realpathSync(configPath);
+    }
+  } catch (error) {
+    return {
+      ...base,
+      outcome: 'FAILED',
+      detail: `Could not resolve ${configPath}: ${error instanceof Error ? error.message : String(error)}`,
+      manualSnippet,
+    };
+  }
+
   let source = '';
-  if (existsSync(configPath)) {
+  if (existsSync(writePath)) {
     try {
-      source = readFileSync(configPath, 'utf-8');
+      source = readFileSync(writePath, 'utf-8');
     } catch (error) {
       return {
         ...base,
         outcome: 'FAILED',
-        detail: `Could not read ${configPath}: ${error instanceof Error ? error.message : String(error)}`,
+        detail: `Could not read ${writePath}: ${error instanceof Error ? error.message : String(error)}`,
         manualSnippet,
       };
     }
@@ -188,7 +203,7 @@ function installViaJsonMerge(options: InstallClientOptions, configPath: string, 
 
   try {
     const written = writeConfigFileAtomically(
-      configPath,
+      writePath,
       edited.text,
       scope === 'user' ? USER_SCOPE_FILE_MODE : PROJECT_SCOPE_FILE_MODE,
       scope === 'user' ? USER_SCOPE_FILE_MODE : undefined,

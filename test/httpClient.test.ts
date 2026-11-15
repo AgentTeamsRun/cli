@@ -32,7 +32,10 @@ describe('httpClient', () => {
     const requestHandlers: StoredRequestHandler[] = [];
 
     const axiosMock = {
-      defaults: { headers: { common: {} as Record<string, string> } },
+      defaults: {
+        headers: { common: {} as Record<string, string> },
+        timeout: undefined as number | undefined,
+      },
       interceptors: {
         request: {
           use: jest.fn((onFulfilled: unknown) => {
@@ -106,7 +109,7 @@ describe('httpClient', () => {
     } as AxiosError;
   }
 
-  it('sets X-CLI-Version header when the module is loaded', async () => {
+  it('sets X-CLI-Version header and a finite default timeout when the module is loaded', async () => {
     const loaded = await loadModule();
     if (!loaded) {
       return;
@@ -114,6 +117,9 @@ describe('httpClient', () => {
 
     expect(loaded.httpClient).toBe(loaded.axiosMock);
     expect(loaded.axiosMock.defaults.headers.common['X-CLI-Version']).toBe(pkg.version);
+    expect(typeof loaded.axiosMock.defaults.timeout).toBe('number');
+    expect(loaded.axiosMock.defaults.timeout).toBeGreaterThan(0);
+    expect(Number.isFinite(loaded.axiosMock.defaults.timeout)).toBe(true);
   });
 
   it('injects low-cardinality AgentTeams client headers with the current command context', async () => {
@@ -214,5 +220,51 @@ describe('httpClient', () => {
     });
 
     expect(loaded.axiosMock.request).not.toHaveBeenCalled();
+  });
+
+  it('caps large retry-after header and body values at 60 seconds', async () => {
+    const loaded = await loadModule();
+    if (!loaded) {
+      return;
+    }
+
+    loaded.axiosMock.request.mockResolvedValue({ data: { ok: true } });
+
+    await loaded.responseHandlers[0]?.onRejected(
+      makeAxiosError(429, { 'retry-after': '86400' }, undefined, { headers: {} } as RetryConfig),
+    );
+    await loaded.responseHandlers[0]?.onRejected(
+      makeAxiosError(429, { 'retry-after': '2147484' }, undefined, { headers: {} } as RetryConfig),
+    );
+    await loaded.responseHandlers[0]?.onRejected(
+      makeAxiosError(429, {}, { retryAfter: 86400 }, { headers: {} } as RetryConfig),
+    );
+
+    expect(loaded.setTimeoutSpy).toHaveBeenNthCalledWith(1, expect.any(Function), 60_000);
+    expect(loaded.setTimeoutSpy).toHaveBeenNthCalledWith(2, expect.any(Function), 60_000);
+    expect(loaded.setTimeoutSpy).toHaveBeenNthCalledWith(3, expect.any(Function), 60_000);
+  });
+
+  it('falls back to exponential backoff for non-finite retry-after values', async () => {
+    const loaded = await loadModule();
+    if (!loaded) {
+      return;
+    }
+
+    loaded.axiosMock.request.mockResolvedValue({ data: { ok: true } });
+
+    await loaded.responseHandlers[0]?.onRejected(
+      makeAxiosError(429, { 'retry-after': 'Infinity' }, undefined, { headers: {} } as RetryConfig),
+    );
+    await loaded.responseHandlers[0]?.onRejected(
+      makeAxiosError(429, { 'retry-after': 'not-a-number' }, undefined, { headers: {}, _retryCount: 1 } as RetryConfig),
+    );
+    await loaded.responseHandlers[0]?.onRejected(
+      makeAxiosError(429, {}, { retryAfter: Number.POSITIVE_INFINITY }, { headers: {}, _retryCount: 2 } as RetryConfig),
+    );
+
+    expect(loaded.setTimeoutSpy).toHaveBeenNthCalledWith(1, expect.any(Function), 1_000);
+    expect(loaded.setTimeoutSpy).toHaveBeenNthCalledWith(2, expect.any(Function), 2_000);
+    expect(loaded.setTimeoutSpy).toHaveBeenNthCalledWith(3, expect.any(Function), 4_000);
   });
 });

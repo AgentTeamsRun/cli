@@ -879,6 +879,75 @@ describe('init configured-project fast path', () => {
     }
   });
 
+  test('uses personal-token and warns about legacy apiKey when configured project has both authMode personal-token and apiKey', async () => {
+    const { axios, executeInitCommand } = await loadInitModules();
+    const cwd = createConfiguredProject({ synced: false });
+    writeFileSync(
+      join(cwd, '.agentteams', 'config.json'),
+      JSON.stringify({
+        teamId: 'team-1',
+        projectId: 'project-1',
+        apiUrl: API_URL,
+        authMode: 'personal-token',
+        apiKey: 'key_legacy_project',
+      }),
+      'utf-8',
+    );
+    mockConventionEndpoints(axios);
+    const getSpy = jest.spyOn(axios, 'get');
+    const stderrSpy = jest.spyOn(process.stderr, 'write').mockImplementation(() => true);
+
+    try {
+      const result = await executeInitCommand({ cwd });
+      expect(result.success).toBe(true);
+      const authHeaders = getSpy.mock.calls.map(
+        ([, config]) => (config?.headers as Record<string, string> | undefined) ?? {},
+      );
+      expect(authHeaders.some((h) => h.Authorization === 'Bearer atp_access_token')).toBe(true);
+      expect(authHeaders.some((h) => h['X-API-Key'] === 'key_legacy_project')).toBe(false);
+      const stderrOutput = stderrSpy.mock.calls.map(([chunk]) => String(chunk)).join('');
+      expect(stderrOutput).toContain('legacy key_ credential');
+    } finally {
+      stderrSpy.mockRestore();
+    }
+  });
+
+  test('keeps AGENTTEAMS_API_KEY precedence over personal-token on configured-project fast path', async () => {
+    const { axios, executeInitCommand } = await loadInitModules();
+    const cwd = createConfiguredProject({ synced: false });
+    writeFileSync(
+      join(cwd, '.agentteams', 'config.json'),
+      JSON.stringify({
+        teamId: 'team-1',
+        projectId: 'project-1',
+        apiUrl: API_URL,
+        authMode: 'personal-token',
+        apiKey: 'key_legacy_project',
+      }),
+      'utf-8',
+    );
+    mockConventionEndpoints(axios);
+    const getSpy = jest.spyOn(axios, 'get');
+    const prevEnv = process.env.AGENTTEAMS_API_KEY;
+    process.env.AGENTTEAMS_API_KEY = 'key_env_override';
+
+    try {
+      const result = await executeInitCommand({ cwd });
+      expect(result.success).toBe(true);
+      const authHeaders = getSpy.mock.calls.map(
+        ([, config]) => (config?.headers as Record<string, string> | undefined) ?? {},
+      );
+      expect(authHeaders.some((h) => h['X-API-Key'] === 'key_env_override')).toBe(true);
+      expect(authHeaders.some((h) => h.Authorization === 'Bearer atp_access_token')).toBe(false);
+    } finally {
+      if (prevEnv === undefined) {
+        delete process.env.AGENTTEAMS_API_KEY;
+      } else {
+        process.env.AGENTTEAMS_API_KEY = prevEnv;
+      }
+    }
+  });
+
   test('keeps the binding ready and reports only convention sync as degraded when freshness fails', async () => {
     const { axios, executeInitCommand } = await loadInitModules();
     const cwd = createConfiguredProject();

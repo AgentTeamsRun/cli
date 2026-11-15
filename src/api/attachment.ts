@@ -1,4 +1,4 @@
-import httpClient from '../utils/httpClient.js';
+import httpClient, { STORAGE_TRANSFER_TIMEOUT_MS } from '../utils/httpClient.js';
 
 export type AttachmentListTarget = 'daemonTrigger' | 'codeReview' | 'completionReport' | 'document';
 export type AttachmentUploadTarget = 'codeReview' | 'completionReport' | 'document';
@@ -33,7 +33,10 @@ export async function createAttachmentDraftUploadUrl(
 
 /** Raw bytes to a presigned PUT URL (bypasses the API server). */
 export async function putAttachmentBytes(uploadUrl: string, buffer: Buffer, contentType: string): Promise<void> {
-  await httpClient.put(uploadUrl, buffer, { headers: { 'Content-Type': contentType } });
+  await httpClient.put(uploadUrl, buffer, {
+    headers: { 'Content-Type': contentType },
+    timeout: STORAGE_TRANSFER_TIMEOUT_MS,
+  });
 }
 
 export async function createAttachment(
@@ -61,7 +64,10 @@ export async function getAttachmentDownloadUrl(
 export async function fetchAttachmentBytes(
   downloadUrl: string,
 ): Promise<{ buffer: Buffer; contentDisposition: string | undefined }> {
-  const response = await httpClient.get(downloadUrl, { responseType: 'arraybuffer' });
+  const response = await httpClient.get(downloadUrl, {
+    responseType: 'arraybuffer',
+    timeout: STORAGE_TRANSFER_TIMEOUT_MS,
+  });
   const header = response.headers?.['content-disposition'];
   return {
     buffer: Buffer.from(response.data),

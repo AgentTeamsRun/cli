@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { detectClients } from '../src/mcp-registration/detect.js';
+import { createProbeExecutable, detectClients } from '../src/mcp-registration/detect.js';
 import { runMcpInstallCommand } from '../src/mcp-registration/index.js';
 import type { McpCredentials } from '../src/mcp-registration/serverSpec.js';
 import type { DetectionSignal, McpPathContext } from '../src/mcp-registration/types.js';
@@ -551,5 +551,27 @@ describe('mcp client detection', () => {
         expect(JSON.stringify(output.json)).not.toContain(CANARY_API_KEY);
       }
     });
+  });
+
+  it('probes win32 .cmd, .bat, and .ps1 shims without shell: true', () => {
+    const calls: { executable: string; args: string[]; options: Record<string, unknown> }[] = [];
+    const probe = createProbeExecutable(
+      ((executable: string, args: string[], options: Record<string, unknown>) => {
+        calls.push({ executable, args, options });
+        return { stdout: 'grok-cli 1.0', stderr: '' };
+      }) as unknown as Parameters<typeof createProbeExecutable>[0],
+      'win32',
+    );
+
+    expect(probe('C:\\bin\\grok.cmd', ['--help'])).toContain('grok-cli 1.0');
+    expect(calls[0].executable).toBe(process.env.ComSpec || 'cmd.exe');
+    expect(calls[0].options.shell).toBe(false);
+    expect(calls[0].options.windowsVerbatimArguments).toBe(true);
+    expect(calls[0].args.slice(0, 3)).toEqual(['/d', '/s', '/c']);
+
+    expect(probe('C:\\bin\\grok.ps1', ['--help'])).toContain('grok-cli 1.0');
+    expect(calls[1].executable).toBe('powershell.exe');
+    expect(calls[1].options.shell).toBe(false);
+    expect(calls[1].args).toEqual(['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', 'C:\\bin\\grok.ps1', '--help']);
   });
 });
