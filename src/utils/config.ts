@@ -136,11 +136,11 @@ export function getConfigurationNotFoundMessage(
  * @param options - CLI argument overrides (highest priority)
  * @returns Merged Config if all required fields are present, otherwise null
  */
-function mergeConfigSources(options?: Partial<Config>): Partial<Config> & { apiUrl: string } {
+function mergeConfigSources(options?: Partial<Config>, cwd?: string): Partial<Config> & { apiUrl: string } {
   const globalPath = join(homedir(), CONFIG_DIR, CONFIG_FILE);
   const globalConfig = readConfigFile(globalPath) ?? {};
 
-  const projectConfig = loadProjectConfig() ?? {};
+  const projectConfig = loadProjectConfig(cwd) ?? {};
 
   const envConfig = loadEnvConfig();
   const cliOptions = options ?? {};
@@ -241,6 +241,8 @@ export const INJECTED_PERSONAL_TOKEN_MEMBER_ID_ENV = 'AGENTTEAMS_MCP_MEMBER_ID';
 export interface ResolveCredentialDeps {
   /** Injection point for tests; production always uses the per-server singleton. */
   getClient?: (apiUrl: string) => PersonalTokenClient;
+  /** Project root to discover `.agentteams/config.json` from, defaulting to `process.cwd()`. */
+  cwd?: string;
 }
 
 let legacyApiKeyWarningPrinted = false;
@@ -292,8 +294,8 @@ export type CredentialPlan =
  *      for a keychain lookup, let alone be blocked by one that fails.
  *   3. The `key_` in `.agentteams/config.json` — the original path, unchanged.
  */
-export function planCredential(options?: Partial<Config>): CredentialPlan {
-  const merged = mergeConfigSources(options);
+export function planCredential(options?: Partial<Config>, cwd?: string): CredentialPlan {
+  const merged = mergeConfigSources(options, cwd);
 
   const explicit = explicitApiKey(options);
   if (explicit) return { source: 'explicit-api-key', apiKey: explicit, apiUrl: merged.apiUrl };
@@ -354,7 +356,7 @@ export async function resolveCredential(
   options?: Partial<Config>,
   deps: ResolveCredentialDeps = {},
 ): Promise<ResolvedCredential | null> {
-  const plan = planCredential(options);
+  const plan = planCredential(options, deps.cwd);
 
   if (plan.source === 'explicit-api-key') {
     if (plan.apiKey.startsWith('atp_')) {
@@ -473,7 +475,7 @@ export async function loadConfigWithCredential(
   options?: Partial<Config>,
   deps: ResolveCredentialDeps = {},
 ): Promise<ResolvedConfig | null> {
-  const merged = mergeConfigSources(options);
+  const merged = mergeConfigSources(options, deps.cwd);
   if (!isNonEmptyString(merged.teamId) || !isNonEmptyString(merged.projectId)) return null;
 
   const credential = await resolveCredential(options, deps);
@@ -590,13 +592,27 @@ export function globalConfigPath(userHomeDir: string = homedir()): string {
  * ignored rather than silently changing that project's login flow.
  */
 export function isDeviceAuthDefaultEnabled(userHomeDir: string = homedir()): boolean {
+  return resolveDeviceAuthDefault(userHomeDir).enabled;
+}
+
+export function resolveDeviceAuthDefault(userHomeDir: string = homedir()): {
+  enabled: boolean;
+  source: 'environment' | 'machine-config' | null;
+  configPath: string;
+} {
+  const configPath = globalConfigPath(userHomeDir);
   const envValue = process.env.AGENTTEAMS_DEVICE_AUTH?.trim().toLowerCase();
   if (envValue !== undefined && envValue.length > 0) {
-    return envValue === '1' || envValue === 'true' || envValue === 'yes';
+    return {
+      enabled: envValue === '1' || envValue === 'true' || envValue === 'yes',
+      source: 'environment',
+      configPath,
+    };
   }
 
   const globalConfig = readConfigFile(globalConfigPath(userHomeDir)) as Record<string, unknown> | null;
-  return globalConfig?.[GLOBAL_DEVICE_AUTH_KEY] === true;
+  const enabled = globalConfig?.[GLOBAL_DEVICE_AUTH_KEY] === true;
+  return { enabled, source: enabled ? 'machine-config' : null, configPath };
 }
 
 /**

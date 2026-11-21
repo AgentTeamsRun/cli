@@ -75,7 +75,12 @@ export const MCP_CLIENTS: McpClientDefinition[] = [
     runnerType: 'CLAUDE_CODE',
     label: 'Claude Code',
     executables: ['claude'],
-    configSignals: (context) => [join(context.homeDir, '.claude.json'), join(context.homeDir, '.claude')],
+    configSignals: (context) => [
+      join(context.homeDir, '.claude.json'),
+      join(context.homeDir, '.claude'),
+      join(context.cwd, '.claude', 'settings.json'),
+      join(context.cwd, '.claude'),
+    ],
     docsUrl: 'https://code.claude.com/docs/en/mcp',
     verifiedAt: '2026-07-25',
     nativeDiscovery: {
@@ -122,7 +127,12 @@ export const MCP_CLIENTS: McpClientDefinition[] = [
     runnerType: 'CODEX',
     label: 'Codex',
     executables: ['codex'],
-    configSignals: (context) => [join(codexHome(context), 'config.toml'), codexHome(context)],
+    configSignals: (context) => [
+      join(codexHome(context), 'config.toml'),
+      codexHome(context),
+      join(context.cwd, '.codex', 'config.toml'),
+      join(context.cwd, '.codex'),
+    ],
     docsUrl: 'https://developers.openai.com/codex/mcp',
     verifiedAt: '2026-08-30',
     nativeDiscovery: {
@@ -165,7 +175,11 @@ export const MCP_CLIENTS: McpClientDefinition[] = [
     runnerType: 'COPILOT_CLI',
     label: 'GitHub Copilot CLI',
     executables: ['copilot'],
-    configSignals: (context) => [join(copilotHome(context), 'mcp-config.json'), copilotHome(context)],
+    configSignals: (context) => [
+      join(copilotHome(context), 'mcp-config.json'),
+      copilotHome(context),
+      join(context.cwd, '.copilot'),
+    ],
     docsUrl: 'https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-mcp-servers',
     verifiedAt: '2026-07-25',
     nativeDiscovery: {
@@ -202,6 +216,8 @@ export const MCP_CLIENTS: McpClientDefinition[] = [
       join(xdgConfigHome(context), 'opencode', 'opencode.jsonc'),
       join(xdgConfigHome(context), 'opencode', 'opencode.json'),
       join(xdgConfigHome(context), 'opencode'),
+      join(context.cwd, 'opencode.json'),
+      join(context.cwd, '.opencode'),
     ],
     docsUrl: 'https://opencode.ai/docs/mcp-servers',
     verifiedAt: '2026-07-25',
@@ -237,6 +253,8 @@ export const MCP_CLIENTS: McpClientDefinition[] = [
     configSignals: (context) => [
       join(xdgConfigHome(context), 'amp', 'settings.json'),
       join(xdgConfigHome(context), 'amp'),
+      join(context.cwd, '.amp', 'settings.json'),
+      join(context.cwd, '.amp'),
     ],
     docsUrl: 'https://ampcode.com/manual',
     verifiedAt: '2026-07-25',
@@ -284,7 +302,12 @@ export const MCP_CLIENTS: McpClientDefinition[] = [
     runnerType: 'CURSOR_CLI',
     label: 'Cursor CLI',
     executables: ['cursor-agent'],
-    configSignals: (context) => [join(context.homeDir, '.cursor', 'mcp.json'), join(context.homeDir, '.cursor')],
+    configSignals: (context) => [
+      join(context.homeDir, '.cursor', 'mcp.json'),
+      join(context.homeDir, '.cursor'),
+      join(context.cwd, '.cursor', 'mcp.json'),
+      join(context.cwd, '.cursor'),
+    ],
     docsUrl: 'https://docs.cursor.com/context/model-context-protocol',
     verifiedAt: '2026-07-25',
     nativeDiscovery: {
@@ -319,7 +342,12 @@ export const MCP_CLIENTS: McpClientDefinition[] = [
     label: 'Kimi CLI',
     executables: ['kimi'],
     extraBinDirs: (context) => [join(kimiHome(context), 'bin')],
-    configSignals: (context) => [join(kimiHome(context), 'mcp.json'), kimiHome(context)],
+    configSignals: (context) => [
+      join(kimiHome(context), 'mcp.json'),
+      kimiHome(context),
+      join(context.cwd, '.kimi-code', 'mcp.json'),
+      join(context.cwd, '.kimi-code'),
+    ],
     docsUrl: 'https://www.kimi.com/code/docs/en/kimi-code-cli/customization/mcp.html',
     verifiedAt: '2026-07-25',
     nativeDiscovery: {
@@ -356,6 +384,8 @@ export const MCP_CLIENTS: McpClientDefinition[] = [
     configSignals: (context) => [
       join(context.homeDir, '.gemini', 'config', 'mcp_config.json'),
       join(context.homeDir, '.gemini', 'antigravity'),
+      join(context.cwd, '.agents', 'mcp_config.json'),
+      join(context.cwd, '.antigravity'),
     ],
     docsUrl: 'https://antigravity.google/docs/mcp',
     verifiedAt: '2026-07-25',
@@ -398,7 +428,12 @@ export const MCP_CLIENTS: McpClientDefinition[] = [
     // detection ignore the caller's context (the daemon keeps that fallback
     // instead, where resolving the real binary is the point).
     extraBinDirs: (context) => [join(context.homeDir, '.local', 'bin')],
-    configSignals: (context) => [join(kiroHome(context), 'settings', 'mcp.json'), kiroHome(context)],
+    configSignals: (context) => [
+      join(kiroHome(context), 'settings', 'mcp.json'),
+      kiroHome(context),
+      join(context.cwd, '.kiro', 'settings', 'mcp.json'),
+      join(context.cwd, '.kiro'),
+    ],
     docsUrl: 'https://kiro.dev/docs/mcp/',
     verifiedAt: '2026-08-08',
     nativeDiscovery: {
@@ -472,6 +507,8 @@ export const MCP_CLIENTS: McpClientDefinition[] = [
       join(grokHome(context), 'config.toml'),
       join(grokHome(context), 'auth.json'),
       grokHome(context),
+      join(context.cwd, '.grok', 'config.toml'),
+      join(context.cwd, '.grok'),
     ],
     docsUrl: 'https://docs.x.ai/build/cli/mcp-servers',
     verifiedAt: '2026-08-14',
@@ -555,7 +592,12 @@ export const MCP_CLIENTS: McpClientDefinition[] = [
       return dirs;
     },
     executableIdentity: { args: ['--help'], marker: 'Oh My Pi', preferExtraBinDirs: true },
-    configSignals: (context) => [join(ompAgentDir(context), 'mcp.json'), ompAgentDir(context)],
+    configSignals: (context) => [
+      join(ompAgentDir(context), 'mcp.json'),
+      ompAgentDir(context),
+      join(context.cwd, '.omp', 'mcp.json'),
+      join(context.cwd, '.omp'),
+    ],
     docsUrl: 'https://github.com/can1357/oh-my-pi/blob/main/docs/mcp-config.md',
     verifiedAt: '2026-08-24',
     nativeDiscovery: {

@@ -18,6 +18,7 @@ import {
 } from '../utils/authServer.js';
 import {
   DEFAULT_API_URL,
+  CredentialResolutionError,
   findProjectConfig,
   loadProjectConfig,
   loadConfigWithCredential,
@@ -27,7 +28,15 @@ import {
   saveLegacyApiKeyConfig,
 } from '../utils/config.js';
 import { getPersonalTokenClient } from '../auth/personalTokenClient.js';
-import { DEVICE_AUTH_INIT_HINT, decorateLoopbackTimeout, performDeviceAuthLogin, shouldUseDeviceAuth } from './auth.js';
+import {
+  DEVICE_AUTH_INIT_HINT,
+  assertCredentialStoreUsable,
+  decorateLoopbackTimeout,
+  describeDeviceAuthConflict,
+  performDeviceAuthLogin,
+  shouldUseDeviceAuth,
+} from './auth.js';
+import { BROWSER_AUTH_TIMEOUT_NOTICE } from '../utils/authMessages.js';
 import { setDeviceAuthDefault } from '../utils/config.js';
 import { createSpinner, withSpinner } from '../utils/spinner.js';
 import { withCommandContext } from '../utils/commandContext.js';
@@ -68,6 +77,7 @@ const AUTH_BASE_URL = process.env.AGENTTEAMS_WEB_URL || 'https://agentteams.run'
 const CONFIG_DIR = '.agentteams';
 const CONFIG_FILE = 'config.json';
 const CONVENTION_FILE = 'convention.md';
+const INIT_CANCELLED_EXIT_CODE = 130;
 
 const AUTH_PATH_PUBLIC_KEY_PEM = `-----BEGIN PUBLIC KEY-----
 MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAs9s9+n0C8Z099LrOTlKB
@@ -231,6 +241,7 @@ type OAuthInitResult = {
   authMode: AuthMode;
   /** Set only on the personal-token path, where the credential lives outside the repository. */
   personalLogin?: { email: string; nickname: string; persisted: boolean; storeBackend?: string };
+  conventionError?: string;
   warning?: string;
   readiness: InitReadinessStep[];
   /** Per-adapter detail behind the `local-adapters` readiness step. Additive. */
@@ -239,6 +250,10 @@ type OAuthInitResult = {
   mcp?: InitMcpResult;
   /** Present only when `--session-hook` was passed. Additive. */
   sessionHook?: InitSessionHookResult;
+  /** Canonical project root used for config, adapters, MCP, and hooks. */
+  projectRoot?: string;
+  /** Set when init was invoked from a subdirectory and operated on the enclosing project/git root. */
+  reusedRootFromSubdir?: boolean;
 };
 
 export type ConfiguredProjectInitResult = {
@@ -264,6 +279,10 @@ export type ConfiguredProjectInitResult = {
   mcp?: InitMcpResult;
   /** Present only when `--session-hook` was passed. Additive. */
   sessionHook?: InitSessionHookResult;
+  /** Canonical project root used for config, adapters, MCP, and hooks. */
+  projectRoot?: string;
+  /** Set when init was invoked from a subdirectory and operated on the enclosing project/git root. */
+  reusedRootFromSubdir?: boolean;
 };
 
 type InitResult = OAuthInitResult | WorktreeInitResult | ConfiguredProjectInitResult;
@@ -274,6 +293,7 @@ export type InitExecutionContext = {
   kind: InitExecutionKind;
   configPath: string | null;
   config: Partial<Config> | null;
+  projectRoot: string;
 };
 
 function isSshEnvironment(): boolean {
@@ -371,24 +391,13 @@ export function buildAuthorizeUrl(input: AuthorizeUrlInput): string {
 }
 
 function printAuthorizeUrl(url: string): void {
-  const displayUrl = (() => {
-    try {
-      const parsed = new URL(url);
-      if (parsed.searchParams.has('ap')) {
-        parsed.searchParams.set('ap', '[secure]');
-      }
-      return parsed.toString();
-    } catch {
-      return url;
-    }
-  })();
-
-  console.log('🚀 Complete a free login in 1 second to download the template:');
-  console.log(displayUrl);
+  console.log('🚀 Sign in and connect this project in your browser:');
+  console.log(BROWSER_AUTH_TIMEOUT_NOTICE);
+  console.log(url);
 }
 
-async function tryOpenBrowser(url: string): Promise<void> {
-  printAuthorizeUrl(url);
+async function tryOpenBrowser(url: string, displayUrl: string): Promise<void> {
+  printAuthorizeUrl(displayUrl);
 
   if (isSshEnvironment()) {
     // Detection is only ever allowed to add a sentence. It must never pick the flow:
@@ -528,7 +537,13 @@ async function resolveAgentFileSelection(
   }
 
   const detected = detectAgentEntryPointFiles(cwd);
-  if (options?.allowPrompt === false || options?.interactive !== true || !process.stdin.isTTY) {
+  if (options?.allowPrompt === false || options?.interactive !== true) {
+    return detected;
+  }
+  if (!process.stdin.isTTY) {
+    console.warn(
+      '⚠ --interactive requires a TTY; using detected agent entry point files instead. Pass --agent-files <list> to select files in non-interactive environments.',
+    );
     return detected;
   }
 
@@ -545,7 +560,7 @@ async function resolveAgentFileSelection(
 
   if (isCancel(selected)) {
     cancel('Init cancelled.');
-    process.exit(0);
+    process.exit(INIT_CANCELLED_EXIT_CODE);
   }
 
   return selected as AgentEntryPointValue[];
@@ -713,7 +728,8 @@ export function detectInitExecutionContext(
   const config = configPath ? loadProjectConfig(resolvedCwd) : null;
 
   if (resolveLinkedWorktreeSource(resolvedCwd)) {
-    return { kind: 'linked-worktree', configPath, config };
+    const worktreeRoot = resolveGitTopLevel(resolvedCwd) ?? resolvedCwd;
+    return { kind: 'linked-worktree', configPath, config, projectRoot: worktreeRoot };
   }
 
   const hasProjectBinding =
@@ -722,14 +738,19 @@ export function detectInitExecutionContext(
     typeof config.projectId === 'string' &&
     config.projectId.length > 0;
 
+  const ownedConfigRoot =
+    configPath && ownsDiscoveredConfig(resolvedCwd, configPath, userHomeDir) ? dirname(dirname(configPath)) : null;
+  // An existing binding owned by this folder or its repository root is the project
+  // root. A first init stays where it was run: a monorepo can bind each package to
+  // its own project, and there is no other way to ask for that.
+  const projectRoot = ownedConfigRoot ?? resolvedCwd;
+
   // An explicit --auth choice means the caller intends to reconnect instead of
   // validating the existing binding through the configured-project fast path.
   const kind: InitExecutionKind =
-    configPath && hasProjectBinding && ownsDiscoveredConfig(resolvedCwd, configPath, userHomeDir) && !explicitAuthMode
-      ? 'configured-project'
-      : 'new-project';
+    ownedConfigRoot && hasProjectBinding && !explicitAuthMode ? 'configured-project' : 'new-project';
 
-  return { kind, configPath, config };
+  return { kind, configPath, config, projectRoot };
 }
 
 function toErrorMessage(error: unknown): string {
@@ -775,7 +796,7 @@ async function waitForBrowserCallback<T>(
     if (authContext.server.listening) {
       authContext.server.close();
     }
-    process.exit(0);
+    process.exit(INIT_CANCELLED_EXIT_CODE);
   }
 
   function onKeypress(key: Buffer): void {
@@ -815,6 +836,7 @@ type SetupOutcome = {
   agentName: string;
   seedPlanId: string | null;
   personalLogin?: OAuthInitResult['personalLogin'];
+  conventionError?: string;
 };
 
 /**
@@ -827,6 +849,7 @@ type SetupOutcome = {
  * project-less login.
  */
 async function runUnifiedSetup(context: SetupContext): Promise<SetupOutcome> {
+  assertCredentialStoreUsable('browser');
   const pkce = createPkcePair();
 
   let server;
@@ -845,7 +868,8 @@ async function runUnifiedSetup(context: SetupContext): Promise<SetupOutcome> {
     machineId: readOrCreateMachineId() ?? undefined,
     codeChallenge: pkce.challenge,
   });
-  await tryOpenBrowser(authUrl);
+  const displayUrl = server.setAuthorizationUrl(authUrl);
+  await tryOpenBrowser(authUrl, displayUrl);
 
   const authSpinner = createSpinner('Waiting for authentication... (Ctrl+C to cancel)');
 
@@ -871,44 +895,55 @@ async function runUnifiedSetup(context: SetupContext): Promise<SetupOutcome> {
     });
 
     saveConfig(context.configPath, toConfig(setup, context.apiUrl));
-
-    // The identifiers are passed explicitly rather than re-read from disk: this
-    // command may run against a `cwd` that is not `process.cwd()`, and the
-    // config resolver only ever looks at the latter.
-    const runtimeConfig = await loadConfigWithCredential({
-      teamId: setup.teamId,
-      projectId: setup.projectId,
-      apiUrl: context.apiUrl,
-      authMode: 'personal-token',
-    });
-
-    // Falling back to a bare `conventionDownload()` here would undo the sentence
-    // above: with no config passed it re-resolves the project from
-    // `process.cwd()`, so an `init --cwd` (a worktree bootstrap included) would
-    // quietly pull conventions for whichever project the shell happens to sit
-    // in. Fail instead — this only happens if credential resolution regressed.
-    if (!runtimeConfig) {
-      throw new Error(
-        'Signed in, but the stored credential could not be read back, so the convention template was not downloaded. ' +
-          'Check `agentteams auth status`, then run `agentteams convention download` in this folder.',
-      );
+    try {
+      ensureGitignore(context.cwd);
+    } catch {
+      // Reported by local-adapters pass.
     }
 
-    // The convention template is now written by `conventionDownload` alone —
-    // exactly one write of `.agentteams/convention.md` per init — using the
-    // agent this setup actually created instead of "whichever config is first".
-    await conventionDownload({
-      cwd: context.cwd,
-      agentConfigId: setup.configId,
-      config: runtimeConfig,
-    });
+    let conventionError: string | undefined;
+    try {
+      // The identifiers are passed explicitly rather than re-read from disk: this
+      // command may run against a `cwd` that is not `process.cwd()`, and the
+      // config resolver only ever looks at the latter.
+      const runtimeConfig = await loadConfigWithCredential({
+        teamId: setup.teamId,
+        projectId: setup.projectId,
+        apiUrl: context.apiUrl,
+        authMode: 'personal-token',
+      });
+
+      // Falling back to a bare `conventionDownload()` here would undo the sentence
+      // above: with no config passed it re-resolves the project from
+      // `process.cwd()`, so an `init --cwd` (a worktree bootstrap included) would
+      // quietly pull conventions for whichever project the shell happens to sit
+      // in. Fail instead — this only happens if credential resolution regressed.
+      if (!runtimeConfig) {
+        throw new Error(
+          'Signed in, but the stored credential could not be read back, so the convention template was not downloaded. ' +
+            'Check `agentteams auth status`, then run `agentteams convention download` in this folder.',
+        );
+      }
+
+      // The convention template is now written by `conventionDownload` alone —
+      // exactly one write of `.agentteams/convention.md` per init — using the
+      // agent this setup actually created instead of "whichever config is first".
+      await conventionDownload({
+        cwd: context.cwd,
+        agentConfigId: setup.configId,
+        config: runtimeConfig,
+      });
+    } catch (error) {
+      conventionError = toErrorMessage(error);
+    }
 
     return {
-      authUrl,
+      authUrl: displayUrl,
       teamId: setup.teamId,
       projectId: setup.projectId,
       agentName: setup.agentName,
       seedPlanId: setup.seedPlanId ?? null,
+      ...(conventionError ? { conventionError } : {}),
       personalLogin: {
         email: session.identity.email,
         nickname: session.identity.nickname,
@@ -954,26 +989,36 @@ async function runDeviceAuthSetup(context: SetupContext): Promise<SetupOutcome> 
 
   const setup = outcome.setup;
   saveConfig(context.configPath, toConfig(setup, context.apiUrl));
-
-  const runtimeConfig = await loadConfigWithCredential({
-    teamId: setup.teamId,
-    projectId: setup.projectId,
-    apiUrl: context.apiUrl,
-    authMode: 'personal-token',
-  });
-
-  if (!runtimeConfig) {
-    throw new Error(
-      'Signed in, but the stored credential could not be read back, so the convention template was not downloaded. ' +
-        'Check `agentteams auth status`, then run `agentteams convention download` in this folder.',
-    );
+  try {
+    ensureGitignore(context.cwd);
+  } catch {
+    // Reported by local-adapters pass.
   }
 
-  await conventionDownload({
-    cwd: context.cwd,
-    agentConfigId: setup.agentConfigId,
-    config: runtimeConfig,
-  });
+  let conventionError: string | undefined;
+  try {
+    const runtimeConfig = await loadConfigWithCredential({
+      teamId: setup.teamId,
+      projectId: setup.projectId,
+      apiUrl: context.apiUrl,
+      authMode: 'personal-token',
+    });
+
+    if (!runtimeConfig) {
+      throw new Error(
+        'Signed in, but the stored credential could not be read back, so the convention template was not downloaded. ' +
+          'Check `agentteams auth status`, then run `agentteams convention download` in this folder.',
+      );
+    }
+
+    await conventionDownload({
+      cwd: context.cwd,
+      agentConfigId: setup.agentConfigId,
+      config: runtimeConfig,
+    });
+  } catch (error) {
+    conventionError = toErrorMessage(error);
+  }
 
   return {
     authUrl: outcome.verificationUri,
@@ -981,6 +1026,7 @@ async function runDeviceAuthSetup(context: SetupContext): Promise<SetupOutcome> 
     projectId: setup.projectId,
     agentName: setup.agentName,
     seedPlanId: setup.seedPlanId,
+    ...(conventionError ? { conventionError } : {}),
     personalLogin: {
       email: outcome.identity.email,
       nickname: outcome.identity.nickname,
@@ -991,7 +1037,7 @@ async function runDeviceAuthSetup(context: SetupContext): Promise<SetupOutcome> 
 }
 
 /**
- * The explicit `--auth api-key` compatibility path, unchanged.
+ * The explicit `--auth api-key` compatibility path.
  *
  * It keeps the legacy authorize URL (no `flow=setup`, no `code_challenge`), the
  * legacy callback payload with its `key_`, and the direct convention write. CI
@@ -1014,7 +1060,8 @@ async function runLegacyApiKeySetup(context: SetupContext): Promise<SetupOutcome
     state: authContext.state,
     machineId: readOrCreateMachineId() ?? undefined,
   });
-  await tryOpenBrowser(authUrl);
+  const displayUrl = authContext.setAuthorizationUrl(authUrl);
+  await tryOpenBrowser(authUrl, displayUrl);
 
   const authSpinner = createSpinner('Waiting for authentication... (Ctrl+C to cancel)');
 
@@ -1028,20 +1075,34 @@ async function runLegacyApiKeySetup(context: SetupContext): Promise<SetupOutcome
       apiKey: authResult.apiKey,
       apiUrl: context.apiUrl,
     };
-    const conventionContent = await withSpinner('Fetching convention template...', () =>
-      fetchConventionTemplate(authResult, context.apiUrl),
-    );
-
+    try {
+      ensureGitignore(context.cwd);
+    } catch (error) {
+      throw new Error(
+        `Failed to update "${join(context.cwd, '.gitignore')}" (${toErrorMessage(error)}). ` +
+          'Check write permissions and rerun `agentteams init --auth api-key`.',
+      );
+    }
     saveLegacyApiKeyConfig(context.configPath, toLegacyApiKeyConfig(authResult, context.apiUrl));
-    writeFileSync(context.conventionPath, conventionContent, 'utf-8');
-    await conventionDownload({ cwd: context.cwd, config: runtimeConfig });
+
+    let conventionError: string | undefined;
+    try {
+      const conventionContent = await withSpinner('Fetching convention template...', () =>
+        fetchConventionTemplate(authResult, context.apiUrl),
+      );
+      writeFileSync(context.conventionPath, conventionContent, 'utf-8');
+      await conventionDownload({ cwd: context.cwd, config: runtimeConfig });
+    } catch (error) {
+      conventionError = toErrorMessage(error);
+    }
 
     return {
-      authUrl,
+      authUrl: displayUrl,
       teamId: authResult.teamId,
       projectId: authResult.projectId,
       agentName: authResult.agentName,
       seedPlanId: authResult.seedPlanId ?? null,
+      ...(conventionError ? { conventionError } : {}),
     };
   } catch (error) {
     authSpinner?.fail();
@@ -1174,17 +1235,15 @@ async function runConfiguredProjectInit(
   // would be ignored on this path alone, and a leftover legacy `apiKey` would be
   // read as an *explicit* key — skipping the migration warning and the refresh
   // slot. `apiUrl` follows the same env-first rule as `resolveApiUrl()`.
-  const runtimeConfig = await loadConfigWithCredential({
-    teamId: projectConfig.teamId,
-    projectId: projectConfig.projectId,
-    apiUrl: normalizeApiUrl(process.env.AGENTTEAMS_API_URL || projectConfig.apiUrl || DEFAULT_API_URL),
-    // `loadConfigWithCredential` normally discovers the project from
-    // `process.cwd()`, but init may repair an explicit `options.cwd`. An empty
-    // override is intentional: it prevents a legacy key from an unrelated
-    // ambient project from becoming this binding's fallback credential.
-    apiKey: process.env.AGENTTEAMS_API_KEY || projectConfig.apiKey || '',
-    ...(projectConfig.authMode ? { authMode: projectConfig.authMode } : {}),
-  });
+  const runtimeConfig = await loadConfigWithCredential(
+    {
+      teamId: projectConfig.teamId,
+      projectId: projectConfig.projectId,
+      apiUrl: normalizeApiUrl(process.env.AGENTTEAMS_API_URL || projectConfig.apiUrl || DEFAULT_API_URL),
+      ...(projectConfig.authMode ? { authMode: projectConfig.authMode } : {}),
+    },
+    { cwd },
+  );
   if (!runtimeConfig) {
     throw new Error("The existing project binding has no usable credential. Run 'agentteams auth login'.");
   }
@@ -1322,7 +1381,16 @@ function buildConfiguredProjectReadiness(
  * issues of every step regardless of its status. Every non-READY adapter
  * contributes its issues, so the reason travels with the line.
  */
-function buildNewProjectReadiness(adapters: InitAdapterOutcome[]): InitReadinessStep[] {
+function buildNewProjectReadiness(adapters: InitAdapterOutcome[], conventionError?: string): InitReadinessStep[] {
+  const conventionStep: InitReadinessStep = conventionError
+    ? {
+        stage: 'convention-sync',
+        status: 'DEGRADED',
+        issues: [{ code: 'convention-sync-failed', message: conventionError }],
+        retryCommand: 'agentteams convention download',
+      }
+    : { stage: 'convention-sync', status: 'READY', issues: [] };
+
   const degraded = adapters.filter((adapter) => adapter.status === 'DEGRADED');
   const status: InitReadinessStatus =
     degraded.length > 0 ? 'DEGRADED' : adapters.some((adapter) => adapter.status === 'READY') ? 'READY' : 'SKIPPED';
@@ -1337,7 +1405,7 @@ function buildNewProjectReadiness(adapters: InitAdapterOutcome[]): InitReadiness
   return [
     { stage: 'project-binding', status: 'READY', issues: [] },
     { stage: 'credential', status: 'READY', issues: [] },
-    { stage: 'convention-sync', status: 'READY', issues: [] },
+    conventionStep,
     localAdaptersStep,
   ];
 }
@@ -1554,10 +1622,7 @@ async function executeInitCommandWithContext(options?: InitOptions): Promise<Ini
   // and ignore the other, so it is refused outright.
   const useDeviceAuth = shouldUseDeviceAuth({ deviceAuth: options?.deviceAuth });
   if (useDeviceAuth && authMode === 'api-key') {
-    throw new Error(
-      'Initialization failed: --device-auth cannot be combined with --auth api-key. ' +
-        'Device authorization issues a personal login; drop --auth api-key, or drop --device-auth to keep the API-key path.',
-    );
+    throw new Error(`Initialization failed: ${describeDeviceAuthConflict(options?.deviceAuth === true)}`);
   }
   // Parsed before anything opens a browser: a typo in --agent-files must not be
   // discovered after the user has already signed in.
@@ -1571,37 +1636,50 @@ async function executeInitCommandWithContext(options?: InitOptions): Promise<Ini
     interactive: options?.interactive === true,
   };
   const executionContext = detectInitExecutionContext(cwd, options?.authMode);
+  const projectRoot = executionContext.projectRoot;
+  const reusedRootFromSubdir = toComparablePath(projectRoot) !== toComparablePath(cwd);
+
   if (executionContext.kind === 'linked-worktree') {
     const worktreeResult = bootstrapLinkedWorktree(cwd);
     if (worktreeResult) return worktreeResult;
   }
   if (executionContext.kind === 'configured-project') {
     try {
-      return await runConfiguredProjectInit(
-        cwd,
+      const configuredResult = await runConfiguredProjectInit(
+        projectRoot,
         executionContext,
-        { ...adapterOptions, allowPrompt: false },
+        { ...adapterOptions, allowPrompt: adapterOptions.interactive },
         { requested: options?.mcp === true, dependencies: options?.mcpDependencies },
         { requested: options?.sessionHook === true, dependencies: options?.sessionHookDependencies },
       );
+      return {
+        ...configuredResult,
+        projectRoot,
+        ...(reusedRootFromSubdir ? { reusedRootFromSubdir: true } : {}),
+      };
     } catch (error) {
-      throw new Error(`Initialization failed: ${toErrorMessage(error)}`);
+      const message = toErrorMessage(error);
+      const retry =
+        useDeviceAuth && (error instanceof CredentialResolutionError || message.includes('no usable credential'))
+          ? message.replace(/agentteams auth login/g, 'agentteams auth login --device-auth')
+          : message;
+      throw new Error(`Initialization failed: ${retry}`);
     }
   }
 
-  const configPath = join(cwd, CONFIG_DIR, CONFIG_FILE);
-  const conventionPath = join(cwd, CONFIG_DIR, CONVENTION_FILE);
+  const configPath = join(projectRoot, CONFIG_DIR, CONFIG_FILE);
+  const conventionPath = join(projectRoot, CONFIG_DIR, CONVENTION_FILE);
 
   let authPathEnc: string | undefined;
   try {
-    authPathEnc = encryptAuthPath(cwd);
+    authPathEnc = encryptAuthPath(projectRoot);
   } catch {
     authPathEnc = undefined;
   }
 
   const context: SetupContext = {
-    cwd,
-    projectName: basename(cwd),
+    cwd: projectRoot,
+    projectName: basename(projectRoot),
     apiUrl: resolveApiUrl(),
     configPath,
     conventionPath,
@@ -1627,11 +1705,15 @@ async function executeInitCommandWithContext(options?: InitOptions): Promise<Ini
 
   // Everything below runs *after* the credential and the config are stored, so
   // none of it may fail the init. Each adapter reports itself.
-  const { adapters: localAdapters, agentFiles, postCheckoutHook } = await runLocalAdapterPass(cwd, adapterOptions);
+  const {
+    adapters: localAdapters,
+    agentFiles,
+    postCheckoutHook,
+  } = await runLocalAdapterPass(projectRoot, adapterOptions);
 
-  const mcp = options?.mcp === true ? await runMcpRegistrationStep(cwd, options?.mcpDependencies) : undefined;
+  const mcp = options?.mcp === true ? await runMcpRegistrationStep(projectRoot, options?.mcpDependencies) : undefined;
   const sessionHook =
-    options?.sessionHook === true ? await runSessionHookStep(cwd, options?.sessionHookDependencies) : undefined;
+    options?.sessionHook === true ? await runSessionHookStep(projectRoot, options?.sessionHookDependencies) : undefined;
 
   const seedPlanId = setup.seedPlanId;
   const seedPlanWebUrl = seedPlanId ? `${AUTH_BASE_URL.replace(/\/+$/, '')}/go?type=plan&id=${seedPlanId}` : null;
@@ -1649,8 +1731,11 @@ async function executeInitCommandWithContext(options?: InitOptions): Promise<Ini
     seedPlanWebUrl,
     postCheckoutHook,
     authMode,
-    readiness: buildNewProjectReadiness(localAdapters),
+    readiness: buildNewProjectReadiness(localAdapters, setup.conventionError),
     localAdapters,
+    projectRoot,
+    ...(reusedRootFromSubdir ? { reusedRootFromSubdir: true } : {}),
+    ...(setup.conventionError ? { conventionError: setup.conventionError } : {}),
     ...(setup.personalLogin ? { personalLogin: setup.personalLogin } : {}),
     ...(mcp ? { mcp } : {}),
     ...(sessionHook ? { sessionHook } : {}),

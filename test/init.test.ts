@@ -214,7 +214,22 @@ describe('init helpers', () => {
     // Repository-scoped lookup: every other command resolves the repository root
     // config from a subdirectory, so init validating that same binding — instead
     // of creating a nested project — is the consistent answer.
-    expect(detectInitExecutionContext(packageDir)).toMatchObject({ kind: 'configured-project' });
+    const ctx = detectInitExecutionContext(packageDir);
+    expect(ctx).toMatchObject({ kind: 'configured-project' });
+    expect(isSamePath(ctx.projectRoot, repositoryDir)).toBe(true);
+  });
+
+  testPosix('detectInitExecutionContext keeps a first init in the subdirectory it was run from', () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'agentteams-init-new-subdir-test-'));
+    tempDirs.push(tempDir);
+    const repoDir = join(tempDir, 'my-repo');
+    const packageDir = join(repoDir, 'packages', 'child');
+    mkdirSync(packageDir, { recursive: true });
+    execFileSync('git', ['init', '-b', 'main'], { cwd: repoDir });
+
+    const ctx = detectInitExecutionContext(packageDir);
+    expect(ctx).toMatchObject({ kind: 'new-project' });
+    expect(isSamePath(ctx.projectRoot, packageDir)).toBe(true);
   });
 
   test('buildAuthorizeUrl includes authPathEnc and osType when provided', () => {

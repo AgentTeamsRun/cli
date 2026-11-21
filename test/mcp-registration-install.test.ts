@@ -1,6 +1,17 @@
 import { describe, it, expect, beforeEach, afterEach } from '@jest/globals';
 import { createHash } from 'node:crypto';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { BACKUP_SUFFIX } from '../src/mcp-registration/atomicWrite.js';
@@ -8,7 +19,11 @@ import { runMcpInstallCommand } from '../src/mcp-registration/index.js';
 import { parseJsonc } from '../src/mcp-registration/jsonc.js';
 import type { McpCredentials } from '../src/mcp-registration/serverSpec.js';
 import type { McpPathContext } from '../src/mcp-registration/types.js';
-import type { VendorCommandResult, VendorRunner } from '../src/mcp-registration/vendorCommand.js';
+import {
+  createVendorRunner,
+  type VendorCommandResult,
+  type VendorRunner,
+} from '../src/mcp-registration/vendorCommand.js';
 
 const CANARY_API_KEY = 'key_canary_2b91f4ad6c07e358_never_print_me';
 const isPosix = process.platform !== 'win32';
@@ -494,5 +509,75 @@ describe('mcp install', () => {
 
   it('rejects unknown clients before doing anything', () => {
     expect(() => install({ client: 'orca', scope: 'user' })).toThrow(/Unknown client: orca/);
+  });
+
+  if (isPosix) {
+    it('preserves a symlinked JSON config file and writes to its real target', () => {
+      const dotfilesDir = join(home, 'dotfiles');
+      mkdirSync(dotfilesDir, { recursive: true });
+      const realTarget = join(dotfilesDir, 'cursor-mcp.json');
+      writeFileSync(realTarget, JSON.stringify({ mcpServers: { other: { command: 'other' } } }, null, 2), 'utf-8');
+
+      mkdirSync(join(cwd, '.cursor'), { recursive: true });
+      const linkPath = join(cwd, '.cursor', 'mcp.json');
+      symlinkSync(realTarget, linkPath);
+
+      const result = install({ client: 'cursor-cli', scope: 'project' });
+      expect(result.exitCode).toBe(0);
+      expect(lstatSync(linkPath).isSymbolicLink()).toBe(true);
+
+      const updated = JSON.parse(readFileSync(realTarget, 'utf-8'));
+      expect(updated.mcpServers.other).toEqual({ command: 'other' });
+      expect(updated.mcpServers.agentteams).toBeDefined();
+    });
+
+    it('fails without replacing a broken symlinked JSON config file', () => {
+      mkdirSync(join(cwd, '.cursor'), { recursive: true });
+      const linkPath = join(cwd, '.cursor', 'mcp.json');
+      symlinkSync(join(home, 'does-not-exist.json'), linkPath);
+
+      const result = install({ client: 'cursor-cli', scope: 'project' });
+      expect(result.exitCode).toBe(1);
+      expect(lstatSync(linkPath).isSymbolicLink()).toBe(true);
+    });
+  }
+
+  it('wraps win32 .cmd, .bat, and .ps1 shims without enabling shell: true', () => {
+    const calls: { executable: string; args: string[]; options: Record<string, unknown> }[] = [];
+    const runner = createVendorRunner(
+      ((executable: string, args: string[], options: Record<string, unknown>) => {
+        calls.push({ executable, args, options });
+        return { status: 0, stdout: 'ok', stderr: '' };
+      }) as unknown as Parameters<typeof createVendorRunner>[0],
+      'win32',
+    );
+
+    runner('C:\\Users\\My Name\\bin\\claude.cmd', ['mcp', 'add', '--label', 'a & b'], {
+      cwd,
+      env: { ComSpec: 'C:\\Windows\\System32\\cmd.exe' },
+    });
+    expect(calls[0].executable).toBe('C:\\Windows\\System32\\cmd.exe');
+    expect(calls[0].options.shell).toBe(false);
+    expect(calls[0].options.windowsVerbatimArguments).toBe(true);
+    expect(calls[0].args.slice(0, 3)).toEqual(['/d', '/s', '/c']);
+    expect(calls[0].args[3]).toContain('C:\\Users\\My^ Name\\bin\\claude.cmd');
+    expect(calls[0].args[3]).toContain('^^^"a^^^ ^^^&^^^ b^^^"');
+
+    runner('C:\\bin\\codex.ps1', ['--version'], { cwd, env: {} });
+    expect(calls[1].executable).toBe('powershell.exe');
+    expect(calls[1].options.shell).toBe(false);
+    expect(calls[1].args).toEqual([
+      '-NoProfile',
+      '-ExecutionPolicy',
+      'Bypass',
+      '-File',
+      'C:\\bin\\codex.ps1',
+      '--version',
+    ]);
+
+    runner('C:\\bin\\claude.exe', ['--version'], { cwd, env: {} });
+    expect(calls[2].executable).toBe('C:\\bin\\claude.exe');
+    expect(calls[2].options.shell).toBe(false);
+    expect(calls[2].args).toEqual(['--version']);
   });
 });

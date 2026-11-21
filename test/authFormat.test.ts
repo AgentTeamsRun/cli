@@ -179,15 +179,16 @@ describe('auth logout as text', () => {
     });
     expect(revoked).toContain('Server-side token: revoked');
 
-    // `--local` leaves a live token the user has to go and cancel.
+    // `--local` does not establish whether the token is still valid remotely.
     const localOnly = formatAuthResultText('logout', {
       success: true,
       apiUrl: 'https://api.agentteams.run',
       configPath: null,
       revokedOnServer: false,
+      serverTokenStatus: 'local-only',
       fellBackToApiKey: true,
     });
-    expect(localOnly).toContain('Server-side token: still valid — revoke it in the AgentTeams web app');
+    expect(localOnly).toContain('Server-side token: not revoked by this command — revoke it in the AgentTeams web app');
     expect(localOnly).toContain('This project fell back to the API key still in its config.');
   });
 });

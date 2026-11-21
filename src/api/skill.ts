@@ -1,4 +1,4 @@
-import httpClient from '../utils/httpClient.js';
+import httpClient, { STORAGE_TRANSFER_TIMEOUT_MS } from '../utils/httpClient.js';
 
 const getBaseUrl = (apiUrl: string, projectId: string) => {
   const normalizedApiUrl = apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl;
@@ -102,7 +102,10 @@ export async function putSkillAssetBytes(uploadUrl: string, buffer: Buffer, cont
 
 /** Raw bytes from a presigned GET URL. */
 export async function fetchSkillAssetBytes(downloadUrl: string): Promise<Buffer> {
-  const response = await httpClient.get(downloadUrl, { responseType: 'arraybuffer' });
+  const response = await httpClient.get(downloadUrl, {
+    responseType: 'arraybuffer',
+    timeout: STORAGE_TRANSFER_TIMEOUT_MS,
+  });
   return Buffer.from(response.data);
 }
 

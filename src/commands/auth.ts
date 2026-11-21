@@ -23,12 +23,14 @@ import {
   isDeviceAuthDefaultEnabled,
   loadProjectConfig,
   resolveCredential,
+  resolveDeviceAuthDefault,
   setDeviceAuthDefault,
   setProjectAuthMode,
   type CredentialSource,
 } from '../utils/config.js';
 import { createSpinner } from '../utils/spinner.js';
 import { withCommandContext } from '../utils/commandContext.js';
+import { BROWSER_AUTH_TIMEOUT_NOTICE } from '../utils/authMessages.js';
 
 const AUTH_BASE_URL = process.env.AGENTTEAMS_WEB_URL || 'https://agentteams.run';
 
@@ -93,8 +95,10 @@ export type AuthLogoutResult = {
   success: true;
   apiUrl: string;
   configPath: string | null;
-  /** false → the token is still live server-side (`--local`, or nothing was stored). */
+  /** Compatibility field: false means revocation was not confirmed. */
   revokedOnServer: boolean;
+  serverTokenStatus: 'not-stored' | 'local-only' | 'revoked';
+  projectAuthMode?: Config['authMode'];
   /** true when the project reverted to an `agentteams init` API key that is still on disk. */
   fellBackToApiKey: boolean;
   warning?: string;
@@ -151,6 +155,7 @@ export const DEVICE_AUTH_INIT_HINT =
 
 async function tryOpenBrowser(url: string): Promise<void> {
   console.log('🔐 Complete the AgentTeams login in your browser:');
+  console.log(BROWSER_AUTH_TIMEOUT_NOTICE);
   console.log(url);
 
   // Headless and SSH sessions have no browser to open; the printed URL is the
@@ -180,6 +185,27 @@ export function shouldUseDeviceAuth(options: Record<string, unknown>, userHomeDi
   return options.deviceAuth === true || isDeviceAuthDefaultEnabled(userHomeDir);
 }
 
+export function describeDeviceAuthConflict(explicit: boolean, userHomeDir?: string): string {
+  if (explicit) {
+    return (
+      '--device-auth cannot be combined with --auth api-key. Device authorization issues a personal login; ' +
+      'drop --auth api-key, or drop --device-auth and disable any device-auth default to keep the API-key path.'
+    );
+  }
+  const preference = resolveDeviceAuthDefault(userHomeDir);
+  const source =
+    preference.source === 'environment'
+      ? 'AGENTTEAMS_DEVICE_AUTH enables device authorization'
+      : `The machine default in ${preference.configPath} enables device authorization ("deviceAuth": true)`;
+  return (
+    `${source}, which cannot be combined with --auth api-key. ` +
+    'For this run, use AGENTTEAMS_DEVICE_AUTH=0 agentteams init --auth api-key. ' +
+    (preference.source === 'environment'
+      ? 'Unset AGENTTEAMS_DEVICE_AUTH to remove the environment override.'
+      : `Remove "deviceAuth" from ${preference.configPath} to change the machine default.`)
+  );
+}
+
 /**
  * Refuse before asking the user to do anything.
  *
@@ -193,7 +219,7 @@ export function shouldUseDeviceAuth(options: Record<string, unknown>, userHomeDi
  * instead of stopping it. Reaching the refusal below means even the fallback is
  * unavailable, which on a default install only happens when it was switched off.
  */
-function assertCredentialStoreUsable(): void {
+export function assertCredentialStoreUsable(flow: 'browser' | 'device' = 'device'): void {
   const status = getCredentialStore().status();
   if (status.reason === 'OK') return;
 
@@ -219,7 +245,7 @@ function assertCredentialStoreUsable(): void {
 
   throw new PersonalTokenError(
     'STORE_UNAVAILABLE',
-    `Cannot start device authorization: ${cause}${diagnostic}. ` +
+    `Cannot start ${flow} authorization: ${cause}${diagnostic}. ` +
       'Fix the OS credential store for your platform — on Linux install and unlock libsecret ' +
       '(for example `sudo apt install libsecret-tools` plus a running keyring), on macOS unlock the login keychain ' +
       '(`security unlock-keychain`), on Windows sign in interactively so the Credential Manager vault is available. ' +
@@ -308,6 +334,7 @@ export async function performPersonalTokenLogin(input: { apiUrl: string; project
   storeReason: CredentialStoreReason;
   storeDetail?: string;
 }> {
+  assertCredentialStoreUsable('browser');
   const client = getPersonalTokenClient(input.apiUrl);
   const pkce = createPkcePair();
   const authContext = await startAuthorizationCodeServer({ state: createAuthState() });
@@ -489,6 +516,7 @@ export function describeAuthStatusProblem(
   projectConnected: boolean,
 ): string | undefined {
   if (resolutionError instanceof CredentialResolutionError) {
+    if (!state.reconnectRequired && !state.refreshFailure) return resolutionError.message;
     return describeUnusableCredential(state, { projectConnected });
   }
   if (resolutionError !== undefined) {
@@ -500,10 +528,8 @@ export function describeAuthStatusProblem(
 /**
  * Leave the personal-token path.
  *
- * Reverting `authMode` is the part that must always be reachable: a project
- * left on `personal-token` with no credential fails every command, so a missing
- * keychain entry or an unreachable server cannot be allowed to trap the user in
- * a state only a hand-edited config file gets out of.
+ * Keep the project's chosen login mode unless a legacy key can actually take
+ * over. A keyless project still needs to say "sign in again", not "run init".
  */
 async function logout(options: Record<string, unknown> = {}): Promise<AuthLogoutResult> {
   const apiUrl = resolveAuthApiUrl({ apiUrl: typeof options.apiUrl === 'string' ? options.apiUrl : undefined });
@@ -511,14 +537,16 @@ async function logout(options: Record<string, unknown> = {}): Promise<AuthLogout
   const localOnly = options.local === true;
 
   let revokedOnServer = false;
+  let serverTokenStatus: AuthLogoutResult['serverTokenStatus'] = 'not-stored';
   let warning: string | undefined;
 
   if (!client.hasCredential()) {
-    warning = `No AgentTeams login was stored for ${apiUrl}; only the project setting was reverted.`;
+    warning = `No AgentTeams login was stored for ${apiUrl}.`;
   } else if (localOnly) {
     client.forgetLocalCredential();
+    serverTokenStatus = 'local-only';
     warning =
-      'The local credential was removed without contacting the server, so the token is still valid there. ' +
+      'The local credential was removed without contacting the server; its server-side status was not checked. ' +
       'Revoke it from the AgentTeams web app if you no longer want it.';
   } else {
     try {
@@ -526,25 +554,31 @@ async function logout(options: Record<string, unknown> = {}): Promise<AuthLogout
       // live refresh token the owner can no longer see or cancel.
       await client.revoke();
       revokedOnServer = true;
+      serverTokenStatus = 'revoked';
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
       throw new PersonalTokenError(
         'REVOKE_FAILED',
-        `${detail} Run 'agentteams auth logout --local' to leave the personal login path anyway.`,
+        `Server-side token: revocation failed; the local login was kept. ${detail} Run 'agentteams auth logout --local' to remove it locally.`,
       );
     }
   }
 
   const configPath = findProjectConfig(process.cwd());
-  const reverted = configPath ? setProjectAuthMode(configPath, null) : false;
   const projectConfig = loadProjectConfig();
+  const sameServer = apiUrl === resolveAuthApiUrl();
+  const hasLegacyKey = typeof projectConfig?.apiKey === 'string' && projectConfig.apiKey.length > 0;
+  const reverted = sameServer && hasLegacyKey && configPath ? setProjectAuthMode(configPath, null) : false;
+  const keptPersonalMode = sameServer && projectConfig?.authMode === 'personal-token' && !hasLegacyKey;
 
   const result: AuthLogoutResult = {
     success: true,
     apiUrl,
-    configPath: reverted ? configPath : null,
+    configPath: reverted || keptPersonalMode ? configPath : null,
     revokedOnServer,
-    fellBackToApiKey: typeof projectConfig?.apiKey === 'string' && projectConfig.apiKey.length > 0,
+    serverTokenStatus,
+    ...(keptPersonalMode ? { projectAuthMode: 'personal-token' as const } : {}),
+    fellBackToApiKey: reverted,
   };
   if (warning) result.warning = warning;
   return result;

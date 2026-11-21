@@ -92,6 +92,7 @@ describe('attachment command', () => {
     );
     expect(putSpy).toHaveBeenCalledWith('https://r2.example/put?sig=1', expect.any(Buffer), {
       headers: { 'Content-Type': 'text/plain' },
+      timeout: 120_000,
     });
     expect(postSpy).toHaveBeenNthCalledWith(
       2,
@@ -152,6 +153,7 @@ describe('attachment command', () => {
     );
     expect(putSpy).toHaveBeenCalledWith('https://r2.example/document?sig=1', expect.any(Buffer), {
       headers: { 'Content-Type': 'text/markdown' },
+      timeout: 120_000,
     });
     expect(postSpy).toHaveBeenNthCalledWith(
       2,
@@ -195,6 +197,7 @@ describe('attachment command', () => {
     );
     expect(putSpy).toHaveBeenCalledWith('https://r2.example/office?sig=1', expect.any(Buffer), {
       headers: { 'Content-Type': contentType },
+      timeout: 120_000,
     });
   });
 
@@ -308,7 +311,10 @@ describe('attachment command', () => {
       expect(axiosGetSpy).toHaveBeenNthCalledWith(1, 'http://localhost:3001/api/attachments/att-1/download-url', {
         headers,
       });
-      expect(axiosGetSpy).toHaveBeenNthCalledWith(2, 'https://r2.example/get?sig=1', { responseType: 'arraybuffer' });
+      expect(axiosGetSpy).toHaveBeenNthCalledWith(2, 'https://r2.example/get?sig=1', {
+        responseType: 'arraybuffer',
+        timeout: 120_000,
+      });
       const savedPath = join(dir, '설계 문서.pdf');
       expect(readFileSync(savedPath, 'utf-8')).toBe('file-bytes');
       expect(result.data).toEqual({ id: 'att-1', fileName: '설계 문서.pdf', path: savedPath, size: 10 });

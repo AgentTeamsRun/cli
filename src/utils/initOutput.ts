@@ -17,12 +17,15 @@ interface InitResultShape {
   agentName: string;
   configPath: string;
   conventionPath: string;
+  projectRoot?: string;
+  reusedRootFromSubdir?: boolean;
   agentFiles?: AgentFileEntry[];
   seedPlanId?: string | null;
   seedPlanWebUrl?: string | null;
   postCheckoutHook?: EnsurePostCheckoutHookResult;
   authMode?: 'api-key' | 'personal-token';
   personalLogin?: { email: string; nickname: string; persisted: boolean; storeBackend?: string };
+  conventionError?: string;
   warning?: string;
   readiness?: InitReadinessStep[];
   mcp?: InitMcpResult;
@@ -242,6 +245,9 @@ export function printInitResult(result: unknown, format: InitOutputFormat): void
 
   if (isConfiguredProjectInitResult(result)) {
     console.log('✓ Existing project binding reused; browser authentication was skipped.');
+    if (result.reusedRootFromSubdir && result.projectRoot) {
+      console.log(`✓ Using project root:  ${result.projectRoot}`);
+    }
     console.log(`✓ Config verified:     ${result.configPath}`);
     if (result.conventionError) {
       console.warn(`⚠ Convention sync is degraded: ${result.conventionError}`);
@@ -318,9 +324,16 @@ export function printInitResult(result: unknown, format: InitOutputFormat): void
     console.warn(`⚠ ${result.warning}`);
   }
 
+  if (result.reusedRootFromSubdir && result.projectRoot) {
+    console.log(`✓ Using project root:  ${result.projectRoot}`);
+  }
   console.log(`✓ Config saved:      ${result.configPath}`);
-  console.log(`✓ Convention saved:  ${result.conventionPath}`);
-  console.log(`✓ Conventions synced to .agentteams/`);
+  if (result.conventionError) {
+    console.warn(`⚠ Convention sync is degraded: ${result.conventionError}`);
+  } else {
+    console.log(`✓ Convention saved:  ${result.conventionPath}`);
+    console.log(`✓ Conventions synced to .agentteams/`);
+  }
 
   if (result.readiness) {
     printReadiness(result.readiness);

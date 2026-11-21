@@ -13,6 +13,10 @@ const pkg = require('../../package.json') as { version: string };
 
 const MAX_RETRIES = 3;
 const BASE_DELAY_MS = 1_000;
+const MAX_RETRY_DELAY_MS = 60_000;
+const DEFAULT_TIMEOUT_MS = 30_000;
+/** Presigned storage PUT/GET carries file bytes, so it gets a longer cap than API calls. */
+export const STORAGE_TRANSFER_TIMEOUT_MS = 120_000;
 
 interface RetryConfig extends InternalAxiosRequestConfig {
   _retryCount?: number;
@@ -42,21 +46,22 @@ const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout
 
 const getRetryDelay = (error: AxiosError, attempt: number): number => {
   const retryAfterHeader = error.response?.headers?.['retry-after'];
-  if (retryAfterHeader) {
+  if (retryAfterHeader !== undefined) {
     const seconds = Number(retryAfterHeader);
-    if (!Number.isNaN(seconds) && seconds > 0) {
-      return seconds * 1_000;
+    if (Number.isFinite(seconds) && seconds > 0) {
+      return Math.min(seconds * 1_000, MAX_RETRY_DELAY_MS);
     }
   }
 
   const body = error.response?.data as { retryAfter?: number } | undefined;
-  if (body?.retryAfter && body.retryAfter > 0) {
-    return body.retryAfter * 1_000;
+  if (typeof body?.retryAfter === 'number' && Number.isFinite(body.retryAfter) && body.retryAfter > 0) {
+    return Math.min(body.retryAfter * 1_000, MAX_RETRY_DELAY_MS);
   }
 
-  return BASE_DELAY_MS * 2 ** attempt;
+  return Math.min(BASE_DELAY_MS * 2 ** attempt, MAX_RETRY_DELAY_MS);
 };
 
+axios.defaults.timeout = DEFAULT_TIMEOUT_MS;
 axios.defaults.headers.common['X-CLI-Version'] = pkg.version;
 
 const setRequestHeader = (config: InternalAxiosRequestConfig, name: string, value: string): void => {

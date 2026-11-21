@@ -1,5 +1,6 @@
-import { afterEach, describe, expect, it } from '@jest/globals';
+import { afterEach, describe, expect, it, jest } from '@jest/globals';
 import type { Server as HttpServer } from 'node:http';
+import { connect } from 'node:net';
 import {
   createAuthState,
   parseUnifiedSetupPayload,
@@ -93,6 +94,38 @@ describe('createAuthState', () => {
 });
 
 describe('startLocalAuthServer', () => {
+  it('redirects a printable setup link without exposing metadata in the link (O8)', async () => {
+    const context = await startServer();
+    const target = `${WEB_ORIGIN}/cli/authorize?ap=v1.encrypted-path&state=${context.state}`;
+    const link = context.setAuthorizationUrl(target);
+    expect(link.includes('ap=')).toBe(false);
+    const response = await fetch(link, { redirect: 'manual' });
+    expect(response.status).toBe(302);
+    expect(response.headers.get('location') === target).toBe(true);
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    expect(response.headers.get('referrer-policy')).toBe('no-referrer');
+    const forged = new URL(link);
+    forged.searchParams.set('state', 'wrong-state');
+    const refused = await fetch(forged, { redirect: 'manual' });
+    expect(refused.status).toBe(403);
+    expect(refused.headers.get('location')).toBeNull();
+    expect((await refused.text()).includes('encrypted-path')).toBe(false);
+    expect((await fetch(link, { redirect: 'manual' })).status).toBe(302);
+  });
+
+  it('allows ten minutes for first-time browser onboarding (O7)', async () => {
+    const context = await startServer();
+    const spy = jest.spyOn(globalThis, 'setTimeout');
+    const pending = context.waitForCallback().catch(() => undefined);
+    try {
+      expect(spy).toHaveBeenCalledWith(expect.any(Function), 10 * 60 * 1000);
+    } finally {
+      spy.mockRestore();
+      await closeServer(context.server);
+      await pending;
+    }
+  });
+
   it('listens on an OS-assigned port instead of a fixed one', async () => {
     const [first, second] = await Promise.all([startServer(), startServer()]);
 
@@ -225,6 +258,29 @@ describe('startLocalAuthServer', () => {
     const response = await postCallback(context.port, { teamId: 'team_1', state: context.state });
 
     expect(response.status).toBe(400);
+  });
+
+  it('responds 400 to an unparseable request URL without terminating the pending login', async () => {
+    const context = await startServer();
+    const pending = context.waitForCallback();
+    pendingCallbacks.push(pending);
+
+    const rawResponse = await new Promise<string>((resolve, reject) => {
+      const chunks: Buffer[] = [];
+      const socket = connect(context.port, 'localhost', () => {
+        socket.write('GET //[ HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n');
+      });
+      socket.on('data', (chunk: Buffer) => chunks.push(chunk));
+      socket.on('end', () => resolve(Buffer.concat(chunks).toString('utf-8')));
+      socket.on('error', reject);
+    });
+
+    expect(rawResponse).toMatch(/^HTTP\/1\.1 400 /);
+    expect(rawResponse).toContain('Invalid request URL.');
+
+    const genuine = await postCallback(context.port, validPayload(context.state));
+    expect(genuine.status).toBe(200);
+    await expect(pending).resolves.toEqual(expect.objectContaining({ apiKey: 'key_oauth_123' }));
   });
 });
 

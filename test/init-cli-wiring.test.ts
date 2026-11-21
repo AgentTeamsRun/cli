@@ -164,4 +164,14 @@ describe('agentteams init CLI wiring', () => {
     const [, , options] = executeCommand.mock.calls[0] as [string, string, Record<string, unknown>];
     expect(options.sessionHook).toBe(false);
   });
+
+  test('search가 위치 인자 [query]를 --query와 동등하게 전달한다', async () => {
+    await runCli(['search', 'auth']);
+
+    expect(executeCommand).toHaveBeenCalledTimes(1);
+    const [resource, action, options] = executeCommand.mock.calls[0] as [string, string, Record<string, unknown>];
+    expect(resource).toBe('search');
+    expect(action).toBe('');
+    expect(options.query).toBe('auth');
+  });
 });

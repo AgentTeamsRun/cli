@@ -150,14 +150,22 @@ function formatLogout(result: Record<string, unknown>): string[] {
   const apiUrl = asString(result.apiUrl);
   if (apiUrl) lines.push(`Server: ${apiUrl}`);
 
+  const tokenStatus = result.serverTokenStatus;
   lines.push(
-    result.revokedOnServer === true
+    tokenStatus === 'revoked' || result.revokedOnServer === true
       ? 'Server-side token: revoked'
-      : 'Server-side token: still valid — revoke it in the AgentTeams web app',
+      : tokenStatus === 'not-stored'
+        ? 'Server-side token: no stored login to revoke (server status not checked)'
+        : 'Server-side token: not revoked by this command — revoke it in the AgentTeams web app',
   );
 
   const configPath = asString(result.configPath);
-  if (configPath) lines.push(`Project: ${configPath} (personal login setting removed)`);
+  if (configPath)
+    lines.push(
+      result.projectAuthMode === 'personal-token'
+        ? `Project: ${configPath} (personal login retained; run 'agentteams auth login' to sign in again)`
+        : `Project: ${configPath} (personal login setting removed)`,
+    );
   if (result.fellBackToApiKey === true) {
     lines.push('This project fell back to the API key still in its config.');
   }

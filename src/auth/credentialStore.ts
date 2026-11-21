@@ -709,7 +709,7 @@ export function getCredentialStore(): CredentialStore {
   return sharedStore;
 }
 
-/** Test-only: drop the cached process-wide store. */
-export function resetCredentialStoreForTests(): void {
-  sharedStore = null;
+/** Test-only: replace or drop the cached store without accessing the host keychain. */
+export function resetCredentialStoreForTests(store: CredentialStore | null = null): void {
+  sharedStore = store;
 }

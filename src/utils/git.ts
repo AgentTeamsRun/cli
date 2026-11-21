@@ -25,6 +25,9 @@ export type TaskFinishGitSnapshot = {
   commit: string;
   branch: string | null;
   commitOnRemote: boolean | null;
+  // origin remote URL. 서버가 정규화 식별자(host/owner/repo)로만 저장해, 러너가 멀티 저장소 작업 공간에서
+  // 이 커밋을 어느 멤버 저장소에서 찾을지 판단한다. origin이 없으면 null.
+  remoteUrl: string | null;
 };
 
 export function collectGitMetrics(
@@ -72,7 +75,10 @@ export function collectTaskFinishGitSnapshot(
     commitOnRemote = null;
   }
 
-  return { commit, branch, commitOnRemote };
+  // origin 조회 실패도 스냅샷을 버리지 않는다(commitOnRemote와 같은 방침).
+  const remoteUrl = getGitRemoteOriginUrl(execFileSyncImpl, cwd) ?? null;
+
+  return { commit, branch, commitOnRemote, remoteUrl };
 }
 
 export function getGitRemoteOriginUrl(

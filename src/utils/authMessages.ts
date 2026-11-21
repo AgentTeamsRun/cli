@@ -11,3 +11,8 @@ export function describeEndedLogin(reason?: string | null): string {
   }
   return "Your AgentTeams login was revoked or expired. Run 'agentteams auth login' to sign in again.";
 }
+
+// The authorization code's five-minute TTL begins only when the browser issues
+// it. This longer local wait gives a new user time to sign in and pick a project.
+export const BROWSER_AUTH_TIMEOUT_MS = 10 * 60 * 1000;
+export const BROWSER_AUTH_TIMEOUT_NOTICE = 'You have 10 minutes to finish authorization (Ctrl+C to cancel).';

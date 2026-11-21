@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs';
 import { delimiter, join } from 'node:path';
 import { MCP_CLIENTS } from './clients.js';
 import type { DetectionSignal, McpClientDefinition, McpClientId, McpPathContext } from './types.js';
+import { resolveWindowsShimSpawn } from './windowsShim.js';
 
 /**
  * CLI-local client detection.
@@ -21,17 +22,44 @@ export interface DetectionDependencies {
   probeExecutable?: (executablePath: string, args: string[]) => string | null;
 }
 
-function probeExecutable(executablePath: string, args: string[]): string | null {
-  const result = spawnSync(executablePath, args, {
-    encoding: 'utf8',
-    shell: false,
-    windowsHide: true,
-    input: '',
-    timeout: 5_000,
-  });
-  if (result.error) return null;
-  return `${result.stdout ?? ''}\n${result.stderr ?? ''}`;
+type SpawnSyncProbe = (
+  executable: string,
+  args: string[],
+  options: {
+    encoding: BufferEncoding;
+    shell: boolean;
+    windowsHide: boolean;
+    windowsVerbatimArguments?: boolean;
+    input: string;
+    timeout: number;
+  },
+) => {
+  stdout: string | null;
+  stderr: string | null;
+  error?: Error;
+};
+
+export function createProbeExecutable(
+  spawnSyncFn: SpawnSyncProbe = spawnSync as SpawnSyncProbe,
+  platform: NodeJS.Platform = process.platform,
+): (executablePath: string, args: string[]) => string | null {
+  return (executablePath, args) => {
+    const resolved = resolveWindowsShimSpawn(executablePath, args, process.env, platform);
+    // windows-hide-guard: child-process-alias spawnSyncFn
+    const result = spawnSyncFn(resolved.executable, resolved.args, {
+      encoding: 'utf8',
+      shell: false,
+      windowsHide: true,
+      ...(resolved.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
+      input: '',
+      timeout: 5_000,
+    });
+    if (result.error) return null;
+    return `${result.stdout ?? ''}\n${result.stderr ?? ''}`;
+  };
 }
+
+const probeExecutable = createProbeExecutable();
 
 function defaultSuffixes(platform: string): string[] {
   return platform === 'win32' ? ['', '.cmd', '.exe', '.bat', '.ps1'] : [''];

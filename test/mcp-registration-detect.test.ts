@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { detectClients } from '../src/mcp-registration/detect.js';
+import { createProbeExecutable, detectClients } from '../src/mcp-registration/detect.js';
 import { runMcpInstallCommand } from '../src/mcp-registration/index.js';
 import type { McpCredentials } from '../src/mcp-registration/serverSpec.js';
 import type { DetectionSignal, McpPathContext } from '../src/mcp-registration/types.js';
@@ -59,6 +59,12 @@ describe('mcp client detection', () => {
     mkdirSync(join(home, 'xdg', 'muse'), { recursive: true });
     writeFileSync(join(home, 'xdg', 'muse', 'settings.json'), '{"schema_version":1}');
     expect(byId(detectClients({ context })).muse.evidence).toBe('configured');
+  });
+
+  it('does not detect Antigravity from a shared project .gemini directory alone', () => {
+    mkdirSync(join(cwd, '.gemini'));
+
+    expect(byId(detectClients({ context })).antigravity).toMatchObject({ detected: false, evidence: 'none' });
   });
 
   it('separates the four signal combinations with the evidence that produced them', () => {
@@ -207,6 +213,23 @@ describe('mcp client detection', () => {
     );
 
     expect(signals.omp.configPaths).toEqual([join(ompHome, 'mcp.json'), ompHome]);
+  });
+
+  it('detects clients from project-scope configuration markers (.claude/settings.json, .cursor/mcp.json) when HOME and PATH are empty', () => {
+    mkdirSync(join(cwd, '.claude'), { recursive: true });
+    writeFileSync(join(cwd, '.claude', 'settings.json'), '{}\n');
+    mkdirSync(join(cwd, '.cursor'), { recursive: true });
+    writeFileSync(join(cwd, '.cursor', 'mcp.json'), '{}\n');
+
+    const signals = byId(detectClients({ context }));
+
+    expect(signals['claude-code'].detected).toBe(true);
+    expect(signals['claude-code'].evidence).toBe('configured');
+    expect(signals['claude-code'].configPaths).toContain(join(cwd, '.claude', 'settings.json'));
+
+    expect(signals['cursor-cli'].detected).toBe(true);
+    expect(signals['cursor-cli'].evidence).toBe('configured');
+    expect(signals['cursor-cli'].configPaths).toContain(join(cwd, '.cursor', 'mcp.json'));
   });
 
   describe('batch install', () => {
@@ -551,5 +574,27 @@ describe('mcp client detection', () => {
         expect(JSON.stringify(output.json)).not.toContain(CANARY_API_KEY);
       }
     });
+  });
+
+  it('probes win32 .cmd, .bat, and .ps1 shims without shell: true', () => {
+    const calls: { executable: string; args: string[]; options: Record<string, unknown> }[] = [];
+    const probe = createProbeExecutable(
+      ((executable: string, args: string[], options: Record<string, unknown>) => {
+        calls.push({ executable, args, options });
+        return { stdout: 'grok-cli 1.0', stderr: '' };
+      }) as unknown as Parameters<typeof createProbeExecutable>[0],
+      'win32',
+    );
+
+    expect(probe('C:\\bin\\grok.cmd', ['--help'])).toContain('grok-cli 1.0');
+    expect(calls[0].executable).toBe(process.env.ComSpec || 'cmd.exe');
+    expect(calls[0].options.shell).toBe(false);
+    expect(calls[0].options.windowsVerbatimArguments).toBe(true);
+    expect(calls[0].args.slice(0, 3)).toEqual(['/d', '/s', '/c']);
+
+    expect(probe('C:\\bin\\grok.ps1', ['--help'])).toContain('grok-cli 1.0');
+    expect(calls[1].executable).toBe('powershell.exe');
+    expect(calls[1].options.shell).toBe(false);
+    expect(calls[1].args).toEqual(['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', 'C:\\bin\\grok.ps1', '--help']);
   });
 });
