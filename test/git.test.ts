@@ -120,6 +120,7 @@ describe('collectTaskFinishGitSnapshot', () => {
       if (serializedArgs === 'rev-parse HEAD') return 'abc123\n';
       if (serializedArgs === 'branch --show-current') return 'feat/pushed\n';
       if (serializedArgs === 'branch -r --contains HEAD') return '  origin/feat/pushed\n';
+      if (serializedArgs === 'remote get-url origin') return 'git@bitbucket.org:acme/member-ui.git\n';
       throw new Error(`unexpected args: ${serializedArgs}`);
     });
 
@@ -127,6 +128,7 @@ describe('collectTaskFinishGitSnapshot', () => {
       commit: 'abc123',
       branch: 'feat/pushed',
       commitOnRemote: true,
+      remoteUrl: 'git@bitbucket.org:acme/member-ui.git',
     });
   });
 
@@ -143,6 +145,7 @@ describe('collectTaskFinishGitSnapshot', () => {
       commit: 'def456',
       branch: 'feat/local',
       commitOnRemote: false,
+      remoteUrl: null,
     });
   });
 
@@ -159,6 +162,25 @@ describe('collectTaskFinishGitSnapshot', () => {
       commit: 'ghi789',
       branch: 'feat/offline',
       commitOnRemote: null,
+      remoteUrl: null,
+    });
+  });
+
+  it('keeps the commit and uses remoteUrl null when origin is not configured', () => {
+    const snapshot = collectTaskFinishGitSnapshot((cmd, args) => {
+      const serializedArgs = args.join(' ');
+      if (serializedArgs === 'rev-parse HEAD') return 'jkl012\n';
+      if (serializedArgs === 'branch --show-current') return 'feat/no-origin\n';
+      if (serializedArgs === 'branch -r --contains HEAD') return '\n';
+      if (serializedArgs === 'remote get-url origin') throw new Error("error: No such remote 'origin'");
+      throw new Error(`unexpected args: ${serializedArgs}`);
+    });
+
+    expect(snapshot).toEqual({
+      commit: 'jkl012',
+      branch: 'feat/no-origin',
+      commitOnRemote: false,
+      remoteUrl: null,
     });
   });
 

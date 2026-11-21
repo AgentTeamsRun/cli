@@ -31,6 +31,7 @@ export type PlanTaskFinishGit = {
   commit: string;
   branch: string | null;
   commitOnRemote: boolean | null;
+  remoteUrl?: string | null;
 };
 
 // 태스크 보고서. title을 생략하면 서버가 `Task {N}. {태스크 제목}`으로 채운다.

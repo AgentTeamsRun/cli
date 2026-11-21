@@ -135,6 +135,7 @@ describe('task lifecycle commands', () => {
       commit: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
       branch: 'feat/unpushed',
       commitOnRemote: false,
+      remoteUrl: 'https://bitbucket.org/acme/member-ui.git',
     };
 
     const result = await executeTaskCommand(
@@ -172,6 +173,7 @@ describe('task lifecycle commands', () => {
       commit: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
       branch: 'feat/blocked',
       commitOnRemote: false,
+      remoteUrl: null,
     };
 
     await executeTaskCommand(
@@ -203,6 +205,7 @@ describe('task lifecycle commands', () => {
       commit: 'cccccccccccccccccccccccccccccccccccccccc',
       branch: 'feat/ignored',
       commitOnRemote: false,
+      remoteUrl: null,
     }));
     const postSpy = jest.spyOn(axios, 'post').mockResolvedValue({
       data: { data: { planStatus: 'IN_PROGRESS', tasks: [], progress: null } },
@@ -261,7 +264,12 @@ describe('task lifecycle commands', () => {
 
 describe('task finish --report-file', () => {
   const reportContent = '## Summary\n\nTask report body that is long enough for the server minimum.';
-  const git = { commit: 'dddddddddddddddddddddddddddddddddddddddd', branch: 'feat/task-report', commitOnRemote: true };
+  const git = {
+    commit: 'dddddddddddddddddddddddddddddddddddddddd',
+    branch: 'feat/task-report',
+    commitOnRemote: true,
+    remoteUrl: null,
+  };
   let dir = '';
   let reportPath = '';
   let emptyPath = '';
