@@ -61,6 +61,12 @@ describe('mcp client detection', () => {
     expect(byId(detectClients({ context })).muse.evidence).toBe('configured');
   });
 
+  it('does not detect Antigravity from a shared project .gemini directory alone', () => {
+    mkdirSync(join(cwd, '.gemini'));
+
+    expect(byId(detectClients({ context })).antigravity).toMatchObject({ detected: false, evidence: 'none' });
+  });
+
   it('separates the four signal combinations with the evidence that produced them', () => {
     // configured only
     mkdirSync(join(home, '.cursor'), { recursive: true });
@@ -207,6 +213,23 @@ describe('mcp client detection', () => {
     );
 
     expect(signals.omp.configPaths).toEqual([join(ompHome, 'mcp.json'), ompHome]);
+  });
+
+  it('detects clients from project-scope configuration markers (.claude/settings.json, .cursor/mcp.json) when HOME and PATH are empty', () => {
+    mkdirSync(join(cwd, '.claude'), { recursive: true });
+    writeFileSync(join(cwd, '.claude', 'settings.json'), '{}\n');
+    mkdirSync(join(cwd, '.cursor'), { recursive: true });
+    writeFileSync(join(cwd, '.cursor', 'mcp.json'), '{}\n');
+
+    const signals = byId(detectClients({ context }));
+
+    expect(signals['claude-code'].detected).toBe(true);
+    expect(signals['claude-code'].evidence).toBe('configured');
+    expect(signals['claude-code'].configPaths).toContain(join(cwd, '.claude', 'settings.json'));
+
+    expect(signals['cursor-cli'].detected).toBe(true);
+    expect(signals['cursor-cli'].evidence).toBe('configured');
+    expect(signals['cursor-cli'].configPaths).toContain(join(cwd, '.cursor', 'mcp.json'));
   });
 
   describe('batch install', () => {

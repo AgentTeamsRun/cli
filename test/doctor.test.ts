@@ -770,9 +770,8 @@ describe('doctor session hook report', () => {
     expect(result.sessionHook?.scopes.map(({ state }) => state)).toEqual(['not-installed', 'not-installed']);
   });
 
-  it('reports nothing about the session hook when Claude Code is not detected', async () => {
+  it('reports nothing about the session hook when Claude Code is not detected in either HOME or project', async () => {
     const repoDir = createGitRootProject();
-    writeSettings(join(repoDir, '.claude', 'settings.json'), hookEntry({ timeout: 30 }));
 
     const result = await executeDoctorCommand({
       cwd: repoDir,
@@ -781,5 +780,17 @@ describe('doctor session hook report', () => {
 
     expect(result.sessionHook).toBeUndefined();
     expect(sessionHookIssues(result)).toEqual([]);
+  });
+
+  it('detects Claude Code and reports the session hook when only project .claude/settings.json exists', async () => {
+    const repoDir = createGitRootProject();
+    writeSettings(join(repoDir, '.claude', 'settings.json'), hookEntry({ timeout: 30 }));
+
+    const result = await executeDoctorCommand({
+      cwd: repoDir,
+      sessionHookDependencies: hookDependencies(createHome({ claudeCode: false })),
+    });
+
+    expect(result.sessionHook?.scopes[0]?.state).toBe('outdated');
   });
 });

@@ -7,6 +7,7 @@
  */
 import { afterEach, beforeEach, describe, expect, jest, test } from '@jest/globals';
 import { execFileSync } from 'node:child_process';
+import * as fs from 'node:fs';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
@@ -27,6 +28,9 @@ const envKeys = [
 const envBackup: Record<string, string | undefined> = {};
 
 const tempDirs: string[] = [];
+
+const appendFileSync = jest.fn(fs.appendFileSync);
+jest.unstable_mockModule('node:fs', () => ({ ...fs, appendFileSync }));
 
 type CallbackPayload = Record<string, unknown>;
 
@@ -969,9 +973,8 @@ describe('init configured-project fast path', () => {
 
   // 어댑터가 안내하는 retryCommand는 전부 `agentteams init`이다. 그런데 그 시점에는
   // config가 이미 저장돼 있어 재실행이 이 fast path로 들어온다. 여기서 어댑터를 돌리지
-  // 않으면 "DEGRADED로 보고하고 복구 명령을 안내한다"는 전제가 통째로 무너진다 —
-  // `--auth api-key` 경로에서 .gitignore가 실패하면 30일짜리 agent key가 담긴 config를
-  // 커밋할 위험이 그대로 남는다.
+  // 않으면 "DEGRADED로 보고하고 복구 명령을 안내한다"는 전제가 통째로 무너진다.
+  // 이미 저장된 레거시 설정의 agent key를 보호하기 위해서도 .gitignore 복구가 필요하다.
   test('re-running init repairs .gitignore instead of only verifying the binding', async () => {
     const { axios, executeInitCommand } = await loadInitModules();
     const cwd = createConfiguredProject();
@@ -1003,6 +1006,83 @@ describe('init configured-project fast path', () => {
     expect(readFileSync(join(cwd, 'CLAUDE.md'), 'utf-8')).toBe('# Existing instructions\n');
   });
 
+  test('running init from a subdirectory of a configured repository writes adapters, MCP, and session hook at the repository root', async () => {
+    const { axios, executeInitCommand } = await loadInitModules();
+    const rootDir = createConfiguredProject();
+    execFileSync('git', ['init', '-b', 'main'], { cwd: rootDir });
+    const childDir = join(rootDir, 'packages', 'child');
+    mkdirSync(childDir, { recursive: true });
+    mockConventionEndpoints(axios);
+
+    const homeDir = createTempProject();
+    const binDir = createTempProject();
+    writeFileSync(join(binDir, 'cursor-agent'), '#!/bin/sh\n', { mode: 0o755 });
+    writeFileSync(join(binDir, 'claude'), '#!/bin/sh\n', { mode: 0o755 });
+
+    const result = await executeInitCommand({
+      cwd: childDir,
+      agentFiles: 'AGENTS.md',
+      mcp: true,
+      mcpDependencies: {
+        context: { homeDir, env: { PATH: binDir } },
+        credentials: { projectId: 'project-1', teamId: 'team-1', apiUrl: API_URL },
+        vendorRunner: () => ({ status: 0, stdout: 'added', stderr: '' }),
+      },
+      sessionHook: true,
+      sessionHookDependencies: {
+        context: { homeDir, env: { PATH: binDir } },
+      },
+    });
+    if (!('mode' in result) || result.mode !== 'configured-project') {
+      throw new Error('Expected the configured-project fast path.');
+    }
+
+    expect(existsSync(join(rootDir, 'AGENTS.md'))).toBe(true);
+    expect(existsSync(join(rootDir, '.gitignore'))).toBe(true);
+    expect(existsSync(join(rootDir, '.cursor', 'mcp.json'))).toBe(true);
+    expect(existsSync(join(rootDir, '.claude', 'settings.json'))).toBe(true);
+
+    expect(existsSync(join(childDir, 'AGENTS.md'))).toBe(false);
+    expect(existsSync(join(childDir, '.gitignore'))).toBe(false);
+    expect(existsSync(join(childDir, '.cursor', 'mcp.json'))).toBe(false);
+    expect(existsSync(join(childDir, '.claude', 'settings.json'))).toBe(false);
+    expect((result as unknown as { reusedRootFromSubdir?: boolean }).reusedRootFromSubdir).toBe(true);
+  });
+
+  test('a first init from a subdirectory of a git repository binds that subdirectory so monorepo packages can be separate projects', async () => {
+    const { axios, executeInitCommand } = await loadInitModules();
+    const rootDir = createTempProject();
+    execFileSync('git', ['init', '-b', 'main'], { cwd: rootDir });
+    const childDir = join(rootDir, 'packages', 'child');
+    mkdirSync(childDir, { recursive: true });
+    mockConventionEndpoints(axios);
+    const { urls, restore } = captureAuthorizeUrls();
+
+    try {
+      const pending = executeInitCommand({ cwd: childDir, agentFiles: 'CLAUDE.md' });
+      const authorizeUrl = await waitForAuthorizeUrl(urls);
+      expect(authorizeUrl.searchParams.get('projectName')).toBe('child');
+
+      await postCallback(authorizeUrl.searchParams.get('port') as string, {
+        code: 'atc_authorization_code',
+        state: authorizeUrl.searchParams.get('state'),
+        teamId: 'team-1',
+        projectId: 'project-1',
+        configId: 'config-1',
+        agentName: 'demo-agent',
+      });
+      const result = (await pending) as Record<string, unknown>;
+
+      expect(existsSync(join(childDir, '.agentteams', 'config.json'))).toBe(true);
+      expect(existsSync(join(childDir, 'CLAUDE.md'))).toBe(true);
+      expect(existsSync(join(rootDir, '.agentteams', 'config.json'))).toBe(false);
+      expect(existsSync(join(rootDir, 'CLAUDE.md'))).toBe(false);
+      expect(result.reusedRootFromSubdir).toBeUndefined();
+    } finally {
+      restore();
+    }
+  }, 20000);
+
   // fast path는 재실행을 전제로 만든 기능이라 절대 프롬프트로 멈춰서는 안 된다.
   test('never prompts on the fast path even with a TTY attached', async () => {
     const { axios, executeInitCommand } = await loadInitModules();
@@ -1022,6 +1102,123 @@ describe('init configured-project fast path', () => {
     } finally {
       restoreTty();
     }
+  });
+
+  test('prompts on the configured-project path when --interactive is explicitly passed on a TTY', async () => {
+    const { axios, executeInitCommand } = await loadInitModules();
+    const cwd = createConfiguredProject();
+    mockConventionEndpoints(axios);
+    const restoreTty = withTty();
+    multiselect.mockResolvedValueOnce(['CLAUDE.md', 'AGENTS.md']);
+
+    try {
+      const result = await executeInitCommand({ cwd, interactive: true });
+      if (!('mode' in result) || result.mode !== 'configured-project') {
+        throw new Error('Expected the configured-project fast path.');
+      }
+      expect(multiselect).toHaveBeenCalledTimes(1);
+      expect(existsSync(join(cwd, 'AGENTS.md'))).toBe(true);
+    } finally {
+      restoreTty();
+    }
+  });
+
+  test('exits with non-zero code (130) when the user cancels the interactive entry point prompt', async () => {
+    const { axios, executeInitCommand } = await loadInitModules();
+    const cwd = createConfiguredProject();
+    mockConventionEndpoints(axios);
+    const restoreTty = withTty();
+    multiselect.mockResolvedValueOnce(Symbol('cancel'));
+    const exitSpy = jest.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
+
+    try {
+      await executeInitCommand({ cwd, interactive: true }).catch(() => undefined);
+      expect(exitSpy).toHaveBeenCalledWith(130);
+    } finally {
+      exitSpy.mockRestore();
+      restoreTty();
+    }
+  });
+
+  test('exits with non-zero code (130) when the user cancels browser authentication with SIGINT', async () => {
+    const { axios, executeInitCommand } = await loadInitModules();
+    const cwd = createTempProject();
+    mockConventionEndpoints(axios);
+    const { urls, restore } = captureAuthorizeUrls();
+    const exitSpy = jest.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
+
+    try {
+      const pending = executeInitCommand({ cwd });
+      pending.catch(() => undefined);
+      await waitForAuthorizeUrl(urls);
+      process.emit('SIGINT', 'SIGINT');
+      await pending.catch(() => undefined);
+      expect(exitSpy).toHaveBeenCalledWith(130);
+    } finally {
+      exitSpy.mockRestore();
+      restore();
+    }
+  });
+
+  test('explains why --interactive could not prompt and points to --agent-files when stdin is not a TTY', async () => {
+    const { axios, executeInitCommand } = await loadInitModules();
+    const cwd = createConfiguredProject();
+    mockConventionEndpoints(axios);
+    const originalIsTTY = Object.getOwnPropertyDescriptor(process.stdin, 'isTTY');
+    Object.defineProperty(process.stdin, 'isTTY', { value: false, configurable: true });
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    try {
+      const result = await executeInitCommand({ cwd, interactive: true });
+      if (!('mode' in result) || result.mode !== 'configured-project') {
+        throw new Error('Expected the configured-project fast path.');
+      }
+      expect(multiselect).not.toHaveBeenCalled();
+      const warnText = warnSpy.mock.calls.map((args) => args.join(' ')).join('\n');
+      const issueMessages = result.localAdapters
+        .flatMap((adapter) => adapter.issues.map((issue) => issue.message))
+        .join('\n');
+      expect(`${warnText}\n${issueMessages}`).toMatch(/TTY/i);
+      expect(`${warnText}\n${issueMessages}`).toContain('--agent-files');
+    } finally {
+      warnSpy.mockRestore();
+      if (originalIsTTY) Object.defineProperty(process.stdin, 'isTTY', originalIsTTY);
+      else delete (process.stdin as unknown as { isTTY?: boolean }).isTTY;
+    }
+  });
+
+  test('registers Claude Code MCP and installs the session hook when only project .claude/settings.json exists without a CLI binary', async () => {
+    const { axios, executeInitCommand } = await loadInitModules();
+    const cwd = createConfiguredProject();
+    mkdirSync(join(cwd, '.claude'), { recursive: true });
+    writeFileSync(join(cwd, '.claude', 'settings.json'), '{}\n', 'utf-8');
+    mockConventionEndpoints(axios);
+
+    const homeDir = createTempProject();
+    const binDir = createTempProject();
+
+    const result = await executeInitCommand({
+      cwd,
+      mcp: true,
+      mcpDependencies: {
+        context: { homeDir, env: { PATH: binDir } },
+        credentials: { projectId: 'project-1', teamId: 'team-1', apiUrl: API_URL },
+      },
+      sessionHook: true,
+      sessionHookDependencies: {
+        context: { homeDir, env: { PATH: binDir } },
+      },
+    });
+    if (!('mode' in result) || result.mode !== 'configured-project') {
+      throw new Error('Expected the configured-project fast path.');
+    }
+
+    expect(result.mcp?.clients.find((client) => client.clientId === 'claude-code')?.outcome).toBe('INSTALLED');
+    expect(existsSync(join(cwd, '.mcp.json'))).toBe(true);
+    expect(result.sessionHook?.status).toBe('installed');
+    expect(JSON.parse(readFileSync(join(cwd, '.claude', 'settings.json'), 'utf-8'))).toHaveProperty(
+      'hooks.SessionStart',
+    );
   });
 
   // 훅 게이트의 SSOT는 한 곳이다. doctor가 무조건 설치하면 두 번째 init 한 번으로
@@ -1369,11 +1566,9 @@ describe('init unified setup failure paths', () => {
     }
   }, 20000);
 
-  test('fails instead of reporting success when the convention template cannot be written', async () => {
+  test('marks convention-sync DEGRADED instead of failing init when the convention template cannot be written', async () => {
     const { axios, executeInitCommand } = await loadInitModules();
     const cwd = createTempProject();
-    // 서버가 content 없는 본문을 돌려주는 상황. 예전 init은 여기서 실패했고, 그 보장이
-    // conventionDownload로 넘어가면서 사라지면 "저장했다"고 말하면서 파일은 없는 상태가 된다.
     jest.spyOn(axios, 'get').mockImplementation((async (url: string) => {
       if (url.endsWith('/api/platform/guides')) return { data: { data: [] } };
       if (url.endsWith('/api/platform/guides/hash')) return { data: { data: { hash: 'aggregate-hash' } } };
@@ -1396,8 +1591,125 @@ describe('init unified setup failure paths', () => {
         agentName: 'demo-agent',
       });
 
-      await expect(pending).rejects.toThrow(/Invalid convention template response from server/);
+      const result = (await pending) as {
+        success: boolean;
+        conventionError?: string;
+        readiness: Array<{ stage: string; status: string; retryCommand?: string; issues: Array<{ message: string }> }>;
+      };
+      expect(result.success).toBe(true);
+      expect(result.conventionError).toMatch(/Invalid convention template response from server/);
+      expect(result.readiness).toContainEqual({
+        stage: 'convention-sync',
+        status: 'DEGRADED',
+        issues: [
+          expect.objectContaining({
+            message: expect.stringMatching(/Invalid convention template response from server/),
+          }),
+        ],
+        retryCommand: 'agentteams convention download',
+      });
       expect(existsSync(join(cwd, '.agentteams', 'convention.md'))).toBe(false);
+      expect(existsSync(join(cwd, '.gitignore'))).toBe(true);
+      expect(existsSync(join(cwd, 'CLAUDE.md'))).toBe(true);
+    } finally {
+      restore();
+    }
+  }, 20000);
+
+  test('recovers when convention download returns 500: marks convention-sync DEGRADED, creates .gitignore and entry points, and includes retry command', async () => {
+    const { axios, executeInitCommand } = await loadInitModules();
+    const cwd = createTempProject();
+    const homeDir = createTempProject();
+    const binDir = createTempProject();
+    writeFileSync(join(binDir, 'cursor-agent'), '#!/bin/sh\n', { mode: 0o755 });
+    writeFileSync(join(binDir, 'claude'), '#!/bin/sh\n', { mode: 0o755 });
+    const dependencies = {
+      context: { homeDir, env: { PATH: binDir } },
+      credentials: { projectId: 'project-1', teamId: 'team-1', apiUrl: API_URL },
+      vendorRunner: () => ({ status: 0, stdout: 'added', stderr: '' }),
+    };
+    jest.spyOn(axios, 'get').mockRejectedValue(new Error('Request failed with status code 500'));
+    const { urls, restore } = captureAuthorizeUrls();
+
+    try {
+      const pending = executeInitCommand({
+        cwd,
+        mcp: true,
+        mcpDependencies: dependencies,
+        sessionHook: true,
+        sessionHookDependencies: { context: { homeDir, env: { PATH: binDir } } },
+      });
+      const authorizeUrl = await waitForAuthorizeUrl(urls);
+
+      await postCallback(authorizeUrl.searchParams.get('port') as string, {
+        code: 'atc_authorization_code',
+        state: authorizeUrl.searchParams.get('state'),
+        teamId: 'team-1',
+        projectId: 'project-1',
+        configId: 'config-1',
+        agentName: 'demo-agent',
+      });
+
+      const result = (await pending) as {
+        success: boolean;
+        conventionError?: string;
+        readiness: Array<{ stage: string; status: string; retryCommand?: string; issues: Array<{ message: string }> }>;
+        mcp?: { summary: { applied: number } };
+        sessionHook?: { status: string };
+      };
+      expect(result.success).toBe(true);
+      expect(result.conventionError).toContain('500');
+      expect(result.readiness).toContainEqual({
+        stage: 'convention-sync',
+        status: 'DEGRADED',
+        issues: [{ code: 'convention-sync-failed', message: expect.stringContaining('500') }],
+        retryCommand: 'agentteams convention download',
+      });
+      expect(readFileSync(join(cwd, '.gitignore'), 'utf-8')).toContain('.agentteams');
+      expect(existsSync(join(cwd, 'CLAUDE.md'))).toBe(true);
+      expect(existsSync(join(cwd, '.cursor', 'mcp.json'))).toBe(true);
+      expect(result.sessionHook?.status).toBe('installed');
+    } finally {
+      restore();
+    }
+  }, 20000);
+
+  test('ensures .gitignore covers legacy api-key config even when convention download returns 500', async () => {
+    const { axios, executeInitCommand } = await loadInitModules();
+    const cwd = createTempProject();
+    jest.spyOn(axios, 'get').mockRejectedValue(new Error('Request failed with status code 500'));
+    const { urls, restore } = captureAuthorizeUrls();
+
+    try {
+      const pending = executeInitCommand({ cwd, authMode: 'api-key' });
+      const authorizeUrl = await waitForAuthorizeUrl(urls);
+
+      await postCallback(authorizeUrl.searchParams.get('port') as string, {
+        teamId: 'team-1',
+        projectId: 'project-1',
+        agentName: 'legacy-agent',
+        apiKey: 'key_legacy_value',
+        configId: 'config-1',
+        state: authorizeUrl.searchParams.get('state'),
+      });
+
+      const result = (await pending) as {
+        success: boolean;
+        conventionError?: string;
+        readiness: Array<{ stage: string; status: string; retryCommand?: string }>;
+      };
+      expect(result.success).toBe(true);
+      expect(result.conventionError).toContain('500');
+      expect(result.readiness).toContainEqual(
+        expect.objectContaining({
+          stage: 'convention-sync',
+          status: 'DEGRADED',
+          retryCommand: 'agentteams convention download',
+        }),
+      );
+      expect(existsSync(join(cwd, '.agentteams', 'config.json'))).toBe(true);
+      expect(readFileSync(join(cwd, '.gitignore'), 'utf-8')).toContain('.agentteams');
+      expect(existsSync(join(cwd, 'CLAUDE.md'))).toBe(true);
     } finally {
       restore();
     }
@@ -1435,6 +1747,40 @@ describe('init unified setup failure paths', () => {
 });
 
 describe('init --auth api-key (compatibility path)', () => {
+  test('fails without saving the API key config when .gitignore cannot be updated', async () => {
+    const { axios, executeInitCommand } = await loadInitModules();
+    const cwd = createTempProject();
+    const gitignorePath = join(cwd, '.gitignore');
+    writeFileSync(gitignorePath, 'node_modules\n', 'utf-8');
+    const writeError = new Error('EACCES: permission denied');
+    appendFileSync.mockImplementationOnce(() => {
+      throw writeError;
+    });
+    mockConventionEndpoints(axios);
+    const { urls, restore } = captureAuthorizeUrls();
+
+    try {
+      const pending = executeInitCommand({ cwd, authMode: 'api-key' });
+      const authorizeUrl = await waitForAuthorizeUrl(urls);
+
+      await Promise.all([
+        expect(pending).rejects.toThrow(`Failed to update "${gitignorePath}" (${writeError.message})`),
+        postCallback(authorizeUrl.searchParams.get('port') as string, {
+          teamId: 'team-1',
+          projectId: 'project-1',
+          agentName: 'legacy-agent',
+          apiKey: 'key_legacy_value',
+          configId: 'config-1',
+          state: authorizeUrl.searchParams.get('state'),
+        }),
+      ]);
+
+      expect(existsSync(join(cwd, '.agentteams', 'config.json'))).toBe(false);
+    } finally {
+      restore();
+    }
+  }, 20000);
+
   test('keeps the legacy authorize URL, the legacy callback and the on-disk agent key', async () => {
     const { axios, executeInitCommand } = await loadInitModules();
     const cwd = createTempProject();

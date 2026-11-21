@@ -400,6 +400,37 @@ describe('printInitResult', () => {
 
       warnSpy.mockRestore();
     });
+
+    it('하위 폴더에서 실행해 루트를 재사용했으면 루트 경로를 출력에 명시한다', () => {
+      printInitResult(
+        {
+          ...MOCK_INIT_RESULT,
+          projectRoot: '/project',
+          reusedRootFromSubdir: true,
+        },
+        'human',
+      );
+      expect(captureOutput(logSpy)).toContain('/project');
+      expect(captureOutput(logSpy)).toMatch(/project root.*\/project|Using project root.*\/project/i);
+
+      logSpy.mockClear();
+
+      printInitResult(
+        {
+          success: true,
+          mode: 'configured-project',
+          projectRoot: '/project',
+          reusedRootFromSubdir: true,
+          configPath: '/project/.agentteams/config.json',
+          conventionPath: '/project/.agentteams/convention.md',
+          conventionsUpdated: false,
+          doctor: { status: 'READY', issues: [] },
+          readiness: [],
+        },
+        'human',
+      );
+      expect(captureOutput(logSpy)).toMatch(/project root.*\/project|Using project root.*\/project/i);
+    });
   });
 
   describe('개인 토큰 경로 (human format)', () => {

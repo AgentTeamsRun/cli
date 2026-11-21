@@ -13,6 +13,7 @@ import {
 export function registerSearchCommand(program: Command): void {
   program
     .command('search')
+    .argument('[query]', 'Search query (or pass --query <text>)')
     .description(
       'Search across all entity types (plans, co-actions, reports, post-mortems, conventions, code reviews, documents)',
     )
@@ -29,10 +30,10 @@ export function registerSearchCommand(program: Command): void {
     .option('--output-file <path>', 'Write full output to a file (stdout prints a short summary)')
     .option('--verbose', 'Print full raw output to stdout; with --output-file, also echo it', false)
     .addHelpText('after', CONVENTION_HINT)
-    .action(async (options) => {
+    .action(async (queryArg: string | undefined, options) => {
       try {
         const result = await executeCommand('search', '', {
-          query: options.query,
+          query: options.query ?? queryArg,
           types: options.types,
           limit: options.limit,
           maxTokens: options.maxTokens,

@@ -23,6 +23,8 @@ export interface InstallClientOptions {
   explicitToolProfile?: boolean;
   /** Absolute path selected by detection; vendor commands must not re-resolve a bare name. */
   executablePath?: string | null;
+  /** Strategy resolved by batch planning (e.g. jsonMerge fallback when project config exists without a CLI binary). */
+  strategyOverride?: McpClientDefinition['scopes'][McpScope]['strategy'];
 }
 
 function firstLines(text: string, limit = 4): string {
@@ -261,7 +263,9 @@ function applyClient(options: InstallClientOptions): InstallResult {
   });
   const manualSnippet = renderConfigSnippet(client, scope, displaySpec, serverName);
 
-  if (definition.strategy === 'configOnly') {
+  const effectiveStrategy = options.strategyOverride ?? definition.strategy;
+
+  if (effectiveStrategy === 'configOnly') {
     return {
       clientId: client.id,
       scope,
@@ -273,7 +277,7 @@ function applyClient(options: InstallClientOptions): InstallResult {
     };
   }
 
-  if (definition.strategy === 'vendorCommand') {
+  if (effectiveStrategy === 'vendorCommand') {
     return installViaVendorCommand(options, configPath, manualSnippet);
   }
 
@@ -324,19 +328,34 @@ export function buildBatchPlan(options: BuildBatchPlanOptions): BatchPlan {
     const definition = client.scopes[scope];
     const detected = signal?.detected ?? false;
     const identityVerified = !client.executableIdentity || signal?.executablePath != null;
+    const hasProjectConfigSignal =
+      scope === 'project' &&
+      (signal?.configPaths ?? []).some(
+        (configPath) =>
+          configPath === options.context.cwd ||
+          configPath.startsWith(`${options.context.cwd}/`) ||
+          configPath.startsWith(`${options.context.cwd}\\`),
+      );
+    const canFallbackToJsonMerge =
+      definition.strategy === 'vendorCommand' &&
+      signal?.executablePath == null &&
+      hasProjectConfigSignal &&
+      (definition.format === 'json' || definition.format === 'jsonc') &&
+      Boolean(definition.containerKey);
+    const effectiveStrategy = canFallbackToJsonMerge ? 'jsonMerge' : definition.strategy;
     // A vendor-command scope has nothing to write itself: it shells out to the client's
     // own CLI. Without a located executable the run would spawn a bare name that is not
     // on this PATH and report FAILED for a client that is merely configured elsewhere —
     // so it is skipped with a reason instead.
-    const runnableVendorCommand = definition.strategy !== 'vendorCommand' || signal?.executablePath != null;
-    const applicable = detected && identityVerified && runnableVendorCommand && definition.strategy !== 'configOnly';
+    const runnableVendorCommand = effectiveStrategy !== 'vendorCommand' || signal?.executablePath != null;
+    const applicable = detected && identityVerified && runnableVendorCommand && effectiveStrategy !== 'configOnly';
 
     let reason: string | undefined;
     if (!detected) reason = 'Not detected on this machine.';
     else if (!identityVerified) reason = `No executable verified as ${client.label} was found.`;
     else if (!runnableVendorCommand)
       reason = `Detected from configuration only; no \`${client.executables[0]}\` executable was found to run its registration command.`;
-    else if (definition.strategy === 'configOnly') reason = definition.configOnlyReason;
+    else if (effectiveStrategy === 'configOnly') reason = definition.configOnlyReason;
 
     return {
       clientId: client.id,
@@ -345,7 +364,7 @@ export function buildBatchPlan(options: BuildBatchPlanOptions): BatchPlan {
       executablePath: signal?.executablePath ?? null,
       configPaths: signal?.configPaths ?? [],
       scope,
-      strategy: definition.strategy,
+      strategy: effectiveStrategy,
       targetPath: definition.configPath(options.context),
       detected,
       applicable,
@@ -437,6 +456,7 @@ export function runBatchInstall(options: RunBatchInstallOptions): { plan: BatchP
       toolProfile: options.toolProfile,
       explicitToolProfile: options.explicitToolProfile,
       executablePath: entry.executablePath,
+      strategyOverride: entry.strategy,
     });
     results.push(result);
 
