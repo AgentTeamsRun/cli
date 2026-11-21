@@ -17,6 +17,7 @@ import { executeFeedbackCommand } from './feedback.js';
 import { executeSearchCommand } from './search.js';
 import { executeLinearCommand } from './linear.js';
 import { executeSentryCommand } from './sentry.js';
+import { executeScheduleCommand } from './schedule.js';
 import { executeAttachmentCommand } from './attachment.js';
 import { executeTaskCommand } from './task.js';
 import { executeResolveCommand } from './resolve.js';
@@ -231,6 +232,12 @@ async function executeCommandWithContext(
         executeSentryCommand(apiUrl, config.projectId, headers, action, options),
       );
     }
+    case 'schedule':
+      return executeScheduleCommand(action, options, async (operation) => {
+        const config = await loadRequiredConfig(buildConfigOverrides(options));
+        const { apiUrl, headers } = resolveApiContext(config);
+        return withApiErrorContext(apiUrl, () => operation({ apiUrl, projectId: config.projectId, headers }));
+      });
     case 'attachment': {
       const config = await loadRequiredConfig(buildConfigOverrides(options));
       const { apiUrl, headers } = resolveApiContext(config);

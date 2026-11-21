@@ -699,6 +699,78 @@ describe('CLI Integration Tests', () => {
       );
     });
 
+    describe('schedule', () => {
+      const scheduleUrl = `${API_URL}/api/projects/${PROJECT_ID}/runner-schedules`;
+      const scheduleId = 'schedule/a ?#';
+      const encodedId = 'schedule%2Fa%20%3F%23';
+
+      it('lists schedules with page and pageSize', async () => {
+        const response = { data: [{ id: scheduleId, targets: [] }], meta: { page: 2, pageSize: 10 } };
+        axiosGetSpy.mockResolvedValue({ data: response });
+
+        await expect(executeCommand('schedule', 'list', { page: '2', pageSize: '10' })).resolves.toEqual(response);
+        expect(axiosGetSpy).toHaveBeenCalledWith(scheduleUrl, {
+          headers: authHeaders(),
+          params: { page: 2, pageSize: 10 },
+        });
+      });
+
+      it('uses the project override and leaves omitted pagination to the API', async () => {
+        axiosGetSpy.mockResolvedValue({ data: { data: [] } });
+
+        await executeCommand('schedule', 'list', { projectId: 'project_override' });
+
+        expect(axiosGetSpy).toHaveBeenCalledWith(`${API_URL}/api/projects/project_override/runner-schedules`, {
+          headers: authHeaders(),
+          params: {},
+        });
+      });
+
+      it('gets a schedule with an encoded ID', async () => {
+        const response = { data: { id: scheduleId, prompt: { type: 'doc' }, targets: [] } };
+        axiosGetSpy.mockResolvedValue({ data: response });
+
+        await expect(executeCommand('schedule', 'get', { id: scheduleId })).resolves.toEqual(response);
+        expect(axiosGetSpy).toHaveBeenCalledWith(`${scheduleUrl}/${encodedId}`, { headers: authHeaders() });
+      });
+
+      it('lists runs with an encoded schedule ID and pagination', async () => {
+        const response = { data: [{ id: 'run-1' }], meta: { page: 3, pageSize: 5 } };
+        axiosGetSpy.mockResolvedValue({ data: response });
+
+        await expect(executeCommand('schedule', 'runs', { id: scheduleId, page: '3', pageSize: '5' })).resolves.toEqual(
+          response,
+        );
+        expect(axiosGetSpy).toHaveBeenCalledWith(`${scheduleUrl}/${encodedId}/runs`, {
+          headers: authHeaders(),
+          params: { page: 3, pageSize: 5 },
+        });
+      });
+
+      it.each(['get', 'runs'])('requires --id for %s before requesting a schedule', async (action) => {
+        axiosGetSpy.mockResolvedValue({ data: {} });
+
+        await expect(executeCommand('schedule', action, {})).rejects.toThrow(`--id is required for schedule ${action}`);
+        expect(axiosGetSpy).not.toHaveBeenCalled();
+      });
+
+      it.each([
+        ['list', 'page', '0', '--page'],
+        ['list', 'page', '2abc', '--page'],
+        ['list', 'pageSize', '1.5', '--page-size'],
+        ['runs', 'page', '1.5', '--page'],
+        ['runs', 'pageSize', '-1', '--page-size'],
+        ['runs', 'pageSize', 'abc', '--page-size'],
+      ])('rejects invalid %s pagination (%s=%s) before requesting a schedule', async (action, key, value, flag) => {
+        axiosGetSpy.mockResolvedValue({ data: {} });
+
+        await expect(executeCommand('schedule', action, { id: scheduleId, [key]: value })).rejects.toThrow(
+          `${flag} must be a positive integer`,
+        );
+        expect(axiosGetSpy).not.toHaveBeenCalled();
+      });
+    });
+
     it('plan get with include-deps: should fetch dependency endpoint and merge data', async () => {
       axiosGetSpy.mockImplementation(async (url: string) => {
         if (url === `${API_URL}/api/platform/guides/hash`) {

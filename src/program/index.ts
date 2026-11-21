@@ -20,6 +20,7 @@ import { registerPlanCommand } from './plan.js';
 import { registerPostmortemCommand } from './postmortem.js';
 import { registerReportCommand } from './report.js';
 import { registerResolveCommand } from './resolve.js';
+import { registerScheduleCommand } from './schedule.js';
 import { registerSearchCommand } from './search.js';
 import { registerSentryCommand } from './sentry.js';
 import { registerSessionCommand } from './session.js';
@@ -72,6 +73,7 @@ export function createProgram(version: string, invokedName: string = resolveInvo
   registerMcpCommand(program);
   registerLinearCommand(program);
   registerSentryCommand(program);
+  registerScheduleCommand(program);
   registerSkillCommand(program);
 
   return program;
