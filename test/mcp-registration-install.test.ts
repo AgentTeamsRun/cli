@@ -560,8 +560,8 @@ describe('mcp install', () => {
     expect(calls[0].options.shell).toBe(false);
     expect(calls[0].options.windowsVerbatimArguments).toBe(true);
     expect(calls[0].args.slice(0, 3)).toEqual(['/d', '/s', '/c']);
-    expect(calls[0].args[3]).toContain('"C:\\Users\\My Name\\bin\\claude.cmd"');
-    expect(calls[0].args[3]).toContain('"a & b"');
+    expect(calls[0].args[3]).toContain('C:\\Users\\My^ Name\\bin\\claude.cmd');
+    expect(calls[0].args[3]).toContain('^^^"a^^^ ^^^&^^^ b^^^"');
 
     runner('C:\\bin\\codex.ps1', ['--version'], { cwd, env: {} });
     expect(calls[1].executable).toBe('powershell.exe');

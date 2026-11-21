@@ -6,10 +6,24 @@ export interface ResolvedSpawnSpec {
   windowsVerbatimArguments?: boolean;
 }
 
-function quoteCmdArgument(value: string): string {
-  // Escape embedded double quotes and wrap in double quotes so cmd.exe treats
-  // spaces and shell metacharacters (&, |, <, >, ^, (, )) literally.
-  return `"${value.replace(/"/g, '\\"')}"`;
+// cmd.exe metacharacters, including `"` and `%`. Quoting alone is not enough:
+// cmd.exe does not treat `\"` as an escape, so an embedded quote flips its quote
+// state and exposes a following `&` as a command separator, and `%VAR%` expands
+// even inside quotes. Caret-escaping every metacharacter keeps cmd.exe from
+// interpreting any of them (same scheme as cross-spawn).
+const CMD_META_CHARS = /([()\][%!^"`<>&|;, *?])/g;
+
+function escapeCmdCommand(value: string): string {
+  return value.replace(CMD_META_CHARS, '^$1');
+}
+
+function escapeCmdArgument(value: string): string {
+  // First quote for CommandLineToArgvW, which the target process uses to split
+  // its command line: backslashes before a quote and at the end are doubled.
+  const quoted = `"${value.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\*)$/, '$1$1')}"`;
+  // Escaped twice: vendor shims (npm cmd-shim) forward `%*`, and cmd.exe parses
+  // that expanded line again, consuming a second layer of carets.
+  return escapeCmdCommand(escapeCmdCommand(quoted));
 }
 
 /**
@@ -30,7 +44,7 @@ export function resolveWindowsShimSpawn(
   const ext = extname(executable).toLowerCase();
   if (ext === '.cmd' || ext === '.bat') {
     const comSpec = env.ComSpec || env.COMSPEC || 'cmd.exe';
-    const commandLine = [executable, ...args].map(quoteCmdArgument).join(' ');
+    const commandLine = [escapeCmdCommand(executable), ...args.map(escapeCmdArgument)].join(' ');
     return {
       executable: comSpec,
       // `cmd.exe /s /c` strips the outer pair of quotes, preserving inner quotes.
