@@ -1,7 +1,8 @@
 import { chmodSync, lstatSync, readFileSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
-import { CONFIG_FILE_MODE, findProjectConfig } from '../utils/config.js';
+import { CONFIG_FILE_MODE, findProjectConfig, planCredential, type ResolveCredentialDeps } from '../utils/config.js';
+import { getPersonalTokenClient } from '../auth/personalTokenClient.js';
 import { BACKUP_SUFFIX } from '../mcp-registration/atomicWrite.js';
 import { detectClients, type DetectionDependencies } from '../mcp-registration/detect.js';
 import type { McpPathContext } from '../mcp-registration/types.js';
@@ -120,6 +121,8 @@ type DoctorOptions = {
   installWorktreeHook?: boolean;
   /** Injection seam so tests drive Claude Code detection with a temporary HOME/PATH. */
   sessionHookDependencies?: DoctorSessionHookDependencies;
+  /** Inspect a supplied store without consulting the host's credential backend. */
+  credentialDependencies?: Pick<ResolveCredentialDeps, 'getClient'>;
 };
 
 const SESSION_HOOK_INSTALL_COMMAND = 'agentteams session hook install';
@@ -179,7 +182,7 @@ function repairConfigFilePermissions(rootDir: string): ConfigPermissionRepair {
       issues.push({
         code: 'config-permissions-narrowed',
         path,
-        message: `${path} was readable beyond its owner (${reported}); narrowed it to 0600. Reissue the agent API key if the machine is shared.`,
+        message: `${path} was readable beyond its owner (${reported}); narrowed it to 0600.${hasStoredApiKey(path) ? ' Reissue the agent API key if the machine is shared.' : ''}`,
         severity: 'info',
       });
     } catch (error) {
@@ -193,6 +196,40 @@ function repairConfigFilePermissions(rootDir: string): ConfigPermissionRepair {
   }
 
   return { changedCount, issues };
+}
+
+function hasStoredApiKey(path: string): boolean {
+  try {
+    const config = JSON.parse(readFileSync(path, 'utf-8')) as { apiKey?: unknown };
+    return typeof config?.apiKey === 'string' && config.apiKey.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+function withCredentialFindings(
+  result: DoctorResult,
+  rootDir: string,
+  deps?: DoctorOptions['credentialDependencies'],
+): DoctorResult {
+  const plan = planCredential(undefined, rootDir);
+  if (plan.source !== 'personal-token' || plan.fallbackApiKey) return result;
+  // Presence is an offline check: doctor must not rotate a login just to inspect
+  // the layout, but it must not promise readiness without a usable login path.
+  if ((deps?.getClient ?? getPersonalTokenClient)(plan.apiUrl).hasCredential()) return result;
+  return {
+    ...result,
+    status: 'DEGRADED',
+    issues: [
+      ...result.issues,
+      {
+        code: 'personal-credential-missing',
+        path: join(rootDir, CONFIG_DIR, CONFIG_FILE),
+        message: "No personal login is stored for this project. Run 'agentteams auth login'.",
+        severity: 'error',
+      },
+    ],
+  };
 }
 
 function withConfigPermissionFindings(result: DoctorResult, repair: ConfigPermissionRepair): DoctorResult {
@@ -597,7 +634,11 @@ function runDoctor(options?: DoctorOptions): DoctorResult {
   const configPermissions = repairConfigFilePermissions(rootDir);
 
   return withSessionHookFindings(
-    withConfigPermissionFindings(runLayoutDoctor(rootDir, options?.installWorktreeHook === true), configPermissions),
+    withCredentialFindings(
+      withConfigPermissionFindings(runLayoutDoctor(rootDir, options?.installWorktreeHook === true), configPermissions),
+      rootDir,
+      options?.credentialDependencies,
+    ),
     diagnoseSessionHook(rootDir, options?.sessionHookDependencies),
   );
 }

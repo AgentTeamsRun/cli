@@ -592,13 +592,27 @@ export function globalConfigPath(userHomeDir: string = homedir()): string {
  * ignored rather than silently changing that project's login flow.
  */
 export function isDeviceAuthDefaultEnabled(userHomeDir: string = homedir()): boolean {
+  return resolveDeviceAuthDefault(userHomeDir).enabled;
+}
+
+export function resolveDeviceAuthDefault(userHomeDir: string = homedir()): {
+  enabled: boolean;
+  source: 'environment' | 'machine-config' | null;
+  configPath: string;
+} {
+  const configPath = globalConfigPath(userHomeDir);
   const envValue = process.env.AGENTTEAMS_DEVICE_AUTH?.trim().toLowerCase();
   if (envValue !== undefined && envValue.length > 0) {
-    return envValue === '1' || envValue === 'true' || envValue === 'yes';
+    return {
+      enabled: envValue === '1' || envValue === 'true' || envValue === 'yes',
+      source: 'environment',
+      configPath,
+    };
   }
 
   const globalConfig = readConfigFile(globalConfigPath(userHomeDir)) as Record<string, unknown> | null;
-  return globalConfig?.[GLOBAL_DEVICE_AUTH_KEY] === true;
+  const enabled = globalConfig?.[GLOBAL_DEVICE_AUTH_KEY] === true;
+  return { enabled, source: enabled ? 'machine-config' : null, configPath };
 }
 
 /**

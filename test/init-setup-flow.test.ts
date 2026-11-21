@@ -177,20 +177,28 @@ function createTempProject(): string {
  * 로컬 콜백 서버 하나당 authorize URL 한 줄이 출력된다. 출력된 URL 개수가 곧 사용자가 마주하는
  * 브라우저 화면 수라, "브라우저 1회"는 이 목록의 길이로 판정한다.
  */
-function captureAuthorizeUrls(): { urls: string[]; restore: () => void } {
+function captureAuthorizeUrls(): { urls: string[]; lines: string[]; restore: () => void } {
   const urls: string[] = [];
+  const lines: string[] = [];
   const spy = jest.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
     const line = args.map(String).join(' ');
+    lines.push(line);
     if (line.includes('/cli/authorize?')) {
       urls.push(line.trim());
     }
   });
-  return { urls, restore: () => spy.mockRestore() };
+  return { urls, lines, restore: () => spy.mockRestore() };
 }
 
 async function waitForAuthorizeUrl(urls: string[]): Promise<URL> {
   for (let attempt = 0; attempt < 200; attempt += 1) {
-    if (urls.length > 0) return new URL(urls[0] as string);
+    if (urls.length > 0) {
+      const printed = new URL(urls[0] as string);
+      if (printed.hostname !== 'localhost') return printed;
+      const response = await fetch(printed, { redirect: 'manual' });
+      expect(response.status).toBe(302);
+      return new URL(response.headers.get('location') as string);
+    }
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
   throw new Error('The authorize URL was never printed.');
@@ -266,6 +274,70 @@ afterEach(() => {
 });
 
 describe('init unified setup (new CLI x new web)', () => {
+  test('SSH login preserves the encrypted path without logging it (O8)', async () => {
+    const { axios, executeInitCommand } = await loadInitModules();
+    const cwd = createTempProject();
+    mockConventionEndpoints(axios);
+    const { urls, lines, restore } = captureAuthorizeUrls();
+    const pending = executeInitCommand({ cwd });
+    const authorizeUrl = await waitForAuthorizeUrl(urls);
+    try {
+      expect(authorizeUrl.searchParams.get('ap')).not.toBe('[secure]');
+      expect(authorizeUrl.searchParams.get('ap')).toMatch(/^v1\./);
+      expect(urls.join('\n').includes(authorizeUrl.searchParams.get('ap') as string)).toBe(false);
+      expect(lines.some((line) => line.includes('10 minutes'))).toBe(true);
+      expect(lines.some((line) => line.includes('1 second'))).toBe(false);
+    } finally {
+      await postCallback(authorizeUrl.searchParams.get('port') as string, {
+        code: 'atc_code',
+        state: authorizeUrl.searchParams.get('state'),
+        teamId: 'team-1',
+        projectId: 'project-1',
+        configId: 'config-1',
+        agentName: 'test-agent',
+      });
+      const result = (await pending) as { authUrl: string };
+      restore();
+      expect(result.authUrl.includes('ap=')).toBe(false);
+    }
+  });
+
+  test('browser setup refuses an unusable credential store before opening a callback server (O11)', async () => {
+    const { axios, executeInitCommand } = await loadInitModules();
+    mockConventionEndpoints(axios);
+    const { urls, restore } = captureAuthorizeUrls();
+    mockStoreStatus.reason = 'NO_BACKEND';
+    mockStoreStatus.persisted = false;
+    try {
+      const pending = executeInitCommand({ cwd: createTempProject() });
+      const outcome = await Promise.race([
+        pending.then(
+          () => null,
+          (error: unknown) => error,
+        ),
+        waitForAuthorizeUrl(urls),
+      ]);
+      if (outcome instanceof URL) {
+        await postCallback(outcome.searchParams.get('port') as string, {
+          code: 'atc_code',
+          state: outcome.searchParams.get('state'),
+          teamId: 'team-1',
+          projectId: 'project-1',
+          configId: 'config-1',
+          agentName: 'test-agent',
+        });
+        await pending;
+      }
+      expect(outcome).toBeInstanceOf(Error);
+      expect(String(outcome)).toMatch(/Cannot start.*authorization/);
+      expect(urls).toEqual([]);
+    } finally {
+      mockStoreStatus.reason = 'OK';
+      mockStoreStatus.persisted = true;
+      restore();
+    }
+  });
+
   test('opens one browser screen, creates no agent key, and syncs the convention once', async () => {
     const { axios, executeInitCommand } = await loadInitModules();
     const cwd = createTempProject();
@@ -749,6 +821,23 @@ describe('init local adapters (new project path)', () => {
 });
 
 describe('init configured-project fast path', () => {
+  test('keeps the requested device method in the missing-login recovery command (O9)', async () => {
+    const { executeInitCommand } = await loadInitModules();
+    const cwd = createTempProject();
+    mkdirSync(join(cwd, '.agentteams'));
+    writeFileSync(
+      join(cwd, '.agentteams/config.json'),
+      JSON.stringify({
+        teamId: 'team-1',
+        projectId: 'project-1',
+        apiUrl: API_URL,
+        authMode: 'personal-token',
+      }),
+    );
+    fakePersonalTokenClient.hasCredential.mockReturnValue(false);
+    await expect(executeInitCommand({ cwd, deviceAuth: true })).rejects.toThrow('agentteams auth login --device-auth');
+  });
+
   /**
    * `synced: true`는 이미 `convention download`를 한 번 돌린 프로젝트다.
    * manifest가 없으면 freshness 검사가 "변경 없음"으로 즉시 반환하므로, 두 상태를
@@ -1827,6 +1916,20 @@ describe('init --auth api-key (compatibility path)', () => {
 });
 
 describe('init --device-auth', () => {
+  test('explains how to override the environment default for API-key setup (O10)', async () => {
+    const { executeInitCommand } = await loadInitModules();
+    const previous = process.env.AGENTTEAMS_DEVICE_AUTH;
+    process.env.AGENTTEAMS_DEVICE_AUTH = '1';
+    try {
+      await expect(executeInitCommand({ cwd: createTempProject(), authMode: 'api-key' })).rejects.toThrow(
+        /AGENTTEAMS_DEVICE_AUTH.*AGENTTEAMS_DEVICE_AUTH=0/,
+      );
+    } finally {
+      if (previous === undefined) delete process.env.AGENTTEAMS_DEVICE_AUTH;
+      else process.env.AGENTTEAMS_DEVICE_AUTH = previous;
+    }
+  });
+
   const DEVICE_START_PAYLOAD = {
     data: {
       deviceCode: 'atd_secret_device_code',

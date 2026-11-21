@@ -9,7 +9,7 @@ import {
   executeAuthCommand,
   resolveAuthApiUrl,
 } from '../src/commands/auth.js';
-import { resetCredentialStoreForTests } from '../src/auth/credentialStore.js';
+import { createCredentialStore, resetCredentialStoreForTests } from '../src/auth/credentialStore.js';
 import { resetPersonalTokenClientsForTests } from '../src/auth/personalTokenClient.js';
 import { createPkcePair, startAuthorizationCodeServer } from '../src/utils/authServer.js';
 import { CredentialResolutionError, setProjectAuthMode } from '../src/utils/config.js';
@@ -382,7 +382,14 @@ describe('project auth mode', () => {
 describe('escaping the personal-token path', () => {
   beforeEach(() => {
     resetPersonalTokenClientsForTests();
-    resetCredentialStoreForTests();
+    const homeDir = mkdtempSync(join(tmpdir(), 'agentteams-auth-home-'));
+    tempDirs.push(homeDir);
+    resetCredentialStoreForTests(
+      createCredentialStore({
+        homeDir,
+        runner: () => ({ status: null, stdout: '', stderr: '' }),
+      }),
+    );
     // A per-run server keeps the credential slot unique, so a developer who is
     // actually logged in does not turn these into flaky tests.
     process.env.AGENTTEAMS_API_URL = `https://auth-cmd-${process.pid}.invalid`;
@@ -394,16 +401,18 @@ describe('escaping the personal-token path', () => {
     resetCredentialStoreForTests();
   });
 
-  it('reverts authMode when no credential is stored, instead of trapping the project', async () => {
-    // authMode 'personal-token' with nothing stored fails every command. If
-    // logout refused to run here the only way out would be editing the file.
+  it('retains personal login mode without a legacy key so the next command can ask for login', async () => {
+    // Logging out removes credentials, not the project's chosen authentication
+    // method. Removing this marker would misdiagnose a missing login as no setup.
     const configPath = createProject({ teamId: 't', projectId: 'p', authMode: 'personal-token' });
 
     const result = (await executeAuthCommand('logout')) as { success: true; warning?: string };
 
     expect(result.success).toBe(true);
     expect(result.warning).toContain('No AgentTeams login was stored');
-    expect(readConfig(configPath).authMode).toBeUndefined();
+    expect(readConfig(configPath).authMode).toBe('personal-token');
+    const { executeCommand } = await import('../src/commands/index.js');
+    await expect(executeCommand('plan', 'list', {})).rejects.toThrow('agentteams auth login');
   });
 
   it('refuses to log in to a server the project does not talk to', async () => {

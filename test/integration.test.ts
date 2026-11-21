@@ -93,6 +93,9 @@ describe('CLI Integration Tests', () => {
         .mockResolvedValueOnce({ data: { data: { hash: 'platform-guides-hash-init-1' } } } as any)
         .mockResolvedValueOnce({ data: { data: [] } } as any);
 
+      const setAuthorizationUrl = jest.fn(
+        (_url: string) => 'http://localhost:7779/cli/authorize?state=test-login-state',
+      );
       const mockStartUnifiedSetupServer = jest.fn().mockReturnValue({
         server: {
           listening: true,
@@ -101,6 +104,7 @@ describe('CLI Integration Tests', () => {
         waitForCallback: async () => callbackPayload,
         port: 7779,
         state: 'test-login-state',
+        setAuthorizationUrl,
       });
 
       if (typeof (jest as any).resetModules === 'function') {
@@ -148,7 +152,7 @@ describe('CLI Integration Tests', () => {
       expect(result).toEqual(
         expect.objectContaining({
           success: true,
-          authUrl: expect.stringContaining('/cli/authorize?port=7779'),
+          authUrl: 'http://localhost:7779/cli/authorize?state=test-login-state',
           configPath: join(tempCwd, '.agentteams', 'config.json'),
           conventionPath: join(tempCwd, '.agentteams', 'convention.md'),
           teamId: 'team_1',
@@ -161,7 +165,10 @@ describe('CLI Integration Tests', () => {
       if ('mode' in result) {
         throw new Error('Expected the OAuth init path outside a linked worktree.');
       }
-      const parsedAuthUrl = new URL(result.authUrl);
+      // Printable results contain only the local handoff. The real browser URL
+      // stays behind the callback server so encrypted paths never enter logs.
+      expect(new URL(result.authUrl).searchParams.has('ap')).toBe(false);
+      const parsedAuthUrl = new URL(setAuthorizationUrl.mock.calls[0][0]);
       expect(parsedAuthUrl.searchParams.get('ap')).toBeTruthy();
       expect(parsedAuthUrl.searchParams.get('state')).toBe('test-login-state');
       expect(parsedAuthUrl.searchParams.get('flow')).toBe('setup');
@@ -256,6 +263,7 @@ describe('CLI Integration Tests', () => {
         waitForCallback: async () => callbackPayload,
         port: 7779,
         state: 'test-login-state',
+        setAuthorizationUrl: () => 'http://localhost:7779/cli/authorize?state=test-login-state',
       });
 
       if (typeof (jest as any).resetModules === 'function') {

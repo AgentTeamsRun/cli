@@ -161,7 +161,7 @@ export async function sessionSync(options?: { cwd?: string }): Promise<SessionSy
       cliUpdateAvailable,
       skillConflicts: 0,
       notes: [NOT_A_PROJECT_NOTE],
-      summary: '✓ Up to date',
+      summary: 'Not an AgentTeams project — nothing to sync',
     };
   }
 
@@ -169,19 +169,23 @@ export async function sessionSync(options?: { cwd?: string }): Promise<SessionSy
 
   // 컨벤션 판정. `conventionStatus`가 CLI 버전 확인까지 겸하므로 한 번에 둘 다 얻는다.
   let conventionUpdateAvailable = false;
+  let credentialProblem: string | undefined;
   try {
     const status = await conventionStatus({ cwd });
     conventionUpdateAvailable = status.conventionUpdateAvailable;
     synced.platformGuides = status.platformGuidesChanged;
     cliUpdateAvailable = status.cliUpdateAvailable;
-    if (status.credentialProblem) notes.push(`Convention check skipped: ${status.credentialProblem}`);
+    credentialProblem = status.credentialProblem;
+    if (credentialProblem) notes.push(`Sync skipped: ${credentialProblem}`);
   } catch (error) {
     notes.push(`Convention check skipped: ${describeError(error)}`);
   }
 
   // 스킬을 **먼저** 맞춘다. 스킬 목록이 바뀌면 convention.md의 Skill Index도 달라지므로,
   // 컨벤션 다운로드가 앞서면 방금 바뀐 스킬이 반영되지 않은 인덱스를 받게 된다.
-  const skillConflicts = await syncSkills(cwd, synced, notes);
+  // Both checks use the same credential. Retrying it cannot fix the login and
+  // repeats the same diagnosis (or refresh request) at every session start.
+  const skillConflicts = credentialProblem ? 0 : await syncSkills(cwd, synced, notes);
 
   // 스킬 변경은 `checkConventionFreshness`가 보지 않는 축이다(그쪽은 컨벤션 레코드와 플랫폼
   // 가이드 해시만 본다). 이 조건이 없으면 스킬만 바뀐 세션에서 Skill Index가 낡은 채로 남는다.

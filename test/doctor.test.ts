@@ -19,6 +19,9 @@ import { executeDoctorCommand } from '../src/commands/doctor.js';
 import { CONFIG_FILE_MODE } from '../src/utils/config.js';
 import { resolveDoctorExitCode } from '../src/utils/doctorOutput.js';
 import { canonicalizePath, isSamePath } from '../src/utils/path.js';
+import { createCredentialStore } from '../src/auth/credentialStore.js';
+import { PersonalTokenClient } from '../src/auth/personalTokenClient.js';
+import { createPersonalTokenStore } from '../src/auth/personalTokenStore.js';
 
 const tempDirs: string[] = [];
 
@@ -26,6 +29,14 @@ function createTempDir(): string {
   const tempDir = mkdtempSync(join(tmpdir(), 'agentteams-doctor-test-'));
   tempDirs.push(tempDir);
   return tempDir;
+}
+
+function missingCredentialDependencies() {
+  const homeDir = createTempDir();
+  const store = createCredentialStore({ homeDir, runner: () => ({ status: null, stdout: '', stderr: '' }) });
+  return {
+    getClient: (apiUrl: string) => new PersonalTokenClient({ apiUrl, store: createPersonalTokenStore(apiUrl, store) }),
+  };
 }
 
 function createRoot(options?: { entryPoints?: string[]; configBody?: string; skipConvention?: boolean }): string {
@@ -297,9 +308,13 @@ describe('doctor root preflight failures', () => {
     });
     const memberDir = addMemberRepo(rootDir, 'alpha');
 
-    const result = await executeDoctorCommand({ cwd: rootDir });
+    const result = await executeDoctorCommand({
+      cwd: rootDir,
+      credentialDependencies: missingCredentialDependencies(),
+    });
 
-    expect(result.status).toBe('READY');
+    expect(result.status).toBe('DEGRADED');
+    expect(result.issues.map((issue) => issue.code)).toContain('personal-credential-missing');
     expect(result.issues.map((issue) => issue.code)).not.toContain('root-config-incomplete');
     expect(existsSync(join(memberDir, '.agentteams'))).toBe(true);
   });
@@ -390,9 +405,14 @@ describe('doctor on a git root project', () => {
       withLinkedWorktree: true,
     });
 
-    const result = await executeDoctorCommand({ cwd: repoDir });
+    const result = await executeDoctorCommand({
+      cwd: repoDir,
+      credentialDependencies: missingCredentialDependencies(),
+    });
 
-    expect(result.status).toBe('READY');
+    // The layout is repaired, but no stored login means commands are not ready.
+    expect(result.status).toBe('DEGRADED');
+    expect(result.issues.map((issue) => issue.code)).toContain('personal-credential-missing');
     expect(result.rootHook).toBe('ready');
     expect(result.issues.map((issue) => issue.code)).not.toContain('root-config-incomplete');
     expect(existsSync(join(repoDir, '.git', 'hooks', 'post-checkout'))).toBe(true);

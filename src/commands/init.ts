@@ -18,6 +18,7 @@ import {
 } from '../utils/authServer.js';
 import {
   DEFAULT_API_URL,
+  CredentialResolutionError,
   findProjectConfig,
   loadProjectConfig,
   loadConfigWithCredential,
@@ -27,7 +28,15 @@ import {
   saveLegacyApiKeyConfig,
 } from '../utils/config.js';
 import { getPersonalTokenClient } from '../auth/personalTokenClient.js';
-import { DEVICE_AUTH_INIT_HINT, decorateLoopbackTimeout, performDeviceAuthLogin, shouldUseDeviceAuth } from './auth.js';
+import {
+  DEVICE_AUTH_INIT_HINT,
+  assertCredentialStoreUsable,
+  decorateLoopbackTimeout,
+  describeDeviceAuthConflict,
+  performDeviceAuthLogin,
+  shouldUseDeviceAuth,
+} from './auth.js';
+import { BROWSER_AUTH_TIMEOUT_NOTICE } from '../utils/authMessages.js';
 import { setDeviceAuthDefault } from '../utils/config.js';
 import { createSpinner, withSpinner } from '../utils/spinner.js';
 import { withCommandContext } from '../utils/commandContext.js';
@@ -382,24 +391,13 @@ export function buildAuthorizeUrl(input: AuthorizeUrlInput): string {
 }
 
 function printAuthorizeUrl(url: string): void {
-  const displayUrl = (() => {
-    try {
-      const parsed = new URL(url);
-      if (parsed.searchParams.has('ap')) {
-        parsed.searchParams.set('ap', '[secure]');
-      }
-      return parsed.toString();
-    } catch {
-      return url;
-    }
-  })();
-
-  console.log('🚀 Complete a free login in 1 second to download the template:');
-  console.log(displayUrl);
+  console.log('🚀 Sign in and connect this project in your browser:');
+  console.log(BROWSER_AUTH_TIMEOUT_NOTICE);
+  console.log(url);
 }
 
-async function tryOpenBrowser(url: string): Promise<void> {
-  printAuthorizeUrl(url);
+async function tryOpenBrowser(url: string, displayUrl: string): Promise<void> {
+  printAuthorizeUrl(displayUrl);
 
   if (isSshEnvironment()) {
     // Detection is only ever allowed to add a sentence. It must never pick the flow:
@@ -851,6 +849,7 @@ type SetupOutcome = {
  * project-less login.
  */
 async function runUnifiedSetup(context: SetupContext): Promise<SetupOutcome> {
+  assertCredentialStoreUsable('browser');
   const pkce = createPkcePair();
 
   let server;
@@ -869,7 +868,8 @@ async function runUnifiedSetup(context: SetupContext): Promise<SetupOutcome> {
     machineId: readOrCreateMachineId() ?? undefined,
     codeChallenge: pkce.challenge,
   });
-  await tryOpenBrowser(authUrl);
+  const displayUrl = server.setAuthorizationUrl(authUrl);
+  await tryOpenBrowser(authUrl, displayUrl);
 
   const authSpinner = createSpinner('Waiting for authentication... (Ctrl+C to cancel)');
 
@@ -938,7 +938,7 @@ async function runUnifiedSetup(context: SetupContext): Promise<SetupOutcome> {
     }
 
     return {
-      authUrl,
+      authUrl: displayUrl,
       teamId: setup.teamId,
       projectId: setup.projectId,
       agentName: setup.agentName,
@@ -1060,7 +1060,8 @@ async function runLegacyApiKeySetup(context: SetupContext): Promise<SetupOutcome
     state: authContext.state,
     machineId: readOrCreateMachineId() ?? undefined,
   });
-  await tryOpenBrowser(authUrl);
+  const displayUrl = authContext.setAuthorizationUrl(authUrl);
+  await tryOpenBrowser(authUrl, displayUrl);
 
   const authSpinner = createSpinner('Waiting for authentication... (Ctrl+C to cancel)');
 
@@ -1096,7 +1097,7 @@ async function runLegacyApiKeySetup(context: SetupContext): Promise<SetupOutcome
     }
 
     return {
-      authUrl,
+      authUrl: displayUrl,
       teamId: authResult.teamId,
       projectId: authResult.projectId,
       agentName: authResult.agentName,
@@ -1621,10 +1622,7 @@ async function executeInitCommandWithContext(options?: InitOptions): Promise<Ini
   // and ignore the other, so it is refused outright.
   const useDeviceAuth = shouldUseDeviceAuth({ deviceAuth: options?.deviceAuth });
   if (useDeviceAuth && authMode === 'api-key') {
-    throw new Error(
-      'Initialization failed: --device-auth cannot be combined with --auth api-key. ' +
-        'Device authorization issues a personal login; drop --auth api-key, or drop --device-auth to keep the API-key path.',
-    );
+    throw new Error(`Initialization failed: ${describeDeviceAuthConflict(options?.deviceAuth === true)}`);
   }
   // Parsed before anything opens a browser: a typo in --agent-files must not be
   // discovered after the user has already signed in.
@@ -1660,7 +1658,12 @@ async function executeInitCommandWithContext(options?: InitOptions): Promise<Ini
         ...(reusedRootFromSubdir ? { reusedRootFromSubdir: true } : {}),
       };
     } catch (error) {
-      throw new Error(`Initialization failed: ${toErrorMessage(error)}`);
+      const message = toErrorMessage(error);
+      const retry =
+        useDeviceAuth && (error instanceof CredentialResolutionError || message.includes('no usable credential'))
+          ? message.replace(/agentteams auth login/g, 'agentteams auth login --device-auth')
+          : message;
+      throw new Error(`Initialization failed: ${retry}`);
     }
   }
 

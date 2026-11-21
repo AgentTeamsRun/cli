@@ -1,7 +1,7 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'node:http';
+import { BROWSER_AUTH_TIMEOUT_MS } from './authMessages.js';
 
-const CALLBACK_TIMEOUT_MS = 60_000;
 const DEFAULT_WEB_URL = 'https://agentteams.run';
 /** 24 random bytes → 32 base64url characters, comfortably above the 16-character floor. */
 const AUTH_STATE_BYTES = 24;
@@ -92,6 +92,8 @@ export type AuthServerResult<T> = {
   port: number;
   /** Echo this back through the authorize URL; the callback is rejected without it. */
   state: string;
+  /** Keep the full setup URL in memory; the printable link contains no path metadata. */
+  setAuthorizationUrl: (url: string) => string;
 };
 
 type StartLocalAuthServerOptions = {
@@ -294,6 +296,7 @@ async function startCallbackServer<T>(
   let settled = false;
   let timeoutHandle: NodeJS.Timeout | null = null;
   let isWaiting = false;
+  let authorizationUrl: string | null = null;
 
   let resolveCallback: ((result: T) => void) | undefined;
   let rejectCallback: ((error: Error) => void) | undefined;
@@ -343,6 +346,27 @@ async function startCallbackServer<T>(
   };
 
   const server = createServer(async (request: IncomingMessage, response: ServerResponse) => {
+    let requestUrl: URL;
+    try {
+      requestUrl = new URL(request.url ?? '/', 'http://localhost');
+    } catch {
+      sendJson(response, 400, { message: 'Invalid request URL.' }, request);
+      return;
+    }
+    if (request.method === 'GET' && requestUrl.pathname === '/cli/authorize') {
+      const state = requestUrl.searchParams.get('state');
+      if (!authorizationUrl || !state || !statesMatch(expectedState, state)) {
+        sendJson(response, 403, { message: 'Authorization link is not valid for this login.' }, request);
+        return;
+      }
+      response.writeHead(302, {
+        Location: authorizationUrl,
+        'Cache-Control': 'no-store',
+        'Referrer-Policy': 'no-referrer',
+      });
+      response.end();
+      return;
+    }
     if (request.method === 'OPTIONS') {
       setCorsHeaders(response, request);
       response.writeHead(204);
@@ -426,8 +450,8 @@ async function startCallbackServer<T>(
     if (!isWaiting) {
       isWaiting = true;
       timeoutHandle = setTimeout(() => {
-        rejectAuth(new Error('OAuth callback timed out after 60 seconds.'));
-      }, CALLBACK_TIMEOUT_MS);
+        rejectAuth(new Error('OAuth callback timed out after 10 minutes.'));
+      }, BROWSER_AUTH_TIMEOUT_MS);
     }
 
     return callbackPromise;
@@ -438,6 +462,10 @@ async function startCallbackServer<T>(
     waitForCallback,
     port,
     state: expectedState,
+    setAuthorizationUrl: (url) => {
+      authorizationUrl = url;
+      return `http://localhost:${port}/cli/authorize?state=${encodeURIComponent(expectedState)}`;
+    },
   };
 }
 
