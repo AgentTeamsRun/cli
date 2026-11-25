@@ -1,0 +1,1 @@
+{"version":3,"file":"mcp.d.ts","sourceRoot":"","sources":["../../src/commands/mcp.ts"],"names":[],"mappings":"AAAA;;;;;;;;GAQG;AACH,OAAO,EAAE,qBAAqB,EAAE,KAAK,cAAc,EAAE,MAAM,mBAAmB,CAAC;AAC/E,OAAO,EAAE,gBAAgB,EAAE,MAAM,iBAAiB,CAAC;AACnD,OAAO,EAAE,gBAAgB,EAAE,MAAM,uBAAuB,CAAC;AACzD,OAAO,EAAE,eAAe,EAAE,eAAe,EAAE,cAAc,EAAE,MAAM,kBAAkB,CAAC"}

@@ -1,0 +1,1 @@
+{"version":3,"file":"outputPolicy.d.ts","sourceRoot":"","sources":["../../src/utils/outputPolicy.ts"],"names":[],"mappings":"AAAA,MAAM,MAAM,YAAY,GAAG,MAAM,CAAC;AAElC;;;GAGG;AACH,MAAM,WAAW,cAAc;IAC7B,QAAQ,CAAC,EAAE,MAAM,CAAC;IAClB,MAAM,CAAC,EAAE,MAAM,CAAC;CACjB;AASD,wBAAgB,kBAAkB,CAAC,MAAM,EAAE,OAAO,EAAE,OAAO,EAAE,cAAc,GAAG,MAAM,EAAE,CA4CrF"}
